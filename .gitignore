@@ -21,3 +21,4 @@ secrets.*
 # 编辑器
 .vscode/
 .idea/
+screenshots/_*

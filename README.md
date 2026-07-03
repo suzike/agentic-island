@@ -13,14 +13,14 @@
 ![electron](https://img.shields.io/badge/Electron-33-47848F?logo=electron&logoColor=white)
 ![react](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![typescript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)
+![release](https://img.shields.io/github/v/release/suzike/agentic-island?color=4ce39a)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 <br/>
 
-<!-- 界面预览：把截图放进 screenshots/ 文件夹即自动显示（文件名见 screenshots/README.md） -->
-<img src="screenshots/hero.png" alt="Agentic-Island 主界面" width="820"/>
+<img src="screenshots/agents.png" alt="Agentic-Island 主界面 — Agents 分区" width="440"/>
 
-<sub>▲ 岛展开后的主界面（截图占位 · 见 <a href="screenshots/README.md">screenshots/</a>）</sub>
+<sub>▲ Agents 分区：Claude Code / Codex 的会话实时汇聚，命令审批就在这里裁决</sub>
 
 </div>
 
@@ -32,7 +32,7 @@
 
 **Agentic-Island** 把这层交互抬到屏幕顶部的一条「灵动岛」上：
 
-- Agent 想执行 `rm -rf` ？岛上弹出**红色危险审批卡**，你点一下决定放行还是拦截，终端据此继续；
+- Agent 想执行 `rm -rf`？岛上弹出**红色危险审批卡**，你点一下决定放行还是拦截，终端据此继续；
 - 一轮跑完，岛上给你 **git 变更小结**（改了几个文件、+/− 多少行）；
 - 顺手它还是个工作台：**问答助手 · 待办 · 灵感便签 · AI 资讯 · 真终端**，都带 AI 增强。
 
@@ -57,33 +57,11 @@
 
 ## 🏗️ 架构
 
-三进程 + 本地桥的经典 Electron 结构；与 Claude Code 走 **hooks**，与 Codex 走 **会话日志跟随**。
+三进程 + 本地桥的 Electron 结构；与 **Claude Code** 走 hooks 阻塞审批，与 **Codex** 走会话日志跟随。
 
-```mermaid
-flowchart TD
-    CC["Claude Code<br/>CLI / 桌面端"] -->|"hooks (阻塞审批)"| FWD["cc-forward.mjs<br/>转发脚本"]
-    CX["Codex<br/>CLI / 桌面端"] -->|"rollout 日志"| TAIL["codex-tail.ts<br/>轮询跟随"]
-    FWD -->|"HTTP 127.0.0.1<br/>随机端口 + token"| BRIDGE
-
-    subgraph MAIN["Electron 主进程 · src/main"]
-        BRIDGE["bridge-server<br/>本地桥 · 审批阻塞"]
-        STORE["agents-store<br/>状态机"]
-        TAIL --> STORE
-        BRIDGE --> STORE
-        PTY["term-pty<br/>真 PTY (ConPTY)"]
-        CAL["calendar-caldav<br/>飞书日历"]
-        RSS["rss / media / sound<br/>llm-proxy / git-summary"]
-    end
-
-    STORE -->|"Electron IPC"| UI
-
-    subgraph REN["渲染进程 · src/renderer"]
-        UI["App.tsx 编排"]
-        UI --- T1["Agents · Plan · 问答"]
-        UI --- T2["待办 · 便签 · 资讯"]
-        UI --- T3["终端 · 设置 · 迷你条"]
-    end
-```
+<div align="center">
+<img src="docs/architecture.svg" alt="架构图" width="900"/>
+</div>
 
 <details>
 <summary><b>模块职责速查</b></summary>
@@ -103,12 +81,32 @@ flowchart TD
 
 ---
 
+## 📸 界面预览
+
+<div align="center">
+
+<table>
+<tr>
+<td align="center" width="50%">
+<img src="screenshots/plan.png" width="360"/><br/>
+<sub><b>Plan · 计划审阅</b><br/>Markdown 渲染实施方案，批准 / 打回继续规划</sub>
+</td>
+<td align="center" width="50%">
+<img src="screenshots/settings.png" width="360"/><br/>
+<sub><b>设置 · 主题与外观</b><br/>6 套 OKLCH 主题 · 宽度 / 字体 / 缩放</sub>
+</td>
+</tr>
+</table>
+
+<sub>更多分区（问答 / 待办 / 灵感便签 / 资讯 / 终端 / 迷你条）截图见 <a href="screenshots/">screenshots/</a></sub>
+
+</div>
+
+---
+
 ## 🧩 功能详解
 
 ### 🤖 Agents —— 核心
-
-> ![agents](screenshots/agents.png)
-
 - **实时接管 Claude Code 权限审批**：任何非只读工具（Bash / Edit / Write / MCP…）都弹到岛上，点 **允许 / 拒绝** 直接决定终端里的执行
 - **危险分级**：`rm -rf`、force push、`DROP TABLE` 等破坏性操作**红色标识 + 两步确认 + 专属警示音**
 - **拒绝并说明理由 = 接力 steer**：你写的理由会回传给 Claude，它据此调整
@@ -117,50 +115,33 @@ flowchart TD
 - **Codex**：经会话日志实时监控（运行 / 完成 / 等待），桌面端场景可审批
 
 ### 💬 问答
-
-> ![ask](screenshots/ask.png)
-
 多轮上下文 · 多会话归档 · **快速 / 深度**（思维链默认折叠可展开）· **每家厂商可配多个模型，头部下拉秒切** · 快捷指令完全自定义 · **框选 AI 回复任意片段 → 引用追问** · 真实读取文本文件 / 图片走视觉模型 · 剪贴板一键 翻译 / 解释 / 清洗
 
 ### ✅ 待办
-
-> ![todos](screenshots/todos.png)
-
 SVG 进度环日历卡 · **✨AI 口语转结构化待办**（自动定时间 / 优先级 / 重复）· **✨AI 拆解子任务** · 优先级色环 · 分组时间线 · 到时弹岛提醒 · **飞书日历近 7 天日程 + 会前 5 分钟提醒 + 一键入会**
 
 ### 💡 灵感便签
-
-> ![notes](screenshots/notes.png)
-
 丢一段文字 / 一个网页链接给 AI → **自动整理成图文知识卡片**（自动配色 + 标签）· 富文本工具栏（免手写 Markdown）+ 实时预览 + 本地图片插入 · 标签筛选 · **AI 语义搜索**
 
 ### 📰 资讯（RSS + AI 主编）
-
-> ![news](screenshots/news.png)
-
 **精选 / 全部 / 日报 / 主题 / 收藏** 五视图 · **逐条流水线**：抓正文全文 → 按你的口味严格评分 → 达标才写 300–500 字详细总结进精选 · 标题规则预筛（融资 / 营销 / 八卦直接拒收）· 只收当天新文章、往日按日期回顾 · **图文 AI 日报**（要点标来源，一键定位到精选原条目）· 内置 16 源（含 Lilian Weng、Martin Fowler 等技术博客），任意 RSS/Atom 可加
 
 ### 🖥️ 终端
-
-> ![terminal](screenshots/terminal.png)
-
 **真 PTY（ConPTY）终端**，与本地 PowerShell 完全同源——可直接跑 `claude`、`codex`、vim、npm，多标签、双击改名、切走不断线
 
 ### 〰 常驻迷你条
-
-> ![ambient](screenshots/ambient.png)
-
 收起后的小状态条（宽度可调、小灵动岛造型）：**智能简报**（下个会议 / 到期待办 / 活动 Agent）· 时钟 · 名言 / 开发经验 / AI Agent 方法论 / 汽车热管理 Simulink 知识 · **自定义主题**（AI 按你的描述持续生成内容，每 10 分钟更新）· GitHub 本周热门 · 正在播放（歌名 / 封面 / 播放控制）· 流动光带 / 跳动律动 / 霓虹脉冲 / 小宠物
 
 ### ⚙️ 设置
-
-> ![settings](screenshots/settings.png)
-
 6 套 OKLCH 主题（含近纯黑「暗夜黑」）· 灵动岛宽度滑杆 · 界面字体四选 + 缩放 · **按通知类型分声效**（等待回复 / 一般审批 / 危险审批 / 待办会议 × 11 种音色）· 多显示器固定 / 跟随 · 开机自启 · hooks 一键接入 / 断开
 
 ---
 
 ## 🚀 快速开始
+
+**直接安装**：到 [Releases](https://github.com/suzike/agentic-island/releases) 下载 `Agentic-Island-Setup-*.exe` 运行即可。
+
+**从源码运行：**
 
 ```bash
 # 1. 安装依赖（原生模块 @lydell/node-pty 为 N-API 预编译，免编译）
