@@ -1,0 +1,23 @@
+# 依赖与构建产物
+node_modules/
+out/
+dist/
+build/*.exe
+*.tsbuildinfo
+
+# 日志与临时
+*.log
+scripts/_*
+.DS_Store
+Thumbs.db
+
+# 本地配置 / 密钥（运行时数据在 userData/~，本就不在仓库；此处双保险）
+.env
+.env.*
+*.local
+config.json
+secrets.*
+
+# 编辑器
+.vscode/
+.idea/

@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<helmet data-dc-atomics>
+<style>
+  body{margin:0}
+  @keyframes ai-dotpulse{0%,100%{opacity:1}50%{opacity:.4}}
+  @keyframes ai-attention{0%,100%{box-shadow:0 0 30px oklch(0.8 0.13 75 / .35)}50%{box-shadow:0 0 58px oklch(0.8 0.13 75 / .7)}}
+  @keyframes ai-bump{0%{transform:translateX(-50%) scale(1)}30%{transform:translateX(-50%) scale(1.06)}100%{transform:translateX(-50%) scale(1)}}
+  @keyframes ai-ring{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+  @keyframes ai-toast{0%{opacity:0;transform:translate(-50%,-14px)}100%{opacity:1;transform:translate(-50%,0)}}
+  .ai-scroll{scrollbar-width:thin;scrollbar-color:oklch(0.55 0.09 150 / .55) transparent}
+  .ai-scroll::-webkit-scrollbar{width:7px;height:7px}
+  .ai-scroll::-webkit-scrollbar-track{background:transparent;margin:4px 0}
+  .ai-scroll::-webkit-scrollbar-thumb{background:oklch(0.55 0.09 150 / .5);border-radius:999px}
+  .ai-scroll::-webkit-scrollbar-thumb:hover{background:oklch(0.65 0.13 150 / .7)}
+</style>
+</helmet>
+
+<div style="position:relative;width:100%;height:100vh;min-height:820px;overflow:hidden;background:radial-gradient(circle at 32% 16%, oklch(0.26 0.03 160), oklch(0.085 0.02 160) 74%);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;user-select:none" data-screen-label="Agentic-Island 主舞台">
+
+  <!-- faint desktop wallpaper hint -->
+  <div style="position:absolute;inset:0;background:linear-gradient(115deg, transparent 40%, oklch(0.5 0.08 200 / .05) 70%, transparent 90%);pointer-events:none"></div>
+
+  <!-- ===== demo control dock ===== -->
+  <div style="position:absolute;left:22px;top:22px;z-index:80;background:#fff;border-radius:16px;padding:15px;box-shadow:0 16px 40px rgba(0,0,0,.32);width:214px;box-sizing:border-box" data-island-keep="1">
+    <div style="font:700 10.5px 'Segoe UI',system-ui,sans-serif;letter-spacing:.07em;text-transform:uppercase;color:#a2a2a2;margin-bottom:11px">原型演示 · 场景切换</div>
+    <div style="display:flex;flex-direction:column;gap:7px">
+      <div style="padding:9px 12px;border-radius:10px;background:oklch(0.95 0.05 75);cursor:pointer;font-size:12.5px;color:#7a4a00;font-weight:600;display:flex;align-items:center;gap:7px" onClick="{{ demoNewRequest }}"><span>＋</span>模拟危险命令请求</div>
+      <div style="padding:9px 12px;border-radius:10px;background:oklch(0.95 0.045 150);cursor:pointer;font-size:12.5px;color:#0d5a35;font-weight:600;display:flex;align-items:center;gap:7px" onClick="{{ demoSafeRequest }}"><span>＋</span>模拟只读命令请求</div>
+      <div style="padding:9px 12px;border-radius:10px;background:oklch(0.94 0.06 150);cursor:pointer;font-size:12.5px;color:#0d5a35;font-weight:600;display:flex;align-items:center;gap:7px" onClick="{{ demoCompleteTask }}"><span>✓</span>模拟任务完成</div>
+      <div style="padding:9px 12px;border-radius:10px;background:#f1f1f1;cursor:pointer;font-size:12.5px;color:#7a7a7a;font-weight:600;display:flex;align-items:center;gap:7px" onClick="{{ demoReset }}"><span>↺</span>重置演示</div>
+    </div>
+    <div style="height:1px;background:#eee;margin:12px 0"></div>
+    <div style="font:400 11px/1.6 'Segoe UI',system-ui,sans-serif;color:#9c9c9c">当前状态：<span style="color:#1d1d1d;font-weight:600">{{ stageLabel }}</span></div>
+    <div style="font:400 10.5px/1.55 'Segoe UI',system-ui,sans-serif;color:#bcbcbc;margin-top:6px">静默时移到顶部<b style="color:#8a8a8a">感应区</b>唤出；危险命令需二次确认，安全命令可勾选自动允许；🌙 专注、📌 贴住、拖文件到岛上进入问答。</div>
+  </div>
+
+  <!-- top-center hover sensor hint -->
+  <div style="position:absolute;top:0;left:50%;transform:translateX(-50%);width:280px;height:16px;z-index:40;border-bottom-left-radius:12px;border-bottom-right-radius:12px;background:{{ sensorBg }};transition:background .3s;cursor:pointer" onMouseEnter="{{ hoverSensor }}" onMouseLeave="{{ leaveIsland }}"></div>
+  <div style="position:absolute;top:19px;left:50%;transform:translateX(-50%);z-index:39;font:500 9.5px 'Segoe UI',sans-serif;letter-spacing:.14em;color:oklch(0.6 0.02 160 / {{ sensorHintOpacity }});text-transform:uppercase;transition:opacity .3s;pointer-events:none">↑ 顶部感应区</div>
+
+  <!-- ===== THE ISLAND ===== -->
+  <div style="position:absolute;top:0;left:50%;z-index:50;display:flex;flex-direction:column;align-items:center;{{ islandAnim }}" data-island-keep="1" onMouseEnter="{{ hoverSensor }}" onMouseLeave="{{ leaveIsland }}">
+
+    <!-- silent seed (always present, morphs) -->
+    <div style="display:flex;align-items:center;gap:9px;padding:{{ seedPad }};border-radius:999px;background:oklch(0.2 0.02 155 / 0.62);backdrop-filter:blur(22px) saturate(160%);border:1px solid {{ seedBorder }};box-shadow:0 8px 26px rgba(0,0,0,.42){{ seedGlow }};cursor:pointer;transition:all .34s cubic-bezier(.34,1.3,.64,1);{{ seedAnim }}" onClick="{{ toggleExpand }}">
+      <div style="width:9px;height:9px;border-radius:999px;background:{{ seedDotColor }};box-shadow:0 0 12px {{ seedDotColor }};animation:ai-dotpulse 2s ease-in-out infinite"></div>
+      <span style="color:oklch(0.96 0.01 150);font-size:13px;font-weight:500;white-space:nowrap;{{ seedTextStyle }}">{{ seedText }}</span>
+      <sc-if value="{{ hasPending }}" hint-placeholder-val="{{ false }}">
+        <span style="min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:999px;background:oklch(0.8 0.13 75);color:oklch(0.18 0.04 75);font:700 11px 'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center">{{ pendingCount }}</span>
+      </sc-if>
+    </div>
+
+    <!-- expanded panel -->
+    <div style="position:relative;width:468px;border-radius:22px;background:oklch(0.2 0.02 155 / 0.72);backdrop-filter:blur(26px) saturate(160%);border:1px solid oklch(0.7 0.14 150 / 0.32);box-shadow:0 34px 70px rgba(0,0,0,.5);box-sizing:border-box;overflow:hidden;{{ panelAnim }}" onDragOver="{{ onIslandDragOver }}" onDragLeave="{{ onIslandDragLeave }}" onDrop="{{ onIslandDrop }}">
+      <sc-if value="{{ dropActive }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;inset:6px;z-index:20;border-radius:16px;border:2px dashed oklch(0.78 0.16 150 / .7);background:oklch(0.2 0.03 155 / .82);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;pointer-events:none">
+          <div style="font-size:26px">📥</div>
+          <div style="color:oklch(0.92 0.03 150);font-size:13px;font-weight:600">松手投喂到问答助手</div>
+          <div style="color:oklch(0.7 0.02 150 / .7);font-size:11px">图片 / 文件都可以</div>
+        </div>
+      </sc-if>
+      <div style="padding:16px 16px 6px">
+        <!-- header -->
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:13px">
+          <div style="width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg, oklch(0.82 0.16 150), oklch(0.62 0.15 165));display:flex;align-items:center;justify-content:center;font-size:12px">🝔</div>
+          <span style="color:oklch(0.96 0.01 150);font-size:13.5px;font-weight:600;letter-spacing:.01em">Agentic-Island</span>
+          <span style="margin-left:auto;color:oklch(0.7 0.02 150 / .6);font-size:11px">{{ clock }}</span>
+          <div title="专注模式（静默 25 分钟）" style="height:26px;padding:0 9px;border-radius:8px;display:flex;align-items:center;gap:5px;cursor:pointer;transition:all .18s;background:{{ focusBtnBg }};color:{{ focusBtnColor }};font-size:12px" onClick="{{ toggleFocus }}">🌙<sc-if value="{{ focusActive }}" hint-placeholder-val="{{ false }}"><span style="font-size:10.5px;font-variant-numeric:tabular-nums;font-weight:600">{{ focusMMSS }}</span></sc-if></div>
+          <div title="贴住 / 取消贴住" style="width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;transition:all .18s;background:{{ pinBg }};color:{{ pinColor }};transform:{{ pinTransform }}" onClick="{{ togglePin }}">📌</div>
+        </div>
+        <!-- tabs -->
+        <div style="display:flex;gap:6px;margin-bottom:14px">
+          <div style="{{ tabAgentsStyle }}" onClick="{{ setAgentsTab }}">Agents<sc-if value="{{ hasPending }}" hint-placeholder-val="{{ false }}"><span style="margin-left:5px;display:inline-block;width:6px;height:6px;border-radius:999px;background:oklch(0.8 0.13 75);vertical-align:middle"></span></sc-if></div>
+          <div style="{{ tabPlanStyle }}" onClick="{{ setPlanTab }}">Plan</div>
+          <div style="{{ tabAskStyle }}" onClick="{{ setAskTab }}">问答</div>
+          <div style="{{ tabSettingsStyle }}" onClick="{{ setSettingsTab }}">Settings</div>
+        </div>
+      </div>
+
+      <div class="ai-scroll" style="padding:0 8px 0 16px;margin:0 4px 16px 0;max-height:424px;overflow-y:auto">
+        <!-- AGENTS -->
+        <sc-if value="{{ showAgents }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ agentRows }}" as="row" hint-placeholder-count="4">
+              <div style="display:flex;flex-direction:column;gap:7px;padding:12px;border-radius:16px;background:{{ row.cardBg }};border:1px solid {{ row.cardBorder }};transition:all .2s">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="width:8px;height:8px;border-radius:999px;background:{{ row.dotColor }};{{ row.dotAnim }}"></div>
+                  <sc-if value="{{ row.isCli }}" hint-placeholder-val="{{ false }}"><div style="width:18px;height:18px;border-radius:5px;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;color:oklch(0.82 0.14 150);font-family:ui-monospace,'Cascadia Code',monospace;font-size:10px;font-weight:700">›_</div></sc-if>
+                  <sc-if value="{{ row.isApp }}" hint-placeholder-val="{{ false }}"><div style="width:18px;height:18px;border-radius:5px;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center"><div style="width:11px;height:9px;border:1px solid oklch(0.75 0.1 205);border-radius:2px;overflow:hidden"><div style="height:2.5px;background:oklch(0.75 0.1 205)"></div></div></div></sc-if>
+                  <span style="color:oklch(0.96 0.01 150);font-size:12.5px;font-weight:600">{{ row.tool }}</span>
+                  <span style="color:oklch(0.72 0.02 150 / .65);font-size:11px;font-family:ui-monospace,'Cascadia Code',monospace">{{ row.proj }}</span>
+                  <span style="margin-left:auto;color:{{ row.labelColor }};font-size:10.5px;font-weight:600">{{ row.label }}</span>
+                </div>
+                <div style="color:oklch(0.78 0.02 150 / .85);font-size:11.5px;line-height:1.5">{{ row.detail }}</div>
+
+                <sc-if value="{{ row.showApproval }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:3px;padding:9px 11px;border-radius:11px;background:oklch(0.28 0.05 75 / .35);border:1px solid oklch(0.8 0.13 75 / .3)">
+                    <div style="display:flex;align-items:center;gap:7px;margin-bottom:7px">
+                      <span style="color:oklch(0.86 0.1 75);font-size:11px;font-weight:600">需要你的确认</span>
+                      <span style="padding:2px 7px;border-radius:6px;background:{{ row.riskBadgeBg }};color:{{ row.riskBadgeColor }};font-size:10px;font-weight:700">{{ row.riskLabel }}</span>
+                      <sc-if value="{{ row.showWait }}" hint-placeholder-val="{{ false }}"><span style="margin-left:auto;color:{{ row.waitColor }};font-size:10px;font-variant-numeric:tabular-nums">⏱ {{ row.waitText }}</span></sc-if>
+                    </div>
+                    <div style="color:{{ row.cmdColor }};font-size:11.5px;font-family:ui-monospace,'Cascadia Code',monospace;background:{{ row.cmdBg }};padding:6px 8px;border-radius:7px;margin-bottom:9px;word-break:break-all">{{ row.command }}</div>
+                    <sc-if value="{{ row.isDanger }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.82 0.14 25);font-size:10.5px;margin-bottom:8px">⚠ {{ row.riskReason }}，请确认后再放行</div></sc-if>
+                    <div style="display:flex;gap:8px">
+                      <div style="flex:1;text-align:center;padding:7px;border-radius:999px;background:{{ row.allowBg }};color:{{ row.allowColor }};font-size:12px;font-weight:700;cursor:pointer" onClick="{{ row.allow }}">{{ row.allowLabel }}</div>
+                      <div style="flex:1;text-align:center;padding:7px;border-radius:999px;background:rgba(255,255,255,.06);color:oklch(0.78 0.02 150 / .85);font-size:12px;font-weight:600;cursor:pointer" onClick="{{ row.deny }}">拒绝 Deny</div>
+                    </div>
+                    <sc-if value="{{ row.isSafe }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;align-items:center;gap:7px;margin-top:9px;cursor:pointer" onClick="{{ row.toggleAutoAllow }}">
+                        <sc-if value="{{ row.autoAllowSafe }}" hint-placeholder-val="{{ false }}"><div style="width:15px;height:15px;border-radius:4px;background:oklch(0.78 0.16 150);display:flex;align-items:center;justify-content:center;color:oklch(0.14 0.02 150);font-size:10px;font-weight:800">✓</div></sc-if>
+                        <sc-if value="{{ row.notAutoAllow }}" hint-placeholder-val="{{ true }}"><div style="width:15px;height:15px;border-radius:4px;border:1.5px solid oklch(0.5 0.02 150 / .5)"></div></sc-if>
+                        <span style="color:oklch(0.78 0.02 150 / .8);font-size:11px">本会话自动允许只读 / 测试类命令</span>
+                      </div>
+                    </sc-if>
+                    <div style="color:oklch(0.6 0.02 150 / .45);font-size:9.5px;margin-top:8px">快捷键：<b style="color:oklch(0.75 0.02 150 / .7)">Y</b> 允许 · <b style="color:oklch(0.75 0.02 150 / .7)">N</b> 拒绝</div>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ row.decidedAllow }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.78 0.16 150);font-weight:600">✓ 已允许，继续执行中…</div></sc-if>
+                <sc-if value="{{ row.decidedDeny }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.7 0.1 30);font-weight:600">✕ 已拒绝，已通知 Agent</div></sc-if>
+
+                <sc-if value="{{ row.hasSummary }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:3px;padding:10px 11px;border-radius:12px;background:oklch(0.24 0.03 150 / .5);border:1px solid oklch(0.5 0.08 150 / .3)">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+                      <span style="color:oklch(0.88 0.06 150);font-size:11px;font-weight:700">变更小结</span>
+                      <span style="color:oklch(0.72 0.02 150 / .7);font-size:10.5px;font-family:ui-monospace,monospace">{{ row.sumFiles }} 文件</span>
+                      <span style="color:oklch(0.78 0.16 150);font-size:10.5px;font-family:ui-monospace,monospace">+{{ row.sumAdded }}</span>
+                      <span style="color:oklch(0.7 0.14 25);font-size:10.5px;font-family:ui-monospace,monospace">−{{ row.sumRemoved }}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div style="flex:1;color:oklch(0.82 0.02 150 / .9);font-size:11px;font-family:ui-monospace,'Cascadia Code',monospace;background:rgba(0,0,0,.28);padding:6px 8px;border-radius:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ row.sumCommit }}</div>
+                      <div style="padding:6px 11px;border-radius:8px;background:rgba(255,255,255,.07);color:oklch(0.85 0.06 150);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap" onClick="{{ row.copyCommit }}">复制</div>
+                    </div>
+                    <sc-if value="{{ row.copied }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.78 0.16 150);font-size:10px;margin-top:5px">✓ 提交信息已复制</div></sc-if>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ row.isDone }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;gap:8px;margin-top:2px">
+                    <div style="padding:5px 12px;border-radius:999px;background:rgba(255,255,255,.06);color:oklch(0.86 0.02 150);font-size:11px;font-weight:600;cursor:pointer" onClick="{{ row.jump }}">↗ 跳转到终端</div>
+                    <div style="padding:5px 12px;border-radius:999px;background:transparent;color:oklch(0.7 0.02 150 / .7);font-size:11px;font-weight:600;cursor:pointer" onClick="{{ row.jump }}">查看变更</div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ row.isRunning }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:5px 12px;border-radius:999px;background:rgba(255,255,255,.05);color:oklch(0.8 0.02 150 / .8);font-size:11px;font-weight:600;cursor:pointer;align-self:flex-start" onClick="{{ row.jump }}">↗ 跳转到终端</div>
+                </sc-if>
+
+                <div style="display:flex;align-items:center;gap:6px;margin-top:1px">
+                  <div style="display:flex;align-items:center;gap:5px;color:oklch(0.8 0.06 150);font-size:11px;font-weight:600;cursor:pointer" onClick="{{ row.toggleRelay }}"><span style="font-size:12px">💬</span>{{ row.relayLabel }}</div>
+                </div>
+                <sc-if value="{{ row.threadOpen }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:2px">
+                    <dc-import name="Island Chat" messages="{{ row.conv.messages }}" composer="{{ row.conv.composer }}" placeholder="{{ row.conv.placeholder }}" quick-replies="{{ row.conv.quickReplies }}" onQuick="{{ row.conv.onQuick }}" onText="{{ row.conv.onText }}" onSend="{{ row.conv.onSend }}" onAttach="{{ row.conv.onAttach }}" onRecord="{{ row.conv.onRecord }}" onRemoveAtt="{{ row.conv.onRemoveAtt }}" hint-size="100%,120px"></dc-import>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- PLAN -->
+        <sc-if value="{{ showPlan }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:11px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="color:oklch(0.96 0.01 150);font-size:13.5px;font-weight:700">重构支付模块</span>
+              <span style="color:oklch(0.72 0.02 150 / .6);font-size:11px">Codex · ml-pipeline</span>
+            </div>
+            <div style="color:oklch(0.75 0.02 150 / .8);font-size:11.5px;line-height:1.6;padding:11px;border-radius:13px;background:rgba(255,255,255,.04)">
+              将现有 <span style="font-family:ui-monospace,monospace;color:oklch(0.85 0.1 150)">PaymentService</span> 拆分为独立的网关与账本模块，把 Stripe Webhook 的签名校验迁移到中间件，并补齐测试覆盖率。
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <sc-for list="{{ planItems }}" as="it" hint-placeholder-count="4">
+                <div style="display:flex;align-items:flex-start;gap:9px">
+                  <sc-if value="{{ it.isDone }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.78 0.16 150);font-size:13px;line-height:1.4">✓</div></sc-if>
+                  <sc-if value="{{ it.isDoing }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.8 0.13 75);font-size:13px;line-height:1.4">◐</div></sc-if>
+                  <sc-if value="{{ it.isTodo }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.5 0.02 150 / .55);font-size:13px;line-height:1.4">○</div></sc-if>
+                  <div style="color:{{ it.textColor }};font-size:12px;line-height:1.45">{{ it.label }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:3px">
+              <div style="flex:1;text-align:center;padding:8px;border-radius:999px;background:linear-gradient(180deg, oklch(0.82 0.16 150), oklch(0.7 0.16 150));color:oklch(0.14 0.02 150);font-size:12px;font-weight:700;cursor:pointer" onClick="{{ approvePlan }}">批准计划</div>
+              <div style="flex:1;text-align:center;padding:8px;border-radius:999px;background:rgba(255,255,255,.06);color:oklch(0.78 0.02 150 / .85);font-size:12px;font-weight:600;cursor:pointer" onClick="{{ approvePlan }}">批准并执行</div>
+            </div>
+            <sc-if value="{{ planApproved }}" hint-placeholder-val="{{ false }}"><div style="text-align:center;font-size:11px;color:oklch(0.78 0.16 150);font-weight:600">✓ 计划已批准</div></sc-if>
+            <div style="height:1px;background:rgba(255,255,255,.07);margin:4px 0"></div>
+            <div style="color:oklch(0.65 0.02 150 / .6);font-size:10.5px;font-weight:600;letter-spacing:.04em">想改计划？直接在这里说 —</div>
+            <dc-import name="Island Chat" messages="{{ planConv.messages }}" composer="{{ planConv.composer }}" placeholder="{{ planConv.placeholder }}" quick-replies="{{ planConv.quickReplies }}" onQuick="{{ planConv.onQuick }}" onText="{{ planConv.onText }}" onSend="{{ planConv.onSend }}" onAttach="{{ planConv.onAttach }}" onRecord="{{ planConv.onRecord }}" onRemoveAtt="{{ planConv.onRemoveAtt }}" hint-size="100%,120px"></dc-import>
+          </div>
+        </sc-if>
+
+        <!-- ASK (knowledge Q&A) -->
+        <sc-if value="{{ showAsk }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;border-radius:11px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);cursor:pointer" onClick="{{ openLlmSettings }}">
+              <div style="width:6px;height:6px;border-radius:999px;background:oklch(0.78 0.16 150);box-shadow:0 0 8px oklch(0.78 0.16 150)"></div>
+              <span style="color:oklch(0.72 0.02 150 / .7);font-size:11px">当前模型</span>
+              <span style="color:oklch(0.9 0.03 150);font-size:11.5px;font-weight:600;font-family:ui-monospace,'Cascadia Code',monospace">{{ askModelLabel }}</span>
+              <span style="margin-left:auto;color:oklch(0.65 0.02 150 / .6);font-size:11px">设置 ›</span>
+            </div>
+            <sc-if value="{{ askEmpty }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:rgba(255,255,255,.03)">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg, oklch(0.82 0.16 150), oklch(0.62 0.15 165));display:flex;align-items:center;justify-content:center;font-size:14px">✦</div>
+                  <div style="color:oklch(0.94 0.01 150);font-size:13px;font-weight:600">工作助手</div>
+                </div>
+                <div style="color:oklch(0.78 0.02 150 / .8);font-size:11.5px;line-height:1.6">工作中遇到问题随时问，回答会以结构化排版给出，方便快速阅读。支持文字、图片、文件。</div>
+                <div style="display:flex;flex-direction:column;gap:7px">
+                  <sc-for list="{{ askSuggestions }}" as="sug" hint-placeholder-count="2">
+                    <div style="padding:9px 12px;border-radius:11px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06);color:oklch(0.86 0.02 150 / .9);font-size:12px;cursor:pointer" onClick="{{ sug.go }}">{{ sug.label }}</div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+            <dc-import name="Island Chat" messages="{{ askConv.messages }}" composer="{{ askConv.composer }}" placeholder="{{ askConv.placeholder }}" onText="{{ askConv.onText }}" onSend="{{ askConv.onSend }}" onAttach="{{ askConv.onAttach }}" onRecord="{{ askConv.onRecord }}" onRemoveAtt="{{ askConv.onRemoveAtt }}" hint-size="100%,140px"></dc-import>
+          </div>
+        </sc-if>
+
+        <!-- SETTINGS -->
+        <sc-if value="{{ showSettings }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:16px">
+            <div>
+              <div style="font:600 10.5px 'Segoe UI',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:oklch(0.65 0.02 150 / .6);margin-bottom:9px">通用</div>
+              <div style="display:flex;flex-direction:column;gap:11px">
+                <sc-for list="{{ generalSettings }}" as="row" hint-placeholder-count="3">
+                  <div style="display:flex;flex-direction:column;gap:9px">
+                    <div style="display:flex;align-items:center;justify-content:space-between">
+                      <div style="display:flex;flex-direction:column;gap:1px;{{ row.labelCursor }}" onClick="{{ row.expandToggle }}">
+                        <span style="color:oklch(0.88 0.02 150 / .9);font-size:12.5px;display:flex;align-items:center;gap:6px">{{ row.label }}<sc-if value="{{ row.chevron }}" hint-placeholder-val="{{ false }}"><span style="color:oklch(0.7 0.02 150 / .6);font-size:10px;transition:transform .2s;{{ row.chevronStyle }}">▾</span></sc-if></span>
+                        <span style="color:oklch(0.6 0.02 150 / .55);font-size:10.5px">{{ row.desc }}</span>
+                      </div>
+                      <div style="{{ row.trackStyle }}" onClick="{{ row.toggle }}"><div style="{{ row.knobStyle }}"></div></div>
+                    </div>
+                    <sc-if value="{{ row.pickerOpen }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;flex-direction:column;gap:6px;padding:9px;border-radius:13px;background:rgba(0,0,0,.22)">
+                        <sc-for list="{{ soundOptions }}" as="snd" hint-placeholder-count="5">
+                          <div style="display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:10px;background:{{ snd.rowBg }};border:1px solid {{ snd.rowBorder }};cursor:pointer;transition:all .15s" onClick="{{ snd.select }}">
+                            <div style="width:15px;height:15px;border-radius:999px;border:2px solid {{ snd.radioColor }};display:flex;align-items:center;justify-content:center">
+                              <sc-if value="{{ snd.selected }}" hint-placeholder-val="{{ false }}"><div style="width:6px;height:6px;border-radius:999px;background:oklch(0.78 0.16 150)"></div></sc-if>
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:1px;flex:1">
+                              <span style="color:{{ snd.labelColor }};font-size:12px;font-weight:{{ snd.labelWeight }}">{{ snd.label }}</span>
+                              <span style="color:oklch(0.6 0.02 150 / .5);font-size:10px">{{ snd.desc }}</span>
+                            </div>
+                            <div style="width:24px;height:24px;border-radius:999px;background:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;color:oklch(0.85 0.08 150);font-size:11px" onClick="{{ snd.preview }}">▶</div>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ row.monitorOpen }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;flex-direction:column;gap:8px;padding:11px;border-radius:13px;background:rgba(0,0,0,.22)">
+                        <div style="color:oklch(0.68 0.02 150 / .7);font-size:10.5px">面板会出现在下面选中的显示器顶部中央：</div>
+                        <div style="display:flex;gap:10px">
+                          <sc-for list="{{ monitors }}" as="mon" hint-placeholder-count="2">
+                            <div style="flex:1;display:flex;flex-direction:column;gap:5px;align-items:center;cursor:pointer" onClick="{{ mon.select }}">
+                              <div style="width:100%;aspect-ratio:16/10;border-radius:7px;background:{{ mon.boxBg }};border:1.5px solid {{ mon.boxBorder }};position:relative;transition:all .18s">
+                                <sc-if value="{{ mon.showIsland }}" hint-placeholder-val="{{ false }}">
+                                  <div style="position:absolute;top:5px;left:50%;transform:translateX(-50%);width:38%;height:7px;border-radius:0 0 6px 6px;background:linear-gradient(180deg, oklch(0.82 0.16 150), oklch(0.6 0.15 150));box-shadow:0 0 10px oklch(0.78 0.16 150 / .6)"></div>
+                                </sc-if>
+                              </div>
+                              <span style="color:{{ mon.labelColor }};font-size:11px;font-weight:500">{{ mon.label }}</span>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:9px" onClick="{{ llm.toggle }}">
+                <div style="font:600 10.5px 'Segoe UI',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:oklch(0.65 0.02 150 / .6)">问答助手模型</div>
+                <span style="color:oklch(0.7 0.02 150 / .6);font-size:10px;transition:transform .2s;{{ llm.chevronStyle }}">▾</span>
+                <span style="margin-left:auto;color:oklch(0.72 0.08 150 / .8);font-size:10.5px">{{ llm.summary }}</span>
+              </div>
+              <sc-if value="{{ llm.open }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:12px;padding:12px;border-radius:14px;background:rgba(0,0,0,.22)">
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <div style="color:oklch(0.68 0.02 150 / .7);font-size:10.5px;font-weight:600">供应商</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px">
+                      <sc-for list="{{ llm.providers }}" as="p" hint-placeholder-count="6">
+                        <div style="padding:6px 11px;border-radius:9px;background:{{ p.chipBg }};border:1px solid {{ p.chipBorder }};color:{{ p.chipColor }};font-size:11.5px;font-weight:500;cursor:pointer;transition:all .15s" onClick="{{ p.select }}">{{ p.label }}</div>
+                      </sc-for>
+                    </div>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <div style="color:oklch(0.68 0.02 150 / .7);font-size:10.5px;font-weight:600">型号</div>
+                    <input value="{{ llm.model }}" onChange="{{ llm.onModel }}" placeholder="自行填写 model id，如 deepseek-chat" class="ai-input" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;color:oklch(0.95 0.01 150);font-size:12px;font-family:ui-monospace,monospace;padding:8px 10px;outline:none" />
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <div style="color:oklch(0.68 0.02 150 / .7);font-size:10.5px;font-weight:600">Base URL</div>
+                    <input value="{{ llm.baseUrl }}" onChange="{{ llm.onBaseUrl }}" placeholder="https://api.example.com/v1" class="ai-input" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;color:oklch(0.95 0.01 150);font-size:12px;font-family:ui-monospace,monospace;padding:8px 10px;outline:none" />
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <div style="color:oklch(0.68 0.02 150 / .7);font-size:10.5px;font-weight:600">API Key</div>
+                    <input value="{{ llm.apiKey }}" onChange="{{ llm.onApiKey }}" type="password" placeholder="sk-••••••••••••" class="ai-input" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;color:oklch(0.95 0.01 150);font-size:12px;font-family:ui-monospace,monospace;padding:8px 10px;outline:none" />
+                  </div>
+
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div style="padding:7px 14px;border-radius:999px;background:{{ llm.testBtnBg }};color:oklch(0.14 0.02 150);font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px" onClick="{{ llm.test }}">
+                      <sc-if value="{{ llm.testing }}" hint-placeholder-val="{{ false }}"><span style="display:inline-block;width:11px;height:11px;border:2px solid oklch(0.14 0.02 150 / .3);border-top-color:oklch(0.14 0.02 150);border-radius:999px;animation:ai-ring .7s linear infinite"></span></sc-if>测试连通性
+                    </div>
+                    <sc-if value="{{ llm.showTestMsg }}" hint-placeholder-val="{{ false }}"><span style="color:{{ llm.testColor }};font-size:11px;flex:1">{{ llm.testMsg }}</span></sc-if>
+                  </div>
+
+                  <div style="height:1px;background:rgba(255,255,255,.07)"></div>
+                  <div style="display:flex;align-items:center;justify-content:space-between">
+                    <div style="color:oklch(0.68 0.02 150 / .7);font-size:10.5px;font-weight:600">已保存的配置</div>
+                    <div style="padding:5px 11px;border-radius:999px;background:rgba(255,255,255,.06);color:oklch(0.85 0.06 150);font-size:11px;font-weight:600;cursor:pointer" onClick="{{ llm.save }}">＋ 保存当前</div>
+                  </div>
+                  <sc-if value="{{ llm.hasSaved }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;flex-direction:column;gap:6px">
+                      <sc-for list="{{ llm.saved }}" as="c" hint-placeholder-count="2">
+                        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:{{ c.rowBg }};border:1px solid {{ c.rowBorder }};cursor:pointer" onClick="{{ c.load }}">
+                          <div style="width:6px;height:6px;border-radius:999px;background:{{ c.dot }}"></div>
+                          <span style="color:oklch(0.88 0.02 150 / .9);font-size:11.5px;font-family:ui-monospace,'Cascadia Code',monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.name }}</span>
+                          <sc-if value="{{ c.active }}" hint-placeholder-val="{{ false }}"><span style="color:oklch(0.78 0.16 150);font-size:10px;font-weight:700">使用中</span></sc-if>
+                          <span style="color:oklch(0.65 0.02 150 / .55);font-size:12px;cursor:pointer" onClick="{{ c.del }}">✕</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+                  <div style="color:oklch(0.55 0.02 150 / .5);font-size:10px;line-height:1.5">仅用于「问答助手」。Agent（Claude Code / Codex）的模型在各自 CLI 中已配置，此处不涉及。兼容 OpenAI Chat Completions 协议的服务均可接入，密钥仅保存在本机。</div>
+                </div>
+              </sc-if>
+            </div>
+            <div>
+              <div style="font:600 10.5px 'Segoe UI',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:oklch(0.65 0.02 150 / .6);margin-bottom:9px">已支持的工具 · {{ enabledToolCount }}/4 启用</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <sc-for list="{{ toolSettings }}" as="row" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:11px;background:{{ row.chipBg }};border:1px solid {{ row.chipBorder }};cursor:pointer" onClick="{{ row.toggle }}">
+                    <sc-if value="{{ row.isCli }}" hint-placeholder-val="{{ false }}"><div style="width:17px;height:17px;flex:none;border-radius:5px;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;color:{{ row.dot }};font-family:ui-monospace,'Cascadia Code',monospace;font-size:9.5px;font-weight:700">›_</div></sc-if>
+                    <sc-if value="{{ row.isApp }}" hint-placeholder-val="{{ false }}"><div style="width:17px;height:17px;flex:none;border-radius:5px;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center"><div style="width:10px;height:8px;border:1px solid {{ row.dot }};border-radius:2px;overflow:hidden"><div style="height:2px;background:{{ row.dot }}"></div></div></div></sc-if>
+                    <span style="color:{{ row.textColor }};font-size:11.5px;font-weight:500">{{ row.label }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="color:oklch(0.55 0.02 150 / .5);font-size:10.5px;margin-top:9px">当前支持 Claude Code、Codex 的 CLI 与桌面端，共 4 种。</div>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== silent-mode toast (task complete) ===== -->
+  <sc-if value="{{ showToast }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:45;display:flex;align-items:center;gap:10px;padding:11px 16px;border-radius:999px;background:oklch(0.2 0.02 155 / 0.82);backdrop-filter:blur(22px) saturate(160%);border:1px solid oklch(0.7 0.14 150 / 0.35);box-shadow:0 18px 40px rgba(0,0,0,.5);animation:ai-toast .34s cubic-bezier(.34,1.3,.64,1)">
+      <div style="width:20px;height:20px;border-radius:999px;background:oklch(0.78 0.16 150);display:flex;align-items:center;justify-content:center;color:oklch(0.14 0.02 150);font-size:12px;font-weight:800">✓</div>
+      <span style="color:oklch(0.96 0.01 150);font-size:12.5px;font-weight:500">{{ toastText }}</span>
+      <span style="color:oklch(0.7 0.02 150 / .55);font-size:11px;cursor:pointer" onClick="{{ dismissToast }}">✕</span>
+    </div>
+  </sc-if>
+
+  <!-- ===== jump feedback toast ===== -->
+  <sc-if value="{{ showJumpToast }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;bottom:34px;left:50%;transform:translateX(-50%);z-index:70;padding:10px 18px;border-radius:999px;background:oklch(0.18 0.02 155 / 0.9);backdrop-filter:blur(20px);border:1px solid oklch(0.7 0.14 150 / 0.3);color:oklch(0.9 0.02 150);font-size:12px;box-shadow:0 14px 34px rgba(0,0,0,.5)">↗ {{ jumpText }}</div>
+  </sc-if>
+
+  <!-- caption -->
+  <div style="position:absolute;bottom:22px;left:50%;transform:translateX(-50%);z-index:20;color:oklch(0.55 0.02 160 / .45);font-size:11px;text-align:center;pointer-events:none">静默 → 感应区悬停唤出胶囊 → 点击展开 · 权限请求会自动弹出并高亮</div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+
+class Component extends DCLogic {
+  baseAgents() {
+    return [
+      { id: 1, tool: 'Claude Code CLI', proj: 'apps/api', status: 'running', detail: '正在编写 /orders 的 REST 接口与校验层…' },
+      { id: 3, tool: 'Codex CLI', proj: 'docs-site', status: 'done', detail: '已重构导航结构，共修改 12 个文件。', summary: { files: 12, added: 180, removed: 64, commit: 'refactor(docs): 重构导航结构与侧边栏层级' } },
+      { id: 4, tool: 'Claude Code 桌面端', proj: 'mobile-app', status: 'running', detail: '正在添加生物识别登录校验…' },
+    ];
+  }
+
+  PLAN_ITEMS = [
+    { label: '拆分 PaymentService 为 Gateway / Ledger 两个模块', state: 'done' },
+    { label: '迁移 Stripe Webhook 签名校验到中间件', state: 'doing' },
+    { label: '补充单元测试覆盖率至 90%', state: 'todo' },
+    { label: '更新 API 文档与迁移指南', state: 'todo' },
+  ];
+
+  GENERAL = [
+    { key: 'autostart', label: '开机自启', desc: '登录 Windows 时自动在后台运行' },
+    { key: 'multiMonitor', label: '多显示器跟随', desc: '面板显示在鼠标所在的显示器' },
+    { key: 'sound', label: '声音提醒', desc: '需要处理时播放提示音' },
+    { key: 'silentBg', label: '空闲时完全静默', desc: '无待办时隐藏胶囊' },
+  ];
+
+  SOUNDS = [
+    { key: 'chime', label: '清脆铃声', desc: '柔和的上行三音', notes: [660, 880, 1320], type: 'sine', gap: 0.1, dur: 0.16 },
+    { key: 'blip', label: '8-bit 提示', desc: '复古像素音', notes: [523, 784], type: 'square', gap: 0.07, dur: 0.09 },
+    { key: 'ping', label: '单声 Ping', desc: '一声干净的提示', notes: [1046], type: 'triangle', gap: 0, dur: 0.22 },
+    { key: 'marimba', label: '木琴', desc: '温暖的双音', notes: [587, 880], type: 'sine', gap: 0.12, dur: 0.24 },
+    { key: 'alert', label: '警示音', desc: '需要立即处理时', notes: [880, 740, 880], type: 'sawtooth', gap: 0.09, dur: 0.11 },
+  ];
+
+  TOOLS = [
+    { key: 'claudeCli', label: 'Claude Code CLI' }, { key: 'claudeApp', label: 'Claude Code 桌面端' },
+    { key: 'codexCli', label: 'Codex CLI' }, { key: 'codexApp', label: 'Codex 桌面端' },
+  ];
+
+  state = {
+    revealed: false,
+    expanded: false,
+    tab: 'agents',
+    agents: this.baseAgents(),
+    decided: {},
+    planApproved: false,
+    showToast: false,
+    toastText: '',
+    showJumpToast: false,
+    jumpText: '',
+    settings: { autostart: true, multiMonitor: true, sound: true, silentBg: false, claudeCli: true, claudeApp: true, codexCli: true, codexApp: false },
+    selectedSound: 'chime',
+    soundPickerOpen: false,
+    threads: {},
+    composers: {},
+    openThread: {},
+    pinned: false,
+    activeMonitor: 1,
+    monitorPreviewOpen: false,
+    now: Date.now(),
+    waitStart: {},
+    autoAllowSafe: false,
+    confirmArm: {},
+    focusUntil: 0,
+    copiedCommit: 0,
+    dropActive: false,
+    llm: { open: false, provider: 'deepseek', model: '', baseUrl: 'https://api.deepseek.com/v1', apiKey: '', testStatus: 'idle', testMsg: '', saved: [] },
+  };
+
+  PROVIDERS = [
+    { key: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
+    { key: 'kimi', label: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'kimi-k2'] },
+    { key: 'qwen', label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max', 'qwen-turbo'] },
+    { key: 'openai', label: 'GPT (OpenAI)', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o', 'gpt-4o-mini', 'o4-mini'] },
+    { key: 'claude', label: 'Claude', baseUrl: 'https://api.anthropic.com/v1', models: ['claude-sonnet-4', 'claude-opus-4', 'claude-haiku-4'] },
+    { key: 'custom', label: '自定义', baseUrl: '', models: [] },
+  ];
+
+  openLlmSettings = () => this.setState(s => ({ tab: 'settings', llm: { ...s.llm, open: true } }));
+
+  saveLlmConfig = () => {
+    const { provider, model, baseUrl, apiKey } = this.state.llm;
+    const label = (this.PROVIDERS.find(p => p.key === provider) || {}).label || provider;
+    const cfg = { id: Date.now(), provider, model, baseUrl, apiKey, name: label + ' · ' + (model || '未命名') };
+    this.setState(s => {
+      const saved = (s.llm.saved || []).filter(c => !(c.provider === provider && c.model === model && c.baseUrl === baseUrl));
+      return { llm: { ...s.llm, saved: [cfg, ...saved].slice(0, 6) } };
+    });
+  };
+
+  loadLlmConfig = (id) => this.setState(s => {
+    const c = (s.llm.saved || []).find(x => x.id === id);
+    if (!c) return {};
+    return { llm: { ...s.llm, provider: c.provider, model: c.model, baseUrl: c.baseUrl, apiKey: c.apiKey, testStatus: 'idle', testMsg: '' } };
+  });
+
+  deleteLlmConfig = (id) => this.setState(s => ({ llm: { ...s.llm, saved: (s.llm.saved || []).filter(x => x.id !== id) } }));
+
+  toggleLlm = () => this.setState(s => ({ llm: { ...s.llm, open: !s.llm.open } }));
+  setLlmField = (field, val) => this.setState(s => ({ llm: { ...s.llm, [field]: val, testStatus: 'idle', testMsg: '' } }));
+  setLlmProvider = (key) => {
+    const p = this.PROVIDERS.find(x => x.key === key) || this.PROVIDERS[0];
+    this.setState(s => ({ llm: { ...s.llm, provider: key, baseUrl: p.baseUrl || s.llm.baseUrl, testStatus: 'idle', testMsg: '' } }));
+  };
+  testLlm = () => {
+    const { baseUrl, apiKey, model } = this.state.llm;
+    this.setState(s => ({ llm: { ...s.llm, testStatus: 'testing', testMsg: '正在连接…' } }));
+    clearTimeout(this._llmTestT);
+    this._llmTestT = setTimeout(() => {
+      let ok = true, msg = '';
+      if (!baseUrl || !/^https?:\/\//.test(baseUrl)) { ok = false; msg = 'Base URL 无效，需以 http(s):// 开头'; }
+      else if (!apiKey || apiKey.trim().length < 8) { ok = false; msg = 'API Key 缺失或过短'; }
+      else if (!model) { ok = false; msg = '未选择型号'; }
+      else { msg = `连接成功 · ${model} 响应正常（约 240ms）`; }
+      this.setState(s => ({ llm: { ...s.llm, testStatus: ok ? 'ok' : 'fail', testMsg: msg } }));
+    }, 1100);
+  };
+
+  togglePin = () => this.setState(s => ({ pinned: !s.pinned, revealed: true }));
+  setMonitor = (n) => this.setState({ activeMonitor: n });
+  toggleMonitorPreview = () => { if (this.state.settings.multiMonitor) this.setState(s => ({ monitorPreviewOpen: !s.monitorPreviewOpen })); };
+
+  FILE_NAMES = ['需求文档.pdf', '错误日志.txt', '设计稿.fig', '接口定义.yaml'];
+
+  getComposer(key) { return this.state.composers[key] || { text: '', attachments: [], recording: false, recTime: '0:00' }; }
+
+  patchComposer(key, patch) {
+    this.setState(s => ({ composers: { ...s.composers, [key]: { ...this.getComposer(key), ...patch } } }));
+  }
+
+  onComposerText = (key, val) => this.patchComposer(key, { text: val });
+
+  onAttach = (key, type, payload) => {
+    const cur = this.getComposer(key);
+    const atts = cur.attachments || [];
+    let name = (payload && payload.name) || '截图';
+    if (!payload || !payload.name) {
+      if (type === 'screenshot') name = '截图 ' + (atts.filter(a => a.type === 'screenshot').length + 1);
+      else name = this.FILE_NAMES[atts.filter(a => a.type === 'file').length % this.FILE_NAMES.length];
+    }
+    const att = { type, name };
+    if (payload && payload.thumb) att.thumb = payload.thumb;
+    this.patchComposer(key, { attachments: [...atts, att] });
+  };
+
+  onRemoveAtt = (key, idx) => {
+    const cur = this.getComposer(key);
+    this.patchComposer(key, { attachments: (cur.attachments || []).filter((_, i) => i !== idx) });
+  };
+
+  onSetRecording = (key, val) => {
+    this._recTimers = this._recTimers || {};
+    if (val) {
+      this.patchComposer(key, { recording: true, recTime: '0:00', recSeed: Math.random() * 6 });
+      let n = 0;
+      clearInterval(this._recTimers[key]);
+      this._recTimers[key] = setInterval(() => {
+        n += 1;
+        const c = this.getComposer(key);
+        if (!c.recording) { clearInterval(this._recTimers[key]); return; }
+        this.patchComposer(key, { recTime: '0:' + String(n).padStart(2, '0'), recSeed: Math.random() * 6 });
+      }, 1000);
+    } else {
+      clearInterval(this._recTimers[key]);
+      this.patchComposer(key, { recording: false });
+    }
+  };
+
+  sendMessage = (key) => {
+    const cur = this.getComposer(key);
+    const text = (cur.text || '').trim();
+    const atts = cur.attachments || [];
+    if (!text && atts.length === 0) return;
+    const userMsg = { role: 'user', text, attachments: atts };
+    const typingMsg = { role: 'agent', typing: true };
+    this.setState(s => ({
+      threads: { ...s.threads, [key]: [...(s.threads[key] || []), userMsg, typingMsg] },
+      composers: { ...s.composers, [key]: { text: '', attachments: [], recording: false, recTime: '0:00' } },
+    }));
+    this.fetchModelReply(key, text, atts);
+  };
+
+  systemFor(key) {
+    if (key === 'ask') {
+      return '你是嵌入 Windows 顶部灵动岛工具里的编程助手，服务专业工程师。回答要简洁、准确、面向工程实践。';
+    }
+    if (key === 'plan') {
+      return '你是编码 Agent Codex，正在与用户讨论「重构支付模块」的实施计划（把 PaymentService 拆分为网关与账本、迁移 Stripe Webhook 签名校验到中间件、补齐测试）。请根据用户的反馈调整或解释计划，语气像协作的工程师。';
+    }
+    if (key.startsWith('agent')) {
+      const id = Number(key.split('-')[1]);
+      const a = this.state.agents.find(x => x.id === id);
+      const cmd = a && a.command ? `你此前请求执行的命令是：${a.command}。用户对此有顾虑。` : '';
+      const tool = a ? a.tool : '编码 Agent';
+      return `你是编码 Agent「${tool}」，正在某个代码仓库里工作。${cmd}请根据用户的最新回复调整你的做法，给出更安全或更符合意图的方案，语气像协作的工程师。`;
+    }
+    return '你是一个乐于助人的编码助手。';
+  }
+
+  parseBlocks(raw) {
+    if (!raw) return null;
+    let t = String(raw).trim();
+    const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence) t = fence[1].trim();
+    const start = t.indexOf('['); const end = t.lastIndexOf(']');
+    if (start !== -1 && end !== -1) t = t.slice(start, end + 1);
+    try {
+      const arr = JSON.parse(t);
+      if (!Array.isArray(arr) || !arr.length) return null;
+      const ok = ['h', 'p', 'ul', 'code', 'note'];
+      const blocks = arr.filter(b => b && ok.includes(b.t)).map(b => ({
+        t: b.t,
+        text: typeof b.text === 'string' ? b.text : '',
+        items: Array.isArray(b.items) ? b.items.map(x => String(x)) : [],
+      }));
+      return blocks.length ? blocks : null;
+    } catch (e) { return null; }
+  }
+
+  async fetchModelReply(key, text, atts) {
+    let reply;
+    try {
+      if (!window.claude || !window.claude.complete) throw new Error('no-claude');
+      const attNote = atts && atts.length
+        ? `\n\n[用户附带了：${atts.map(a => a.name).join('、')}。你无法读取其具体内容，请礼貌说明并请其粘贴关键信息（报错栈、代码片段等）。]`
+        : '';
+      const system = this.systemFor(key) +
+        '\n\n只输出一个 JSON 数组，不要任何数组以外的文字。每个元素是一个 block，t 取值：' +
+        '"h"(小标题,含 text)、"p"(段落,含 text)、"ul"(要点列表,含 items 字符串数组)、"code"(代码/命令,含 text 可多行)、"note"(一句提示,含 text)。' +
+        '整体控制在 2–5 个 block。除非用户用英文提问，否则用简体中文。';
+      const raw = await window.claude.complete({
+        system,
+        messages: [{ role: 'user', content: (text || '（用户未输入文字）') + attNote }],
+        max_tokens: 900,
+      });
+      const blocks = this.parseBlocks(raw);
+      reply = blocks ? { role: 'agent', blocks } : this.replyFor(key, text, atts);
+    } catch (e) {
+      reply = this.replyFor(key, text, atts);
+    }
+    this.setState(s => {
+      const th = (s.threads[key] || []).filter(m => !m.typing);
+      return { threads: { ...s.threads, [key]: [...th, reply] } };
+    });
+  }
+
+  sendPreset = (key, text) => { this.patchComposer(key, { text }); setTimeout(() => this.sendMessage(key), 30); };
+
+  toggleRelay = (id) => this.setState(s => ({ openThread: { ...s.openThread, [id]: !s.openThread[id] } }));
+
+  replyFor(key, text, atts) {
+    const hasShot = (atts || []).some(a => a.type === 'screenshot');
+    if (key.startsWith('agent')) {
+      return { role: 'agent', blocks: [
+        { t: 'h', text: '已根据你的反馈调整' },
+        { t: 'p', text: '明白，我不会执行全量删除。改为只清理构建缓存、保留 dist 下已发布的静态资源：' },
+        { t: 'code', text: 'rm -rf dist/.cache\nnpm run build' },
+        { t: 'note', text: '确认后我按这个方案继续，需要我再跑一遍测试吗？' },
+      ] };
+    }
+    if (key === 'plan') {
+      return { role: 'agent', blocks: [
+        { t: 'h', text: '计划已更新' },
+        { t: 'p', text: '收到你的意见，我把测试覆盖率目标改为分阶段推进：' },
+        { t: 'ul', items: ['第一阶段：核心支付路径覆盖率 ≥ 95%', '第二阶段：边缘场景补齐至 85%'] },
+        { t: 'note', text: '其余步骤保持不变，是否批准修订后的计划？' },
+      ] };
+    }
+    // ask (knowledge Q&A)
+    const q = (text || '').toLowerCase();
+    if (hasShot) {
+      return { role: 'agent', blocks: [
+        { t: 'h', text: '截图分析' },
+        { t: 'p', text: '从截图看，报错源于空指针访问；建议按以下顺序排查：' },
+        { t: 'ul', items: ['确认调用处对象是否已初始化', '在入口加一次空值守卫', '补一条针对该分支的单测'] },
+        { t: 'note', text: '把相关代码贴给我，我可以直接给出改法。' },
+      ] };
+    }
+    if (q.includes('rebase') || q.includes('git')) {
+      return { role: 'agent', blocks: [
+        { t: 'h', text: '安全地做 rebase' },
+        { t: 'p', text: '在私有分支上操作、先备份，出错可随时回退：' },
+        { t: 'code', text: 'git branch backup/mybranch\ngit rebase -i main\n# 冲突解决后\ngit rebase --continue' },
+        { t: 'ul', items: ['已推送的公共分支避免 rebase，改用 merge', '搞砸了用 git reflog 找回原 HEAD'] },
+        { t: 'note', text: '需要我解释交互式 rebase 里 squash / fixup 的区别吗？' },
+      ] };
+    }
+    if (q.includes('docker')) {
+      return { role: 'agent', blocks: [
+        { t: 'h', text: '精简镜像体积' },
+        { t: 'p', text: '用多阶段构建，把编译产物拷进最小运行时镜像：' },
+        { t: 'code', text: 'FROM node:20 AS build\n...\nFROM node:20-slim\nCOPY --from=build /app/dist ./dist' },
+        { t: 'ul', items: ['善用 .dockerignore 排除 node_modules', '合并 RUN 指令减少层数'] },
+      ] };
+    }
+    return { role: 'agent', blocks: [
+      { t: 'h', text: '思路' },
+      { t: 'p', text: '针对「' + (text || '你的问题') + '」，可以从三个方向入手：' },
+      { t: 'ul', items: ['先复现并缩小问题范围', '查官方文档确认预期行为', '写一个最小可运行示例验证假设'] },
+      { t: 'note', text: '给我更多上下文（代码、日志或截图），我能给更具体的答案。' },
+    ] };
+  }
+
+  playSound = (key) => {
+    const def = this.SOUNDS.find(s => s.key === key) || this.SOUNDS[0];
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this._ac = this._ac || new AC();
+      const ac = this._ac;
+      if (ac.state === 'suspended') ac.resume();
+      let t = ac.currentTime;
+      def.notes.forEach((f, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = def.type;
+        osc.frequency.value = f;
+        const start = t + i * (def.dur + def.gap);
+        g.gain.setValueAtTime(0.0001, start);
+        g.gain.exponentialRampToValueAtTime(0.22, start + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, start + def.dur);
+        osc.connect(g); g.connect(ac.destination);
+        osc.start(start); osc.stop(start + def.dur + 0.02);
+      });
+    } catch (e) {}
+  };
+
+  selectSound = (key) => { this.setState({ selectedSound: key, soundPickerOpen: false }); this.playSound(key); };
+  previewSound = (e, key) => { if (e && e.stopPropagation) e.stopPropagation(); this.playSound(key); };
+  toggleSoundPicker = () => { if (this.state.settings.sound) this.setState(s => ({ soundPickerOpen: !s.soundPickerOpen })); };
+
+  componentDidMount() {
+    this._tick = setInterval(() => {
+      const s = this.state;
+      const focusOn = s.focusUntil && Date.now() < s.focusUntil;
+      const pendingWait = s.agents.some(a => a.status === 'needs_approval' && !s.decided[a.id]);
+      if (s.focusUntil && Date.now() >= s.focusUntil) {
+        const pc = s.agents.filter(a => a.status === 'needs_approval' && !s.decided[a.id]).length;
+        clearTimeout(this._toastT);
+        this.setState({ focusUntil: 0, now: Date.now(), showToast: true, toastText: pc ? `专注结束 · 期间累积 ${pc} 个待处理请求` : '专注结束 · 期间无待处理请求' });
+        this._toastT = setTimeout(() => this.setState({ showToast: false }), 4600);
+        return;
+      }
+      if (focusOn || pendingWait) this.setState({ now: Date.now() });
+    }, 1000);
+
+    this._keydown = (e) => {
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const pending = this.state.agents.filter(a => a.status === 'needs_approval' && !this.state.decided[a.id]);
+      if ((e.key === 'y' || e.key === 'Y') && pending.length) { e.preventDefault(); this.decide(pending[0].id, 'allow'); }
+      else if ((e.key === 'n' || e.key === 'N') && pending.length) { e.preventDefault(); this.decide(pending[0].id, 'deny'); this.setState(st => ({ openThread: { ...st.openThread, [pending[0].id]: true } })); }
+      else if (e.key === 'Escape') { if (!this.state.pinned) this.setState({ expanded: false, revealed: false }); }
+      else if ((e.key === '\\' || e.key === '`') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.setState(s => ({ expanded: !s.expanded, revealed: true })); }
+    };
+    document.addEventListener('keydown', this._keydown);
+
+    this._outside = (e) => {
+      if (this.state.pinned) return;
+      if (!this.state.expanded && !this.state.revealed) return;
+      if (this.hasPendingNow()) return;
+      if (e.target && e.target.closest && e.target.closest('[data-island-keep]')) return;
+      this.setState({ revealed: false, expanded: false });
+    };
+    document.addEventListener('mousedown', this._outside, true);
+  }
+
+  componentWillUnmount() {
+    document.removeEventListener('mousedown', this._outside, true);
+    document.removeEventListener('keydown', this._keydown);
+    clearInterval(this._tick);
+    clearTimeout(this._toastT); clearTimeout(this._jumpT); clearTimeout(this._llmTestT);
+    Object.values(this._recTimers || {}).forEach(clearInterval);
+    Object.values(this._replyTimers || {}).forEach(clearTimeout);
+  }
+
+  convProps(key, placeholder, quickReplies) {
+    return {
+      messages: this.state.threads[key] || [],
+      composer: this.getComposer(key),
+      placeholder,
+      quickReplies: quickReplies || [],
+      onQuick: (t) => this.sendPreset(key, t),
+      onText: (v) => this.onComposerText(key, v),
+      onSend: () => this.sendMessage(key),
+      onAttach: (t, payload) => this.onAttach(key, t, payload),
+      onRecord: (val) => this.onSetRecording(key, val),
+      onRemoveAtt: (i) => this.onRemoveAtt(key, i),
+    };
+  }
+
+  hasPendingNow() { return this.state.agents.some(a => a.status === 'needs_approval' && !this.state.decided[a.id]); }
+
+  hoverSensor = () => this.setState({ revealed: true });
+  leaveIsland = () => {
+    if (this.state.pinned || this.state.expanded || this.hasPendingNow()) return;
+    this.setState({ revealed: false });
+  };
+  toggleExpand = () => this.setState(s => ({ expanded: !s.expanded, revealed: true }));
+  setTab = (tab) => this.setState({ tab });
+
+  riskOf(cmd) {
+    if (!cmd) return { level: 'normal' };
+    const danger = /(rm\s+-[rf]{1,2}|rm\s+-rf|git\s+push\s+.*(--force|-f)|--force\b|sudo\s|dd\s+if=|mkfs|:\(\)\s*\{|chmod\s+777|>\s*\/dev\/|\bdel\s+\/[fqs]|format\s+[a-z]:|DROP\s+TABLE|TRUNCATE\s+TABLE|shutdown|reboot)/i;
+    const safe = /^\s*(ls|ll|cat|pwd|echo|npm\s+(test|run\s+test|run\s+lint)|pnpm\s+test|yarn\s+test|pytest|jest|git\s+(status|diff|log|show)|grep|rg|find|which|node\s+-v)/i;
+    if (danger.test(cmd)) return { level: 'danger', reason: '检测到破坏性操作' };
+    if (safe.test(cmd)) return { level: 'safe', reason: '只读 / 测试类命令' };
+    return { level: 'normal' };
+  }
+
+  demoNewRequest = () => {
+    this.setState(s => {
+      if (s.agents.some(a => a.id === 2)) return s;
+      const req = { id: 2, tool: 'Codex CLI', proj: 'ml-pipeline', status: 'needs_approval', detail: '准备清理并重建构建产物目录。', command: 'rm -rf dist/ && npm run build' };
+      const focus = s.focusUntil && Date.now() < s.focusUntil;
+      const patch = { ...s, agents: [s.agents[0], req, ...s.agents.slice(1)], waitStart: { ...s.waitStart, 2: Date.now() }, tab: 'agents' };
+      if (!focus) { patch.revealed = true; patch.expanded = true; }
+      return patch;
+    });
+  };
+
+  demoSafeRequest = () => {
+    this.setState(s => {
+      if (s.agents.some(a => a.id === 5)) return s;
+      const cmd = 'npm run test';
+      const req = { id: 5, tool: 'Claude Code CLI', proj: 'apps/api', status: 'needs_approval', detail: '运行测试套件以验证改动。', command: cmd };
+      const focus = s.focusUntil && Date.now() < s.focusUntil;
+      // auto-allow safe commands if enabled
+      if (s.autoAllowSafe && this.riskOf(cmd).level === 'safe') {
+        clearTimeout(this._toastT);
+        this._toastT = setTimeout(() => this.setState({ showToast: false }), 3600);
+        return { ...s, agents: [...s.agents, { ...req, status: 'running', detail: '按「本会话自动允许」规则已放行，测试运行中…' }], showToast: true, toastText: '已按规则自动允许：npm run test' };
+      }
+      const patch = { ...s, agents: [...s.agents, req], waitStart: { ...s.waitStart, 5: Date.now() }, tab: 'agents' };
+      if (!focus) { patch.revealed = true; patch.expanded = true; }
+      return patch;
+    });
+  };
+
+  demoCompleteTask = () => {
+    this.setState(s => {
+      const agents = s.agents.map(a => a.id === 1 ? { ...a, status: 'done', detail: '已完成 /orders 接口，新增 6 个测试并全部通过。', summary: { files: 4, added: 96, removed: 12, commit: 'feat(api): 新增 /orders 接口与校验层' } } : a);
+      return { ...s, agents, showToast: true, toastText: 'Claude Code 完成了 apps/api 的任务' };
+    });
+    clearTimeout(this._toastT);
+    this._toastT = setTimeout(() => this.setState({ showToast: false }), 4200);
+  };
+
+  demoReset = () => {
+    clearTimeout(this._toastT); clearTimeout(this._jumpT);
+    this.setState({ revealed: false, expanded: false, tab: 'agents', agents: this.baseAgents(), decided: {}, planApproved: false, showToast: false, showJumpToast: false, waitStart: {}, confirmArm: {}, focusUntil: 0, autoAllowSafe: false });
+  };
+
+  dismissToast = () => this.setState({ showToast: false });
+
+  decide = (id, v) => this.setState(s => {
+    const confirmArm = { ...s.confirmArm }; delete confirmArm[id];
+    const waitStart = { ...s.waitStart }; delete waitStart[id];
+    return { decided: { ...s.decided, [id]: v }, confirmArm, waitStart };
+  });
+
+  armConfirm = (id) => this.setState(s => ({ confirmArm: { ...s.confirmArm, [id]: true } }));
+  toggleAutoAllowSafe = () => this.setState(s => ({ autoAllowSafe: !s.autoAllowSafe }));
+
+  toggleFocus = () => this.setState(s => {
+    if (s.focusUntil && Date.now() < s.focusUntil) return { focusUntil: 0 };
+    return { focusUntil: Date.now() + 25 * 60 * 1000 };
+  });
+
+  copyCommit = (msg) => {
+    try { navigator.clipboard && navigator.clipboard.writeText(msg); } catch (e) {}
+    this.setState({ copiedCommit: Date.now() });
+    clearTimeout(this._copyT);
+    this._copyT = setTimeout(() => this.setState({ copiedCommit: 0 }), 1800);
+  };
+
+  onIslandDragOver = (e) => { e.preventDefault(); if (!this.state.dropActive) this.setState({ dropActive: true }); };
+  onIslandDragLeave = (e) => { if (e.currentTarget === e.target) this.setState({ dropActive: false }); };
+  onIslandDrop = (e) => {
+    e.preventDefault();
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+    files.forEach(f => {
+      if (f.type && f.type.startsWith('image/')) { const url = URL.createObjectURL(f); this.onAttach('ask', 'screenshot', { thumb: url, name: f.name }); }
+      else this.onAttach('ask', 'file', { name: f.name });
+    });
+    this.setState({ dropActive: false, revealed: true, expanded: true, tab: 'ask' });
+  };
+
+  jump = (tool, proj) => {
+    this.setState({ showJumpToast: true, jumpText: `已聚焦到 ${tool} 的终端窗口 · ${proj}` });
+    clearTimeout(this._jumpT);
+    this._jumpT = setTimeout(() => this.setState({ showJumpToast: false }), 2200);
+  };
+
+  approvePlan = () => this.setState({ planApproved: true });
+  toggleSetting = (k) => this.setState(s => ({ settings: { ...s.settings, [k]: !s.settings[k] } }));
+
+  tabStyle(name) {
+    const active = this.state.tab === name;
+    return `padding:6px 15px;border-radius:999px;font:600 12px 'Segoe UI',sans-serif;cursor:pointer;transition:all .16s;background:${active ? 'linear-gradient(180deg, oklch(0.82 0.16 150), oklch(0.7 0.16 150))' : 'rgba(255,255,255,.05)'};color:${active ? 'oklch(0.14 0.02 150)' : 'oklch(0.78 0.02 150 / .7)'};`;
+  }
+
+  renderVals() {
+    const s = this.state;
+    const pending = s.agents.filter(a => a.status === 'needs_approval' && !s.decided[a.id]);
+    const hasPending = pending.length > 0;
+    const running = s.agents.filter(a => a.status === 'running').length;
+    const focusActive = s.focusUntil && s.now < s.focusUntil;
+    const focusRemaining = focusActive ? Math.max(0, Math.ceil((s.focusUntil - s.now) / 1000)) : 0;
+    const focusMMSS = `${String(Math.floor(focusRemaining / 60)).padStart(2, '0')}:${String(focusRemaining % 60).padStart(2, '0')}`;
+
+    // longest wait among pending → escalation
+    let maxWait = 0;
+    pending.forEach(a => { const st = s.waitStart[a.id]; if (st) maxWait = Math.max(maxWait, Math.floor((s.now - st) / 1000)); });
+    const escalated = maxWait >= 20; // demo threshold: 20s
+
+    // pending forces the island open only when NOT in focus mode
+    const forcePending = hasPending && !focusActive;
+
+    // island visibility: revealed on hover OR forced by pending request OR pinned
+    const isShown = s.revealed || forcePending || s.pinned;
+    const isExpanded = s.expanded || (forcePending && s.revealed);
+
+    // seed morphs: collapsed dot when hidden, pill when shown
+    const seedText = focusActive
+      ? `专注中 · ${focusMMSS}${hasPending ? ' · ' + pending.length + ' 待处理' : ''}`
+      : (hasPending
+        ? `需要处理 · ${pending.length}`
+        : `${s.agents.length} 个 Agent${running ? ' · ' + running + ' 运行中' : ''}`);
+    const seedDotColor = focusActive ? 'oklch(0.7 0.05 260)' : (hasPending ? (escalated ? 'oklch(0.65 0.2 25)' : 'oklch(0.8 0.13 75)') : 'oklch(0.78 0.16 150)');
+
+    const seedGlow = (forcePending && !focusActive) ? (escalated ? ',0 0 44px oklch(0.65 0.2 25 / .6)' : ',0 0 40px oklch(0.8 0.13 75 / .5)') : '';
+    const seedBorder = focusActive ? 'oklch(0.55 0.05 260 / .5)' : (hasPending ? (escalated ? 'oklch(0.65 0.2 25 / 0.6)' : 'oklch(0.8 0.13 75 / 0.55)') : 'oklch(0.7 0.14 150 / 0.35)');
+    const seedAnim = isShown
+      ? 'transform:translateY(10px) scale(1);opacity:1;'
+      : (forcePending ? 'transform:translateY(6px) scale(1);opacity:1;' : 'transform:translateY(-46px) scale(.85);opacity:0;pointer-events:none;');
+    const seedPad = '11px 18px';
+    const attentionRing = (forcePending && !focusActive) ? `animation:ai-attention ${escalated ? '0.9s' : '1.6s'} ease-in-out infinite;` : '';
+
+    const islandAnim = `transform:translateX(-50%);transition:all .3s;`;
+
+    const panelAnim = isExpanded
+      ? 'max-height:640px;opacity:1;margin-top:10px;'
+      : 'max-height:0px;opacity:0;margin-top:0px;pointer-events:none;';
+
+    const agentRows = s.agents.map(a => {
+      const decided = s.decided[a.id];
+      const showApproval = a.status === 'needs_approval' && !decided;
+      let dotColor = 'oklch(0.78 0.16 150)', label = '运行中', labelColor = 'oklch(0.78 0.16 150)';
+      let cardBg = 'rgba(255,255,255,.04)', cardBorder = 'transparent', dotAnim = 'animation:ai-dotpulse 2s ease-in-out infinite';
+      if (a.status === 'needs_approval') {
+        dotColor = 'oklch(0.8 0.13 75)'; labelColor = 'oklch(0.86 0.1 75)';
+        label = decided ? '已处理' : '待处理';
+        if (!decided) { cardBg = 'oklch(0.28 0.05 75 / .18)'; cardBorder = 'oklch(0.8 0.13 75 / .4)'; }
+      }
+      if (a.status === 'done') { dotColor = 'oklch(0.6 0.02 150 / .7)'; label = '已完成'; labelColor = 'oklch(0.7 0.02 150 / .7)'; dotAnim = ''; }
+
+      const risk = this.riskOf(a.command);
+      const waitStart = s.waitStart[a.id];
+      const waitSecs = showApproval && waitStart ? Math.floor((s.now - waitStart) / 1000) : 0;
+      const waitEsc = waitSecs >= 20;
+      const armed = !!s.confirmArm[a.id];
+      const sm = a.summary;
+      return {
+        id: a.id, tool: a.tool, proj: a.proj, detail: a.detail, command: a.command || '',
+        dotColor, dotAnim, label, labelColor, cardBg, cardBorder, showApproval,
+        isCli: /CLI/i.test(a.tool), isApp: /桌面/.test(a.tool),
+        isDone: a.status === 'done', isRunning: a.status === 'running',
+        decidedAllow: decided === 'allow', decidedDeny: decided === 'deny',
+        // risk grading
+        isDanger: risk.level === 'danger', isSafe: risk.level === 'safe',
+        riskReason: risk.reason || '',
+        riskBadgeBg: risk.level === 'danger' ? 'oklch(0.5 0.18 25 / .3)' : (risk.level === 'safe' ? 'oklch(0.4 0.1 150 / .3)' : 'rgba(255,255,255,.06)'),
+        riskBadgeColor: risk.level === 'danger' ? 'oklch(0.82 0.16 25)' : (risk.level === 'safe' ? 'oklch(0.82 0.14 150)' : 'oklch(0.75 0.02 150 / .7)'),
+        riskLabel: risk.level === 'danger' ? '⚠ 危险' : (risk.level === 'safe' ? '✓ 安全' : '· 一般'),
+        cmdBg: risk.level === 'danger' ? 'oklch(0.28 0.08 25 / .35)' : 'rgba(0,0,0,.28)',
+        cmdColor: risk.level === 'danger' ? 'oklch(0.88 0.1 25)' : 'oklch(0.82 0.02 150 / .9)',
+        // wait timer
+        showWait: showApproval && waitSecs > 0,
+        waitText: `已等待 ${String(Math.floor(waitSecs / 60)).padStart(1, '0')}:${String(waitSecs % 60).padStart(2, '0')}`,
+        waitColor: waitEsc ? 'oklch(0.72 0.18 25)' : 'oklch(0.72 0.02 150 / .6)',
+        // danger 2-step confirm
+        armed,
+        allowLabel: risk.level === 'danger' ? (armed ? '确认执行 · 再点一次' : '允许（需确认）') : '允许 Allow',
+        allowBg: risk.level === 'danger' ? (armed ? 'linear-gradient(180deg, oklch(0.62 0.19 25), oklch(0.52 0.19 25))' : 'oklch(0.4 0.12 25 / .55)') : 'linear-gradient(180deg, oklch(0.82 0.16 150), oklch(0.7 0.16 150))',
+        allowColor: risk.level === 'danger' && !armed ? 'oklch(0.9 0.08 25)' : 'oklch(0.14 0.02 150)',
+        allow: () => {
+          if (risk.level === 'danger' && !s.confirmArm[a.id]) { this.armConfirm(a.id); return; }
+          this.decide(a.id, 'allow');
+        },
+        // safe → auto-allow toggle
+        autoAllowSafe: s.autoAllowSafe,
+        notAutoAllow: !s.autoAllowSafe,
+        toggleAutoAllow: this.toggleAutoAllowSafe,
+        deny: () => { this.decide(a.id, 'deny'); this.setState(st => ({ openThread: { ...st.openThread, [a.id]: true } })); },
+        jump: () => this.jump(a.tool, a.proj),
+        threadOpen: !!s.openThread[a.id],
+        relayLabel: s.openThread[a.id] ? '收起对话' : '继续对话',
+        toggleRelay: () => this.toggleRelay(a.id),
+        conv: this.convProps('agent-' + a.id, '回复 ' + a.tool + '，直接在这里接力…', ['继续', '换个方案', '先跑测试再说']),
+        // completion summary
+        hasSummary: !!sm,
+        sumFiles: sm ? sm.files : 0, sumAdded: sm ? sm.added : 0, sumRemoved: sm ? sm.removed : 0, sumCommit: sm ? sm.commit : '',
+        copyCommit: () => this.copyCommit(sm ? sm.commit : ''),
+        copied: s.copiedCommit > 0,
+      };
+    });
+
+    const planItems = this.PLAN_ITEMS.map(it => ({
+      label: it.label,
+      isDone: it.state === 'done', isDoing: it.state === 'doing', isTodo: it.state === 'todo',
+      textColor: it.state === 'todo' ? 'oklch(0.65 0.02 150 / .6)' : 'oklch(0.85 0.02 150 / .9)',
+    }));
+
+    const track = (on) => `width:38px;height:22px;border-radius:999px;position:relative;cursor:pointer;transition:background .2s;background:${on ? 'linear-gradient(180deg, oklch(0.82 0.16 150), oklch(0.7 0.16 150))' : 'rgba(255,255,255,.12)'};`;
+    const knob = (on) => `position:absolute;top:2px;${on ? 'right:2px' : 'left:2px'};width:18px;height:18px;border-radius:999px;background:${on ? '#fff' : 'rgba(255,255,255,.7)'};transition:all .2s;box-shadow:0 2px 5px rgba(0,0,0,.3);`;
+
+    const generalSettings = this.GENERAL.map(g => {
+      const isSound = g.key === 'sound';
+      const isMonitor = g.key === 'multiMonitor';
+      return {
+        label: g.label, desc: g.desc,
+        trackStyle: track(s.settings[g.key]), knobStyle: knob(s.settings[g.key]),
+        toggle: () => {
+          if (isSound && s.settings.sound) this.setState({ soundPickerOpen: false });
+          if (isMonitor && s.settings.multiMonitor) this.setState({ monitorPreviewOpen: false });
+          this.toggleSetting(g.key);
+        },
+        isSound,
+        isMonitor,
+        pickerOpen: isSound && s.soundPickerOpen && s.settings.sound,
+        monitorOpen: isMonitor && s.monitorPreviewOpen && s.settings.multiMonitor,
+        labelCursor: (isSound && s.settings.sound) || (isMonitor && s.settings.multiMonitor) ? 'cursor:pointer' : '',
+        chevron: isSound || isMonitor,
+        chevronStyle: (isSound && s.soundPickerOpen) || (isMonitor && s.monitorPreviewOpen) ? 'transform:rotate(180deg)' : '',
+        expandToggle: isSound ? this.toggleSoundPicker : (isMonitor ? this.toggleMonitorPreview : () => {}),
+      };
+    });
+
+    const monitors = [1, 2].map(n => ({
+      n, active: s.activeMonitor === n,
+      boxBg: s.activeMonitor === n ? 'oklch(0.28 0.05 150 / .5)' : 'rgba(255,255,255,.04)',
+      boxBorder: s.activeMonitor === n ? 'oklch(0.7 0.14 150 / .55)' : 'rgba(255,255,255,.08)',
+      showIsland: s.activeMonitor === n,
+      label: n === 1 ? '主显示器' : '副显示器',
+      labelColor: s.activeMonitor === n ? 'oklch(0.88 0.02 150)' : 'oklch(0.6 0.02 150 / .6)',
+      select: () => this.setMonitor(n),
+    }));
+
+    const toolSettings = this.TOOLS.map(t => {
+      const on = s.settings[t.key];
+      return {
+        label: t.label,
+        isCli: /Cli$/.test(t.key), isApp: /App$/.test(t.key),
+        chipBg: on ? 'oklch(0.3 0.05 150 / .3)' : 'rgba(255,255,255,.03)',
+        chipBorder: on ? 'oklch(0.7 0.14 150 / .35)' : 'rgba(255,255,255,.06)',
+        dot: on ? 'oklch(0.78 0.16 150)' : 'oklch(0.5 0.02 150 / .5)',
+        textColor: on ? 'oklch(0.92 0.01 150)' : 'oklch(0.6 0.02 150 / .6)',
+        toggle: () => this.toggleSetting(t.key),
+      };
+    });
+
+    let stageLabel = '静默待命';
+    if (focusActive && hasPending) stageLabel = '🌙 专注中 · 请求静默堆叠';
+    else if (focusActive) stageLabel = '🌙 专注中';
+    else if (hasPending) stageLabel = escalated ? '⚠ 请求久等，已升级提醒' : '⚠ 权限请求弹出';
+    else if (s.pinned) stageLabel = '📌 已贴住';
+    else if (isExpanded) stageLabel = '面板已展开';
+    else if (isShown) stageLabel = '胶囊已唤出';
+
+    return {
+      stageLabel,
+      sensorBg: isShown ? 'oklch(0.7 0.14 150 / 0)' : 'oklch(0.7 0.14 150 / 0.08)',
+      sensorHintOpacity: isShown ? 0 : 0.5,
+      islandAnim, seedAnim: seedAnim + attentionRing, seedText, seedDotColor, seedGlow, seedBorder, seedPad,
+      seedTextStyle: '', hasPending, pendingCount: pending.length,
+      pinned: s.pinned,
+      pinBg: s.pinned ? 'oklch(0.78 0.16 150 / .22)' : 'rgba(255,255,255,.05)',
+      pinColor: s.pinned ? 'oklch(0.85 0.14 150)' : 'oklch(0.7 0.02 150 / .55)',
+      pinTransform: s.pinned ? 'rotate(0deg)' : 'rotate(38deg)',
+      togglePin: this.togglePin,
+      panelAnim, clock: '14:32',
+      tabAgentsStyle: this.tabStyle('agents'), tabPlanStyle: this.tabStyle('plan'), tabAskStyle: this.tabStyle('ask'), tabSettingsStyle: this.tabStyle('settings'),
+      showAgents: s.tab === 'agents', showPlan: s.tab === 'plan', showAsk: s.tab === 'ask', showSettings: s.tab === 'settings',
+      agentRows, planItems,
+      approvePlan: this.approvePlan, planApproved: s.planApproved,
+      askConv: this.convProps('ask', '有问题随时问，支持文字 / 图片 / 文件…'),
+      planConv: this.convProps('plan', '对这个计划有想法？直接说，或要求修改…', ['批准计划', '再细化第 2 步', '拆得更小些']),
+      askEmpty: !(s.threads['ask'] && s.threads['ask'].length),
+      askModelLabel: (this.PROVIDERS.find(p => p.key === s.llm.provider) || {}).label + ' · ' + (s.llm.model || '未设置'),
+      openLlmSettings: this.openLlmSettings,
+      askSuggestions: [
+        { label: '如何安全地做 git rebase？', go: () => this.sendPreset('ask', '如何安全地做 git rebase？') },
+        { label: '怎么精简 Docker 镜像体积？', go: () => this.sendPreset('ask', '怎么精简 Docker 镜像体积？') },
+      ],
+      generalSettings, toolSettings, monitors,
+      llm: (() => {
+        const L = s.llm;
+        const activeProvider = this.PROVIDERS.find(p => p.key === L.provider) || this.PROVIDERS[0];
+        return {
+          open: L.open,
+          toggle: this.toggleLlm,
+          chevronStyle: L.open ? 'transform:rotate(180deg)' : '',
+          summary: (this.PROVIDERS.find(p => p.key === L.provider) || {}).label + ' · ' + (L.model || '未设置'),
+          providers: this.PROVIDERS.map(p => ({
+            label: p.label,
+            selected: p.key === L.provider,
+            chipBg: p.key === L.provider ? 'oklch(0.3 0.05 150 / .4)' : 'rgba(255,255,255,.04)',
+            chipBorder: p.key === L.provider ? 'oklch(0.7 0.14 150 / .5)' : 'rgba(255,255,255,.08)',
+            chipColor: p.key === L.provider ? 'oklch(0.94 0.01 150)' : 'oklch(0.7 0.02 150 / .7)',
+            select: () => this.setLlmProvider(p.key),
+          })),
+          modelChips: activeProvider.models.map(m => ({
+            label: m,
+            selected: m === L.model,
+            chipBg: m === L.model ? 'oklch(0.3 0.05 150 / .4)' : 'rgba(255,255,255,.04)',
+            chipColor: m === L.model ? 'oklch(0.92 0.01 150)' : 'oklch(0.7 0.02 150 / .7)',
+            select: () => this.setLlmField('model', m),
+          })),
+          hasModelChips: activeProvider.models.length > 0,
+          model: L.model, baseUrl: L.baseUrl, apiKey: L.apiKey,
+          onModel: (e) => this.setLlmField('model', e.target.value),
+          onBaseUrl: (e) => this.setLlmField('baseUrl', e.target.value),
+          onApiKey: (e) => this.setLlmField('apiKey', e.target.value),
+          test: this.testLlm,
+          testing: L.testStatus === 'testing',
+          save: this.saveLlmConfig,
+          saved: (L.saved || []).map(c => ({
+            name: c.name,
+            load: () => this.loadLlmConfig(c.id),
+            del: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.deleteLlmConfig(c.id); },
+            active: c.provider === L.provider && c.model === L.model && c.baseUrl === L.baseUrl,
+            rowBg: (c.provider === L.provider && c.model === L.model && c.baseUrl === L.baseUrl) ? 'oklch(0.3 0.05 150 / .3)' : 'rgba(255,255,255,.03)',
+            rowBorder: (c.provider === L.provider && c.model === L.model && c.baseUrl === L.baseUrl) ? 'oklch(0.7 0.14 150 / .4)' : 'rgba(255,255,255,.06)',
+            dot: (c.provider === L.provider && c.model === L.model && c.baseUrl === L.baseUrl) ? 'oklch(0.78 0.16 150)' : 'oklch(0.5 0.02 150 / .5)',
+          })),
+          hasSaved: (L.saved || []).length > 0,
+          testBtnBg: L.testStatus === 'testing' ? 'oklch(0.7 0.06 150)' : 'linear-gradient(180deg, oklch(0.82 0.16 150), oklch(0.7 0.16 150))',
+          testMsg: L.testMsg,
+          testColor: L.testStatus === 'ok' ? 'oklch(0.8 0.14 150)' : (L.testStatus === 'fail' ? 'oklch(0.72 0.15 30)' : 'oklch(0.7 0.02 150 / .7)'),
+          showTestMsg: !!L.testMsg,
+        };
+      })(),
+      soundOn: !!s.settings.sound,
+      soundOptions: this.SOUNDS.map(snd => {
+        const selected = s.selectedSound === snd.key;
+        return {
+          label: snd.label, desc: snd.desc, selected,
+          rowBg: selected ? 'oklch(0.3 0.05 150 / .28)' : 'rgba(255,255,255,.03)',
+          rowBorder: selected ? 'oklch(0.7 0.14 150 / .35)' : 'rgba(255,255,255,.06)',
+          radioColor: selected ? 'oklch(0.78 0.16 150)' : 'oklch(0.5 0.02 150 / .5)',
+          labelColor: selected ? 'oklch(0.94 0.01 150)' : 'oklch(0.82 0.02 150 / .8)',
+          labelWeight: selected ? 600 : 500,
+          select: () => this.selectSound(snd.key),
+          preview: (e) => this.previewSound(e, snd.key),
+        };
+      }),
+      enabledToolCount: this.TOOLS.filter(t => s.settings[t.key]).length,
+      demoNewRequest: this.demoNewRequest, demoCompleteTask: this.demoCompleteTask, demoReset: this.demoReset,
+      demoSafeRequest: this.demoSafeRequest,
+      focusActive, focusMMSS, toggleFocus: this.toggleFocus,
+      focusBtnBg: focusActive ? 'oklch(0.4 0.08 260 / .5)' : 'rgba(255,255,255,.05)',
+      focusBtnColor: focusActive ? 'oklch(0.82 0.1 260)' : 'oklch(0.7 0.02 150 / .55)',
+      dropActive: s.dropActive,
+      onIslandDragOver: this.onIslandDragOver, onIslandDragLeave: this.onIslandDragLeave, onIslandDrop: this.onIslandDrop,
+      hoverSensor: this.hoverSensor, leaveIsland: this.leaveIsland, toggleExpand: this.toggleExpand,
+      setAgentsTab: () => this.setTab('agents'), setPlanTab: () => this.setTab('plan'), setAskTab: () => this.setTab('ask'), setSettingsTab: () => this.setTab('settings'),
+      showToast: s.showToast, toastText: s.toastText, dismissToast: this.dismissToast,
+      showJumpToast: s.showJumpToast, jumpText: s.jumpText,
+    };
+  }
+}
+
+</script>
+</body>
+</html>

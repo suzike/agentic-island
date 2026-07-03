@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agentic-Island</title>
+    <style>
+      /* 主题令牌：--th 主色相 / --th2 渐变副色相 / --ths 面板底色相（JS 按所选主题覆写） */
+      :root {
+        --th: 150;
+        --th2: 165;
+        --ths: 155;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        /* 必须显式全屏：body 带 filter（纯白主题）时会成为 fixed 元素的包含块，
+           若高度为 0 + overflow hidden 会把整个岛裁剪掉（曾导致纯白主题下完全不可见） */
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+      }
+      @keyframes ai-dotpulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+      @keyframes ai-attention {
+        0%,
+        100% {
+          box-shadow: 0 0 30px oklch(0.8 0.13 75 / 0.35);
+        }
+        50% {
+          box-shadow: 0 0 58px oklch(0.8 0.13 75 / 0.7);
+        }
+      }
+      @keyframes ai-toast {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, -14px);
+        }
+        100% {
+          opacity: 1;
+          transform: translate(-50%, 0);
+        }
+      }
+      /* 字体清晰度：透明窗口禁用亚像素渲染 → 显式灰度平滑 + 优化排版；--font 由设置切换 */
+      html, body {
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+      body { font-family: var(--font, 'Segoe UI','PingFang SC','Microsoft YaHei UI','Microsoft YaHei',system-ui,sans-serif); }
+
+      /* 卡片入场：纯淡入（无位移/缩放——带 translate 的动画会让卡片飘出面板边界） */
+      @keyframes ai-fadein {
+        0% { opacity: 0; }
+        100% { opacity: 1; }
+      }
+      /* 渐变流动（常驻迷你条光带等） */
+      @keyframes ai-flow {
+        0% { background-position: 0% 50%; }
+        100% { background-position: 200% 50%; }
+      }
+      /* 迷你条：均衡器跳动 */
+      @keyframes ai-eq {
+        0% { transform: scaleY(0.2); }
+        100% { transform: scaleY(1); }
+      }
+      /* 迷你条：霓虹脉冲 */
+      @keyframes ai-neon {
+        0%, 100% { opacity: 0.45; filter: drop-shadow(0 0 2px currentColor); }
+        50% { opacity: 1; filter: drop-shadow(0 0 9px currentColor); }
+      }
+      /* 迷你条：小宠物散步 */
+      @keyframes ai-walk {
+        0% { left: 2%; }
+        100% { left: 88%; }
+      }
+      /* 迷你条：长文本跑马灯（双份文本无缝滚动） */
+      @keyframes ai-marquee {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(calc(-50% - 28px)); }
+      }
+      /* 迷你条：宠物小跳步 */
+      @keyframes ai-hop {
+        0% { transform: translateY(0); }
+        100% { transform: translateY(-2.5px); }
+      }
+      /* 迷你条：文字旁小宠物短距踱步 */
+      @keyframes ai-walkmini {
+        0% { left: 0; }
+        100% { left: 12px; }
+      }
+      /* 迷你条：文字入场（上浮 + 模糊淡入，比普通 fade 高级） */
+      @keyframes ai-riseblur {
+        0% { opacity: 0; transform: translateY(7px); filter: blur(5px); }
+        100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+      }
+      /* 迷你条：高光扫过（每次内容切换时一道流光） */
+      @keyframes ai-shimmer {
+        0% { transform: translateX(-130%) skewX(-18deg); }
+        100% { transform: translateX(260%) skewX(-18deg); }
+      }
+      /* 迷你条：背景光斑漂移（景深感） */
+      @keyframes ai-drift1 {
+        0% { transform: translate(-8px, -3px) scale(1); opacity: .5; }
+        100% { transform: translate(14px, 3px) scale(1.25); opacity: .8; }
+      }
+      @keyframes ai-drift2 {
+        0% { transform: translate(10px, 3px) scale(1.15); opacity: .6; }
+        100% { transform: translate(-12px, -3px) scale(0.95); opacity: .35; }
+      }
+      .ai-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: oklch(0.55 calc(0.09 * var(--cs, 1)) var(--th) / 0.55) transparent;
+      }
+      .ai-scroll::-webkit-scrollbar {
+        width: 7px;
+      }
+      .ai-scroll::-webkit-scrollbar-thumb {
+        background: oklch(0.55 calc(0.09 * var(--cs, 1)) var(--th) / 0.5);
+        border-radius: 999px;
+      }
+      /* 交互反馈：按钮/标签悬停提亮、按压微缩 */
+      .hv {
+        transition: filter 0.15s ease, transform 0.1s ease, background 0.15s ease;
+      }
+      .hv:hover {
+        filter: brightness(1.22);
+      }
+      .hv:active {
+        transform: scale(0.97);
+      }
+      /* 卡片悬停微亮 */
+      .ai-card {
+        transition: background 0.18s ease, border-color 0.18s ease;
+      }
+      .ai-card:hover {
+        background: rgba(255, 255, 255, 0.06) !important;
+      }
+      /* 悬停显隐的行内操作（待办行等）：平时隐藏，悬停浮现 */
+      .row-acts {
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+      .ai-card:hover .row-acts,
+      .msg:hover .row-acts,
+      .row-acts.always {
+        opacity: 1;
+      }
+      /* 完成勾选的弹跳微动效 */
+      @keyframes ai-pop {
+        0% { transform: scale(0.5); }
+        60% { transform: scale(1.2); }
+        100% { transform: scale(1); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

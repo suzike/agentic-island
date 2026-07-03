@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<helmet>
+<style>
+  doc-page:not(:defined){visibility:hidden}
+  @page{size:letter;margin:0}
+</style>
+</helmet>
+
+<x-import component-from-global-scope="doc-page" from="./doc-page.js" size="letter" margin="0.85in" hint-size="100%,100%">
+<div style="font-family:'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif;font-size:14.5px;line-height:1.72;color:#1c1d1f;-webkit-font-smoothing:antialiased">
+
+  <!-- cover block -->
+  <div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div style="width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#3ec98a,#1f8a5b);display:flex;align-items:center;justify-content:center;color:#08301f;font-size:15px;font-weight:800">◆</div>
+      <div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#5b6b62;font-weight:700">Product Requirements Document</div>
+    </div>
+  </div>
+
+  <h1 style="font-size:30px;line-height:1.2;font-weight:800;letter-spacing:-.01em;margin:14px 0 6px;color:#0f1512">Agentic-Island · Windows 端产品需求文档</h1>
+  <div style="font-size:15px;color:#4a544e;margin-bottom:4px">一个常驻于屏幕顶部的 AI 编码 Agent 状态监控、审批与协作面板</div>
+  <div style="display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:#6a746e;margin:10px 0 4px">
+    <span>版本 v1.0（设计稿）</span><span>状态：设计定稿 · 待研发评审</span><span>密级：内部</span><span>形态：桌面常驻工具</span>
+  </div>
+  <div style="height:1px;background:#e4e7e4;margin:16px 0 22px"></div>
+
+  <!-- TOC -->
+  <div style="background:#f6f8f6;border:1px solid #e4e9e5;border-radius:10px;padding:16px 20px;margin-bottom:26px">
+    <div style="font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#5b6b62;margin-bottom:10px">目录</div>
+    <div style="columns:2;column-gap:34px;font-size:13px;line-height:1.95;color:#2c332e">
+      <div>1 · 产品概述</div>
+      <div>2 · 背景与竞品移植挑战</div>
+      <div>3 · 目标用户与使用场景</div>
+      <div>4 · 目标与非目标</div>
+      <div>5 · 形态与交互模型</div>
+      <div>6 · 视觉设计系统</div>
+      <div>7 · 信息架构与导航</div>
+      <div>8 · 功能详述：Agents 一览</div>
+      <div>9 · 权限审批与命令风险分级</div>
+      <div>10 · 对话接力与富输入</div>
+      <div>11 · Plan 审阅</div>
+      <div>12 · 问答助手与模型设置</div>
+      <div>13 · 快捷键与快捷回复</div>
+      <div>14 · 通知、声音与久等提醒</div>
+      <div>15 · 专注模式与贴住</div>
+      <div>16 · 拖拽投喂</div>
+      <div>17 · 设置项完整清单</div>
+      <div>18 · 技术架构（Windows 实现）</div>
+      <div>19 · 状态机与交互时序</div>
+      <div>20 · 数据、隐私与安全</div>
+      <div>21 · 路线图与开源计划</div>
+    </div>
+  </div>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">1 · 产品概述</h2>
+  <p style="margin:0 0 12px"><b>Agentic-Island</b> 是一款面向 Windows 的桌面常驻工具，把「灵动岛」形态的信息岛移植到 Windows。它常驻于主屏顶部中央，用来集中监控和管理多个 AI 编码 Agent（Claude Code、Codex 的 CLI 与桌面端）的运行状态，并在 Agent 需要人类介入时——请求权限、提交计划、等待回答——直接在这个岛上完成审批、接力对话与知识问答，而无需切回终端或各自的桌面端。</p>
+  <p style="margin:0 0 12px">核心价值主张：<b>把「人类在多个 Agent 之间的上下文切换成本」压缩到接近于零</b>。工程师同时驱动多个 Agent 并行工作时，痛点不是启动 Agent，而是不断被打断、需要在多个终端窗口间来回跳转确认。Agentic-Island 以一个统一的、平时静默、需要时才出现的顶部岛来承载所有这些交互。</p>
+  <p style="margin:0 0 4px">它区别于系统托盘图标或通知气泡的地方在于三点：<b>（1）常驻但克制</b>——无事静默、有事才现身；<b>（2）可操作而不仅是通知</b>——审批、对话、问答都能就地完成；<b>（3）单一聚合入口</b>——所有 Agent 会话集中在一个面板里一览。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">2 · 背景与竞品移植挑战</h2>
+  <p style="margin:0 0 12px">灵感来源是 macOS 上的同类产品：它利用 Mac 的「刘海（notch）」区域承载一个可展开的信息岛，集中管理 AI Agent 的权限审批、终端跳转、计划审阅与声音提醒。该形态在 Mac 上天然成立，因为刘海是一块系统预留、视觉上「本就存在」的黑色区域。</p>
+  <p style="margin:0 0 12px"><b>移植到 Windows 的核心挑战：Windows 没有刘海。</b>因此不能照搬「贴合刘海」的形态，必须重新设计岛的落点、唤起方式与形态语言。本设计给出的解法是：</p>
+  <ul style="margin:0 0 12px;padding-left:22px">
+    <li style="margin-bottom:5px"><b>虚拟刘海</b>——在主屏顶部中央绘制一个悬浮的圆角胶囊/面板，模拟灵动岛的位置感，但视觉完全原创（毛玻璃material + 终端氛围的荧光绿强调色）。</li>
+    <li style="margin-bottom:5px"><b>顶部感应区唤起</b>——把鼠标移动到屏幕顶部中央的一条隐形感应带，即可唤出胶囊；这复刻了「抬头看一眼刘海」的直觉。</li>
+    <li style="margin-bottom:0"><b>三态生命周期</b>——静默（后台无痕）→ 唤出（胶囊）→ 展开（面板），配合「贴住」让常驻可控。</li>
+  </ul>
+  <p style="margin:0 0 4px;padding:12px 16px;background:#fbf7ee;border:1px solid #ece0c6;border-radius:9px;font-size:13.5px;color:#5c4a25"><b>知识产权说明：</b>本产品仅复用「AI Agent 状态监控 + 就地审批」这一产品概念与交互范式，全部图形语言、图标、动效、配色与品牌均为原创，不照搬任何竞品的具体视觉设计。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">3 · 目标用户与使用场景</h2>
+  <p style="margin:0 0 10px"><b>目标用户：</b>初期为作者本人及团队内部工程师；使用效果良好后可对外开源。用户画像是「同时驱动 2–5 个 AI 编码 Agent 并行工作」的开发者。</p>
+  <p style="margin:0 0 6px"><b>典型场景：</b></p>
+  <ul style="margin:0 0 4px;padding-left:22px">
+    <li style="margin-bottom:5px"><b>并行监控</b>——三个 Agent 分别在改后端、写文档、加移动端功能，用户扫一眼胶囊即知「几个在跑、几个待处理」。</li>
+    <li style="margin-bottom:5px"><b>就地审批</b>——Codex 请求执行 <code style="font-family:ui-monospace,Consolas,monospace;background:#eef1ee;padding:1px 5px;border-radius:4px;font-size:12.5px">rm -rf dist/</code>，岛上直接弹出并标红，用户二次确认或拒绝。</li>
+    <li style="margin-bottom:5px"><b>不切窗接力</b>——用户认为 Agent 的方案不妥，直接在岛上打字接力对话，让它换方案，无需回到终端。</li>
+    <li style="margin-bottom:0"><b>随手问答</b>——工作中卡壳，直接在岛的「问答」里提问，得到结构化排版的答案。</li>
+  </ul>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">4 · 目标与非目标</h2>
+  <div style="display:flex;gap:16px;margin:8px 0 4px">
+    <div style="flex:1;background:#f2f8f4;border:1px solid #d8e8de;border-radius:10px;padding:14px 16px">
+      <div style="font-weight:700;color:#1f7a52;margin-bottom:8px;font-size:13.5px">✓ 目标（In Scope）</div>
+      <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.65">
+        <li>多 Agent 状态一览（运行中 / 待权限 / 完成）</li>
+        <li>权限审批 Allow / Deny + 命令风险分级</li>
+        <li>就地对话接力（Agent 与 Plan）</li>
+        <li>知识问答助手（接入自定义大模型）</li>
+        <li>富输入：文字 / 图片 / 文件</li>
+        <li>终端跳转、快捷键、完成小结</li>
+        <li>专注模式、贴住、多显示器、开机自启</li>
+      </ul>
+    </div>
+    <div style="flex:1;background:#f7f7f8;border:1px solid #e2e4e6;border-radius:10px;padding:14px 16px">
+      <div style="font-weight:700;color:#7a7f86;margin-bottom:8px;font-size:13.5px">✕ 非目标（Out of Scope）</div>
+      <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.65">
+        <li>替代终端 / IDE 本身</li>
+        <li>管理 Agent 的模型配置（由各 CLI 自行配置）</li>
+        <li>语音输入（本期已移除，仅保留文字/图片/文件）</li>
+        <li>云端同步会话历史</li>
+        <li>移动端 / Web 端</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">5 · 形态与交互模型</h2>
+  <p style="margin:0 0 10px">Agentic-Island 的生命周期是一个<b>三态模型</b>，三态之间平滑过渡：</p>
+  <div style="border:1px solid #e4e9e5;border-radius:10px;overflow:hidden;margin:10px 0 14px">
+    <div style="display:grid;grid-template-columns:120px 1fr;font-size:13px">
+      <div style="padding:11px 14px;background:#f2f5f2;font-weight:700;border-bottom:1px solid #e8ece8">① 静默态</div>
+      <div style="padding:11px 14px;border-bottom:1px solid #e8ece8;border-left:1px solid #e8ece8">默认状态，后台运行无任何可见 UI（可选：无待办时完全隐藏胶囊）。顶部中央保留一条隐形<b>感应带</b>作为唤起热区。</div>
+      <div style="padding:11px 14px;background:#f2f5f2;font-weight:700;border-bottom:1px solid #e8ece8">② 唤出态</div>
+      <div style="padding:11px 14px;border-bottom:1px solid #e8ece8;border-left:1px solid #e8ece8">鼠标移入感应带，或有新事件时，胶囊从顶部滑出，显示「N 个 Agent · M 运行中 / 待处理」的摘要。</div>
+      <div style="padding:11px 14px;background:#f2f5f2;font-weight:700">③ 展开态</div>
+      <div style="padding:11px 14px;border-left:1px solid #e8ece8">点击胶囊，向下展开完整面板（Agents / Plan / 问答 / Settings 四个分区）。</div>
+    </div>
+  </div>
+  <p style="margin:0 0 10px"><b>唤起与收起规则（重点交互）：</b></p>
+  <ul style="margin:0 0 12px;padding-left:22px">
+    <li style="margin-bottom:5px"><b>悬停唤出</b>：鼠标进入顶部感应带 → 胶囊滑出。</li>
+    <li style="margin-bottom:5px"><b>点击展开、常驻不闪退</b>：一旦点击展开面板，面板将<b>保持打开</b>，不因鼠标移开而收起——这是为了让用户能安心在里面打字、审批。只有点击面板外的空白处，或再次点击胶囊，或按 <code style="font-family:ui-monospace,Consolas,monospace;background:#eef1ee;padding:1px 5px;border-radius:4px;font-size:12.5px">Esc</code>，才收起。</li>
+    <li style="margin-bottom:5px"><b>事件自动弹出</b>：当有 Agent 请求权限时，面板自动弹出并高亮（除非处于专注模式）。</li>
+    <li style="margin-bottom:0"><b>贴住（📌）</b>：点亮面板头部的图钉后，胶囊常驻显示，不再随鼠标移开而收起，适合盯着一批任务时使用。</li>
+  </ul>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">6 · 视觉设计系统</h2>
+  <p style="margin:0 0 10px">整体基调：<b>深色玻璃拟态 + 终端氛围的荧光绿强调色</b>，呼应「编码 Agent」的属性，同时保持精致克制。</p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 14px">
+    <thead><tr style="background:#f2f5f2">
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700">要素</th>
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700">规格</th>
+    </tr></thead>
+    <tbody>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">主强调色</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">荧光绿 <code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">oklch(0.78 0.16 150)</code>，用于运行中状态、主按钮、选中态、开关。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">待处理色</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">琥珀 <code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">oklch(0.80 0.13 75)</code>，用于「待权限」提醒（同色相衍生）。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">危险色</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">红 <code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">oklch(0.65 0.20 25)</code>，用于危险命令、久等升级。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">面板材质</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">深色半透明 <code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">oklch(0.20 0.02 155 / .72)</code> + <code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">backdrop-filter: blur(26px) saturate(160%)</code>。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">圆角</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">面板 22px、卡片 16px、胶囊全圆角（999px）、按钮胶囊形。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">字体</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">正文 Segoe UI / PingFang SC；代码、命令、model id 用等宽 Cascadia Code / Consolas。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">面板宽度</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">468px（经用户反馈由 392px 加宽）。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">工具图标</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">CLI 用等宽符号 <code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">›_</code>；桌面端用小窗口图标（带标题栏），二者一眼可辨。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">滚动条</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">半透明主色细条（7px），并从圆角内收，避免滚到底戳出边框。</td></tr>
+      <tr><td style="padding:8px 12px;font-weight:600">动效</td><td style="padding:8px 12px">状态点 2s 呼吸；待处理时面板琥珀高亮呼吸；久等升级为红色、加快至 0.9s；面板展开为即时（避免与逐秒计时器打架，见 §18）。</td></tr>
+    </tbody>
+  </table>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">7 · 信息架构与导航</h2>
+  <p style="margin:0 0 8px">展开面板由头部 + 四个分区标签构成：</p>
+  <ul style="margin:0 0 12px;padding-left:22px">
+    <li style="margin-bottom:4px"><b>头部</b>：品牌标识、时钟、🌙 专注模式按钮（带倒计时）、📌 贴住按钮。</li>
+    <li style="margin-bottom:4px"><b>Agents</b>：所有会话卡片列表（有待处理时标签带琥珀点）。</li>
+    <li style="margin-bottom:4px"><b>Plan</b>：当前计划的 Markdown 渲染 + 审阅 + 接力对话。</li>
+    <li style="margin-bottom:4px"><b>问答</b>：知识问答助手，顶部显示当前模型。</li>
+    <li style="margin-bottom:0"><b>Settings</b>：通用、问答助手模型、已支持工具三组。</li>
+  </ul>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">8 · 功能详述：Agents 一览</h2>
+  <p style="margin:0 0 10px">每个 Agent 一张卡片，包含：状态点（颜色区分运行中/待处理/完成）、工具类型图标（CLI/桌面端）、工具名、项目路径（等宽字体）、状态标签、一句当前动作描述。卡片底部按状态提供操作：</p>
+  <ul style="margin:0 0 4px;padding-left:22px">
+    <li style="margin-bottom:5px"><b>运行中</b>：「↗ 跳转到终端」——点击将系统焦点切到对应的终端窗口（支持分屏、tmux 等，见 §18）。</li>
+    <li style="margin-bottom:5px"><b>待处理</b>：权限审批区（见 §9）。</li>
+    <li style="margin-bottom:5px"><b>完成</b>：变更小结 + 跳转 + 查看变更（见下）。</li>
+    <li style="margin-bottom:0"><b>所有状态</b>：「💬 继续对话」入口，展开就地接力（见 §10）。</li>
+  </ul>
+  <p style="margin:6px 0 4px"><b>完成小结：</b>Agent 完成任务时，卡片展示一行变更速览——<b>修改文件数、新增行数（+）、删除行数（−）</b>——以及一条建议的提交信息，配「复制」按钮，一键拿去 commit。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">9 · 权限审批与命令风险分级</h2>
+  <p style="margin:0 0 10px">审批是本产品最核心的交互。Agent 请求执行命令时，卡片展开审批区，显示命令原文（等宽、可换行）、Allow / Deny 按钮，并按命令内容做<b>风险分级</b>：</p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 12px">
+    <thead><tr style="background:#f2f5f2">
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700;width:80px">等级</th>
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700">判定规则（正则匹配命令）</th>
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700">处理</th>
+    </tr></thead>
+    <tbody>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;color:#b8341f;font-weight:700">⚠ 危险</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-family:ui-monospace,Consolas,monospace;font-size:11.5px">rm -rf、git push --force、sudo、dd if=、mkfs、chmod 777、&gt; /dev/、del /f、format、DROP/TRUNCATE TABLE、shutdown/reboot 等</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">命令标红；Allow 键需<b>两步确认</b>（先点武装、再点「确认执行」才放行）。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;color:#1f7a52;font-weight:700">✓ 安全</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-family:ui-monospace,Consolas,monospace;font-size:11.5px">ls、cat、pwd、echo、npm/yarn/pnpm test、pytest、jest、git status/diff/log、grep、rg、find 等</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">可勾选「本会话自动允许只读 / 测试类命令」，后续同类请求自动放行并提示。</td></tr>
+      <tr><td style="padding:8px 12px;color:#6a746e;font-weight:700">· 一般</td><td style="padding:8px 12px;font-family:ui-monospace,Consolas,monospace;font-size:11.5px">其余命令</td><td style="padding:8px 12px">常规 Allow / Deny。</td></tr>
+    </tbody>
+  </table>
+  <p style="margin:0 0 4px">审批区还展示<b>等待计时</b>（见 §14）与快捷键提示（Y 允许 / N 拒绝）。拒绝后自动展开接力对话，便于说明理由。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">10 · 对话接力与富输入</h2>
+  <p style="margin:0 0 10px"><b>接力对话</b>让用户无需切回终端即可与 Agent 继续交互。每张 Agent 卡片、以及 Plan 分区，都内嵌一个统一的对话组件：消息按用户/Agent 分气泡展示，Agent 回复以<b>结构化排版</b>呈现（小标题、要点列表、代码块、提示），便于工程师快速阅读。</p>
+  <p style="margin:0 0 8px"><b>富输入（三种）：</b></p>
+  <ul style="margin:0 0 10px;padding-left:22px">
+    <li style="margin-bottom:4px"><b>文字</b>——回车发送；</li>
+    <li style="margin-bottom:4px"><b>图片</b>（🖼）——选择图片，生成缩略图附件；</li>
+    <li style="margin-bottom:0"><b>文件</b>（📎）——选择任意文件作为附件，图片类自动出缩略图。</li>
+  </ul>
+  <p style="margin:0 0 4px;font-size:13.5px;color:#5c4a25;background:#fbf7ee;border:1px solid #ece0c6;border-radius:9px;padding:11px 15px"><b>设计沿革：</b>早期版本含语音输入，但其形态被调整为「说完自动转文字填入输入框」；后因交互存在闪烁问题、且非核心诉求，本期已移除语音与主动截图，仅保留文字 / 图片 / 文件三种输入。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">11 · Plan 审阅</h2>
+  <p style="margin:0 0 4px">Plan 分区渲染 Agent 提交的实施计划：标题、Markdown 描述、分步清单（已完成 ✓ / 进行中 ◐ / 待办 ○ 三态图标），底部提供「批准计划 / 批准并执行」，以及内嵌的接力对话——用户可直接提修改意见（配快捷回复气泡：批准 / 再细化第 2 步 / 拆得更小些），Agent 给出修订后的结构化方案。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">12 · 问答助手与模型设置</h2>
+  <p style="margin:0 0 10px">除监控主目标外，岛还提供一个<b>知识问答助手</b>：工作中遇到问题随手提问，回答以结构化排版给出，支持文字/图片/文件输入。空态提供引导与一键建议问题；分区顶部实时显示<b>当前模型</b>，点击直达设置。</p>
+  <p style="margin:0 0 8px"><b>模型设置（仅供问答助手，折叠展开式）：</b>Agent（Claude Code / Codex）的模型在各自 CLI 里已配置，此处不涉及。设置项包含：</p>
+  <ul style="margin:0 0 10px;padding-left:22px">
+    <li style="margin-bottom:4px"><b>供应商</b>——DeepSeek / Kimi / 通义千问 / GPT(OpenAI) / Claude / 自定义；切换只带出对应 Base URL。</li>
+    <li style="margin-bottom:4px"><b>型号</b>——用户自行填写 model id（不做推荐）。</li>
+    <li style="margin-bottom:4px"><b>Base URL、API Key</b>——兼容 OpenAI Chat Completions 协议的服务均可接入。</li>
+    <li style="margin-bottom:4px"><b>测试连通性</b>——校验字段并给出成功/失败反馈（带加载动画）。</li>
+    <li style="margin-bottom:0"><b>多套配置</b>——「保存当前」存为一套，列表内一键切换/删除，当前使用中高亮标注。</li>
+  </ul>
+  <p style="margin:0 0 4px;font-size:13.5px;color:#4a544e">密钥仅保存在本机。设计原型中问答走内置模型演示；正式 Windows 客户端将直连用户配置的 Base URL / Key。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">13 · 快捷键与快捷回复</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 12px">
+    <thead><tr style="background:#f2f5f2">
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700;width:120px">按键</th>
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700">行为</th>
+    </tr></thead>
+    <tbody>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-family:ui-monospace,Consolas,monospace">Y</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">允许第一个待处理请求</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-family:ui-monospace,Consolas,monospace">N</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">拒绝第一个待处理请求（并展开接力对话）</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-family:ui-monospace,Consolas,monospace">Esc</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">收起面板（未贴住时）</td></tr>
+      <tr><td style="padding:8px 12px;font-family:ui-monospace,Consolas,monospace">Ctrl + \ / `</td><td style="padding:8px 12px">唤出 / 收起面板（全局热键）</td></tr>
+    </tbody>
+  </table>
+  <p style="margin:0 0 4px">输入框上方提供<b>快捷回复气泡</b>，一键发送常用回复（接力：继续 / 换个方案 / 先跑测试再说；Plan：批准 / 再细化 / 拆更小些）。焦点在输入框时，Y/N 等快捷键自动让位于打字。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">14 · 通知、声音与久等提醒</h2>
+  <ul style="margin:0 0 10px;padding-left:22px">
+    <li style="margin-bottom:5px"><b>完成通知</b>——即使在静默态，Agent 完成任务也会从顶部滑出一个通知气泡（可关闭、自动消失）。</li>
+    <li style="margin-bottom:5px"><b>终端跳转反馈</b>——点击跳转后底部出现「已聚焦到 XXX 的终端窗口」浮条。</li>
+    <li style="margin-bottom:5px"><b>声音提醒</b>——需要处理时播放提示音；音效在「声音提醒」开关下方内联展开选择（清脆铃声 / 8-bit / 单声 Ping / 木琴 / 警示音），每项可试听，选完自动收起。音效用 WebAudio 实时合成，无需音频文件。</li>
+    <li style="margin-bottom:0"><b>久等提醒</b>——权限请求挂起超过阈值（演示为 20s）后，胶囊对应状态点从琥珀<b>升级为红色</b>并加快呼吸，审批区显示「⏱ 已等待 M:SS」，避免遗忘。</li>
+  </ul>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">15 · 专注模式与贴住</h2>
+  <p style="margin:0 0 8px"><b>专注模式（🌙）</b>——一键开启 25 分钟静默倒计时。期间新的权限请求<b>不弹窗、不高亮、不发声</b>，只在胶囊上安静堆叠计数；倒计时结束时一次性弹出汇总（「专注结束 · 期间累积 N 个待处理请求」）。适合番茄钟式深度工作。</p>
+  <p style="margin:0 0 4px"><b>贴住（📌）</b>——见 §5，让胶囊常驻不收起。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">16 · 拖拽投喂</h2>
+  <p style="margin:0 0 4px">把桌面上的图片或文件直接<b>拖到面板上</b>，面板出现「📥 松手投喂到问答助手」的高亮虚线覆盖层；松手后文件作为附件进入「问答」输入框并自动切到该分区。降低「带着一个文件去提问」的操作成本。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">17 · 设置项完整清单</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 12px">
+    <thead><tr style="background:#f2f5f2">
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700;width:150px">分组 / 项</th>
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700">说明</th>
+    </tr></thead>
+    <tbody>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">开机自启</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">登录 Windows 时自动在后台运行。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">多显示器跟随</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">面板显示在指定显示器顶部中央；可展开预览两块屏并选择主/副屏。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">声音提醒 + 音效</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">开关 + 内联展开的 5 种音效单选（可试听）。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">空闲时完全静默</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">无待办时隐藏胶囊。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">问答助手模型</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">供应商 / 型号 / Base URL / API Key / 测试连通性 / 多套配置（见 §12）。</td></tr>
+      <tr><td style="padding:8px 12px;font-weight:600">已支持的工具</td><td style="padding:8px 12px">Claude Code CLI、Claude Code 桌面端、Codex CLI、Codex 桌面端，逐个可启用/停用。</td></tr>
+    </tbody>
+  </table>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">18 · 技术架构（Windows 实现建议）</h2>
+  <p style="margin:0 0 8px">本设计以高保真交互原型交付。落地为 Windows 原生客户端时的建议架构：</p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 12px">
+    <thead><tr style="background:#f2f5f2">
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700;width:150px">模块</th>
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700">实现要点</th>
+    </tr></thead>
+    <tbody>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">窗口与渲染</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">WinUI 3 / WPF 无边框置顶层窗口，DWM 亚克力/Mica 实现毛玻璃；始终置顶、点击穿透空白区、跨虚拟桌面可见。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">顶部感应区</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">全局低级鼠标钩子（<code style="font-family:ui-monospace,Consolas,monospace;font-size:11.5px">SetWindowsHookEx / WH_MOUSE_LL</code>）监听光标进入顶部中央热区；多显示器按光标所在屏定位。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">全局热键</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee"><code style="font-family:ui-monospace,Consolas,monospace;font-size:11.5px">RegisterHotKey</code> 注册唤出热键；面板内 Y/N/Esc 走窗口消息。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">Agent 接入</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">通过各 CLI 的 hook / 事件流（stdout 解析或官方钩子）捕获权限请求、计划、完成事件；桌面端走其本地 API / IPC。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">终端跳转</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">记录会话与终端窗口/进程的映射（Windows Terminal、ConEmu、WSL、tmux 等），跳转时 <code style="font-family:ui-monospace,Consolas,monospace;font-size:11.5px">SetForegroundWindow</code> 并定位到对应 pane。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">问答模型代理</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">本地转发到用户配置的 OpenAI 兼容端点；密钥用 Windows Credential Manager / DPAPI 加密存储。</td></tr>
+      <tr><td style="padding:8px 12px;font-weight:600">声音</td><td style="padding:8px 12px">WebAudio 或原生音频合成 5 种提示音；无需打包音频资源。</td></tr>
+    </tbody>
+  </table>
+  <p style="margin:0 0 4px;font-size:13.5px;color:#5c4a25;background:#fbf7ee;border:1px solid #ece0c6;border-radius:9px;padding:11px 15px"><b>原型实现要点（值得研发注意的一个坑）：</b>面板展开的 <code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">max-height</code> 过渡动画会被「每秒刷新一次的等待计时器」重渲染打断而卡住。解决方案是<b>让面板展开为即时（不对 max-height 做过渡）</b>，并把逐秒计时器限制为仅在有待处理请求或专注模式时才触发重渲染。原生实现中同理：驱动动画的时钟应与状态计时解耦。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">19 · 状态机与交互时序</h2>
+  <p style="margin:0 0 8px">岛的可见性由三个输入决定：<b>悬停/焦点</b>、<b>是否有待处理</b>、<b>是否贴住</b>；并受专注模式抑制：</p>
+  <ul style="margin:0 0 10px;padding-left:22px">
+    <li style="margin-bottom:4px"><code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">显示 = 悬停 || (有待处理 &amp;&amp; 非专注) || 贴住</code></li>
+    <li style="margin-bottom:4px"><code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">展开 = 已点击展开 || (有待处理 &amp;&amp; 非专注 &amp;&amp; 已显示)</code></li>
+    <li style="margin-bottom:0"><b>收起</b>：点击外部 / 再点胶囊 / Esc；但「有待处理」「贴住」「焦点在输入框」时不自动收起。</li>
+  </ul>
+  <p style="margin:0 0 4px">危险命令审批为两步状态：<code style="font-family:ui-monospace,Consolas,monospace;font-size:12px">待确认 → 已武装 → 放行</code>；决策后清除该请求的等待计时与武装态。</p>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">20 · 数据、隐私与安全</h2>
+  <ul style="margin:0 0 10px;padding-left:22px">
+    <li style="margin-bottom:5px"><b>本地优先</b>——模型密钥、配置、会话历史均仅存于本机，不上云。</li>
+    <li style="margin-bottom:5px"><b>密钥加密</b>——API Key 以 DPAPI / Credential Manager 加密存储，UI 中以密码形式呈现。</li>
+    <li style="margin-bottom:5px"><b>危险操作护栏</b>——破坏性命令强制二次确认，降低误触发风险。</li>
+    <li style="margin-bottom:0"><b>最小权限</b>——仅请求实现监控/跳转所需的系统权限（窗口枚举、前台切换、全局钩子）。</li>
+  </ul>
+
+  <h2 style="font-size:20px;font-weight:800;margin:30px 0 8px;padding-top:6px;color:#0f1512;border-top:2px solid #eef1ee">21 · 路线图与开源计划</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 12px">
+    <thead><tr style="background:#f2f5f2">
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700;width:110px">阶段</th>
+      <th style="text-align:left;padding:9px 12px;border-bottom:2px solid #dbe2dc;font-weight:700">内容</th>
+    </tr></thead>
+    <tbody>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">M0 · 设计</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">高保真交互原型（本文对应）——形态、视觉、全部核心交互定稿。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">M1 · 内测</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">Windows 原生外壳 + Claude Code / Codex 四端接入；审批、跳转、问答跑通；作者与团队内部使用。</td></tr>
+      <tr><td style="padding:8px 12px;border-bottom:1px solid #eef1ee;font-weight:600">M2 · 打磨</td><td style="padding:8px 12px;border-bottom:1px solid #eef1ee">风险分级规则可配置、更多终端集成、性能与内存优化（对标原生低占用）。</td></tr>
+      <tr><td style="padding:8px 12px;font-weight:600">M3 · 开源</td><td style="padding:8px 12px">效果良好后开源，沉淀插件式的 Agent 接入协议，吸纳社区扩展更多工具。</td></tr>
+    </tbody>
+  </table>
+
+  <div style="height:1px;background:#e4e7e4;margin:24px 0 14px"></div>
+  <div style="font-size:12px;color:#8a938c;text-align:center">Agentic-Island · Windows 端产品需求文档 · v1.0（设计稿）· 内部文档</div>
+
+</div>
+</x-import>
+
+</x-dc>
+</body>
+</html>

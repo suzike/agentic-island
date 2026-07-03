@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  body{margin:0;background:#f0eee9;font-family:'Segoe UI',system-ui,-apple-system,sans-serif}
+  .dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}
+  .dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 14px}
+  .dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}
+  .dv-tname{font:600 13px/1.2 system-ui,sans-serif;color:#1a1a1a}
+  .dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+  .dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}
+  .dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}
+  .dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55)}
+  .dv-opt:target .dv-oid{background:#2a78d6;color:#fff}
+  .dv-next{margin:22px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}
+  @keyframes dotpulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes blinkcursor{0%,50%{opacity:1}51%,100%{opacity:0}}
+</style>
+</helmet>
+
+<div style="padding:36px 44px 8px">
+  <div style="font:700 22px 'Segoe UI',system-ui,sans-serif;color:#151513;letter-spacing:-.01em">Agentic-Island</div>
+  <div style="font:400 13px/1.5 'Segoe UI',system-ui,sans-serif;color:rgba(0,0,0,.55);max-width:680px;margin-top:4px">Windows 端 AI Agent 状态面板 — 原创视觉设计，功能理念对标「后台静默 → 需要处理时弹出 → hover 顶部唤出」。下面 3 个方向共享同一套交互模型与内容，仅在视觉语言上分叉。</div>
+</div>
+
+<section class="dv-turn" id="t1">
+  <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">三个视觉方向</span></div>
+  <p style="font:12.5px/1.6 'Segoe UI',system-ui,sans-serif;color:rgba(0,0,0,.6);max-width:760px;margin:0 0 22px">设计说明：黑底 + 荧光绿强调色的终端氛围呼应原产品调性，但图形语言完全原创；同一色相(oklch)衍生出待处理用的琥珀色。正文用 Windows 系统字 Segoe UI，代码/状态信息用等宽字体。交互：<b>把鼠标移到卡片顶部中间区域</b>唤出胶囊，<b>点击胶囊</b>展开 Agents / Plan / Settings 三个分区，移出即自动收起。</p>
+  <div class="dv-opts">
+
+    <div class="dv-opt" id="1a">
+      <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Notch Pill — 圆润灵动胶囊</div>
+      <div style="position:relative;width:620px;height:420px;border-radius:14px;overflow:hidden;background:linear-gradient(160deg, oklch(0.24 0.01 250), oklch(0.13 0.01 250));box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:'Segoe UI',system-ui,-apple-system,sans-serif">
+        <div style="position:absolute;left:0;right:0;bottom:0;height:44px;background:rgba(10,10,14,.65);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:space-between;padding:0 14px">
+          <div style="display:flex;gap:8px;align-items:center">
+            <div style="width:120px;height:22px;border-radius:11px;background:rgba(255,255,255,.08)"></div>
+            <div style="width:22px;height:22px;border-radius:6px;background:rgba(255,255,255,.1)"></div>
+            <div style="width:22px;height:22px;border-radius:6px;background:rgba(255,255,255,.1)"></div>
+            <div style="width:22px;height:22px;border-radius:6px;background:rgba(255,255,255,.1)"></div>
+          </div>
+          <div style="color:rgba(255,255,255,.5);font-size:12px">14:32</div>
+        </div>
+
+        <div style="position:absolute;top:0;left:50%;transform:translateX(-50%);width:340px;display:flex;flex-direction:column;align-items:center;z-index:5" onMouseEnter="{{ v.a.enter }}" onMouseLeave="{{ v.a.leave }}">
+          <div style="display:flex;align-items:center;gap:8px;padding:9px 18px;border-radius:999px;background:oklch(0.15 0.015 150);box-shadow:0 10px 30px rgba(0,0,0,.5);cursor:pointer;{{ v.a.pillDynStyle }}" onClick="{{ v.a.toggleExpand }}">
+            <div style="width:7px;height:7px;border-radius:999px;background:oklch(0.78 0.19 150);animation:dotpulse 2s ease-in-out infinite"></div>
+            <span style="color:oklch(0.92 0.02 150);font-size:13px;font-weight:600">{{ v.a.countText }}</span>
+          </div>
+
+          <div style="width:320px;border-radius:20px;background:oklch(0.17 0.015 150);border:1px solid oklch(0.32 0.02 150 / 0.5);padding:14px;box-shadow:0 20px 50px rgba(0,0,0,.5);box-sizing:border-box;{{ v.a.panelDynStyle }}">
+            <div style="display:flex;gap:6px;margin-bottom:12px">
+              <div style="{{ v.a.tabAgentsStyle }}" onClick="{{ v.a.setAgentsTab }}">Agents</div>
+              <div style="{{ v.a.tabPlanStyle }}" onClick="{{ v.a.setPlanTab }}">Plan</div>
+              <div style="{{ v.a.tabSettingsStyle }}" onClick="{{ v.a.setSettingsTab }}">Settings</div>
+            </div>
+
+            <sc-if value="{{ v.a.showAgents }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <sc-for list="{{ v.a.agentRows }}" as="row" hint-placeholder-count="4">
+                  <div style="display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:12px;background:rgba(255,255,255,.03)">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div style="width:7px;height:7px;border-radius:999px;background:{{ row.dotColor }}"></div>
+                      <span style="color:oklch(0.92 0.02 150);font-size:12.5px;font-weight:600">{{ row.tool }}</span>
+                      <span style="color:oklch(0.55 0.02 150);font-size:11.5px">{{ row.proj }}</span>
+                      <span style="margin-left:auto;color:oklch(0.6 0.02 150);font-size:10.5px">{{ row.label }}</span>
+                    </div>
+                    <div style="color:oklch(0.65 0.02 150);font-size:11.5px;font-family:ui-monospace,'Cascadia Code',Consolas,monospace">{{ row.detail }}</div>
+                    <sc-if value="{{ row.showApproval }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;gap:8px;margin-top:2px">
+                        <div style="padding:5px 14px;border-radius:8px;background:oklch(0.78 0.19 150);color:oklch(0.12 0.02 150);font-size:12px;font-weight:700;cursor:pointer" onClick="{{ row.allow }}">Allow</div>
+                        <div style="padding:5px 14px;border-radius:8px;background:transparent;border:1px solid oklch(0.4 0.02 150);color:oklch(0.7 0.02 150);font-size:12px;font-weight:600;cursor:pointer" onClick="{{ row.deny }}">Deny</div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ row.decidedAllow }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.78 0.19 150)">✓ 已允许</div></sc-if>
+                    <sc-if value="{{ row.decidedDeny }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.65 0.1 30)">✕ 已拒绝</div></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ v.a.showPlan }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="color:oklch(0.92 0.02 150);font-size:12.5px;font-weight:700;margin-bottom:2px">重构支付模块</div>
+                <sc-for list="{{ planItems }}" as="it" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <sc-if value="{{ it.isDone }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.78 0.19 150);font-size:13px">✓</div></sc-if>
+                    <sc-if value="{{ it.isDoing }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.78 0.15 75);font-size:13px">…</div></sc-if>
+                    <sc-if value="{{ it.isTodo }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.4 0.02 150);font-size:13px">○</div></sc-if>
+                    <div style="color:oklch(0.75 0.02 150);font-size:12px">{{ it.label }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ v.a.showSettings }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:9px">
+                <sc-for list="{{ v.a.settingsRows }}" as="row" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;justify-content:space-between">
+                    <span style="color:oklch(0.8 0.02 150);font-size:12px">{{ row.label }}</span>
+                    <sc-if value="{{ row.on }}" hint-placeholder-val="{{ false }}">
+                      <div style="width:34px;height:19px;border-radius:999px;background:oklch(0.78 0.19 150);position:relative;cursor:pointer" onClick="{{ row.toggle }}"><div style="position:absolute;right:2px;top:2px;width:15px;height:15px;border-radius:999px;background:white"></div></div>
+                    </sc-if>
+                    <sc-if value="{{ row.off }}" hint-placeholder-val="{{ true }}">
+                      <div style="width:34px;height:19px;border-radius:999px;background:rgba(255,255,255,.15);position:relative;cursor:pointer" onClick="{{ row.toggle }}"><div style="position:absolute;left:2px;top:2px;width:15px;height:15px;border-radius:999px;background:rgba(255,255,255,.7)"></div></div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dv-opt" id="1b">
+      <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Terminal HUD — 硬核终端</div>
+      <div style="position:relative;width:620px;height:420px;border-radius:10px;overflow:hidden;background:#050505;font-family:ui-monospace,'Cascadia Code',Consolas,monospace">
+        <div style="position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(to bottom, rgba(255,255,255,.02) 0px, rgba(255,255,255,.02) 1px, transparent 1px, transparent 3px)"></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:40px;background:#000;border-top:1px solid oklch(0.4 0.1 150 / .4);display:flex;align-items:center;justify-content:space-between;padding:0 14px">
+          <div style="display:flex;gap:8px;align-items:center">
+            <div style="width:110px;height:18px;border-radius:2px;background:rgba(255,255,255,.06)"></div>
+            <div style="width:18px;height:18px;border-radius:2px;background:rgba(255,255,255,.08)"></div>
+            <div style="width:18px;height:18px;border-radius:2px;background:rgba(255,255,255,.08)"></div>
+          </div>
+          <div style="color:oklch(0.55 0.14 150);font-size:11px">14:32:07</div>
+        </div>
+
+        <div style="position:absolute;top:0;left:50%;transform:translateX(-50%);width:320px;display:flex;flex-direction:column;align-items:center;z-index:5" onMouseEnter="{{ v.b.enter }}" onMouseLeave="{{ v.b.leave }}">
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 16px;border-radius:4px;background:#000;border:1px solid oklch(0.85 0.19 150 / .6);cursor:pointer;{{ v.b.pillDynStyle }}" onClick="{{ v.b.toggleExpand }}">
+            <span style="color:oklch(0.85 0.19 150);font-size:12.5px;font-weight:600">{{ v.b.countText }}</span>
+            <span style="color:oklch(0.85 0.19 150);font-size:13px;animation:blinkcursor 1s step-end infinite">▌</span>
+          </div>
+
+          <div style="width:320px;border-radius:6px;background:#000;border:1px solid oklch(0.85 0.19 150 / .5);padding:12px;box-sizing:border-box;{{ v.b.panelDynStyle }}">
+            <div style="display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid oklch(0.4 0.1 150 / .3);padding-bottom:8px">
+              <div style="{{ v.b.tabAgentsStyle }}" onClick="{{ v.b.setAgentsTab }}">[agents]</div>
+              <div style="{{ v.b.tabPlanStyle }}" onClick="{{ v.b.setPlanTab }}">[plan]</div>
+              <div style="{{ v.b.tabSettingsStyle }}" onClick="{{ v.b.setSettingsTab }}">[settings]</div>
+            </div>
+
+            <sc-if value="{{ v.b.showAgents }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:9px">
+                <sc-for list="{{ v.b.agentRows }}" as="row" hint-placeholder-count="4">
+                  <div style="display:flex;flex-direction:column;gap:4px;padding:8px;border:1px solid oklch(0.35 0.08 150 / .35);border-radius:3px">
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <span style="color:{{ row.dotColor }};font-size:11px">●</span>
+                      <span style="color:oklch(0.85 0.19 150);font-size:11.5px;font-weight:700">{{ row.tool }}</span>
+                      <span style="color:oklch(0.5 0.1 150);font-size:11px">{{ row.proj }}</span>
+                      <span style="margin-left:auto;color:oklch(0.55 0.14 150);font-size:10px">{{ row.label }}</span>
+                    </div>
+                    <div style="color:oklch(0.55 0.14 150);font-size:11px">{{ row.detail }}</div>
+                    <sc-if value="{{ row.showApproval }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;gap:10px;margin-top:2px">
+                        <div style="color:oklch(0.85 0.19 150);font-size:11.5px;cursor:pointer;font-weight:700" onClick="{{ row.allow }}">[Y] allow</div>
+                        <div style="color:oklch(0.6 0.1 30);font-size:11.5px;cursor:pointer;font-weight:700" onClick="{{ row.deny }}">[N] deny</div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ row.decidedAllow }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.85 0.19 150)">&gt; allowed_</div></sc-if>
+                    <sc-if value="{{ row.decidedDeny }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.6 0.1 30)">&gt; denied_</div></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ v.b.showPlan }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:7px">
+                <div style="color:oklch(0.85 0.19 150);font-size:12px;font-weight:700"># 重构支付模块</div>
+                <sc-for list="{{ planItems }}" as="it" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <sc-if value="{{ it.isDone }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.85 0.19 150);font-size:12px">[x]</div></sc-if>
+                    <sc-if value="{{ it.isDoing }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.78 0.15 75);font-size:12px">[~]</div></sc-if>
+                    <sc-if value="{{ it.isTodo }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.4 0.08 150);font-size:12px">[ ]</div></sc-if>
+                    <div style="color:oklch(0.6 0.12 150);font-size:11.5px">{{ it.label }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ v.b.showSettings }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <sc-for list="{{ v.b.settingsRows }}" as="row" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;justify-content:space-between">
+                    <span style="color:oklch(0.6 0.12 150);font-size:11.5px">{{ row.label }}</span>
+                    <sc-if value="{{ row.on }}" hint-placeholder-val="{{ false }}"><span style="color:oklch(0.85 0.19 150);font-size:11.5px;cursor:pointer;font-weight:700" onClick="{{ row.toggle }}">[on]</span></sc-if>
+                    <sc-if value="{{ row.off }}" hint-placeholder-val="{{ true }}"><span style="color:oklch(0.45 0.08 150);font-size:11.5px;cursor:pointer;font-weight:700" onClick="{{ row.toggle }}">[off]</span></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dv-opt" id="1c">
+      <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Soft Glass Island — 柔和亚克力</div>
+      <div style="position:relative;width:620px;height:420px;border-radius:16px;overflow:hidden;background:radial-gradient(circle at 30% 20%, oklch(0.24 0.03 160), oklch(0.11 0.02 160) 70%);font-family:'Segoe UI',system-ui,-apple-system,sans-serif">
+        <div style="position:absolute;left:0;right:0;bottom:0;height:46px;background:rgba(10,14,12,.5);backdrop-filter:blur(16px);display:flex;align-items:center;justify-content:space-between;padding:0 16px">
+          <div style="display:flex;gap:8px;align-items:center">
+            <div style="width:130px;height:24px;border-radius:12px;background:rgba(255,255,255,.07)"></div>
+            <div style="width:24px;height:24px;border-radius:8px;background:rgba(255,255,255,.08)"></div>
+            <div style="width:24px;height:24px;border-radius:8px;background:rgba(255,255,255,.08)"></div>
+          </div>
+          <div style="color:rgba(255,255,255,.5);font-size:12px">14:32</div>
+        </div>
+
+        <div style="position:absolute;top:0;left:50%;transform:translateX(-50%);width:360px;display:flex;flex-direction:column;align-items:center;z-index:5" onMouseEnter="{{ v.c.enter }}" onMouseLeave="{{ v.c.leave }}">
+          <div style="display:flex;align-items:center;gap:9px;padding:11px 22px;border-radius:999px;background:oklch(0.22 0.02 155 / 0.6);backdrop-filter:blur(20px) saturate(150%);box-shadow:0 0 40px oklch(0.7 0.15 150 / .22);cursor:pointer;{{ v.c.pillDynStyle }}" onClick="{{ v.c.toggleExpand }}">
+            <div style="width:8px;height:8px;border-radius:999px;background:oklch(0.78 0.16 150);box-shadow:0 0 10px oklch(0.78 0.16 150 / .8);animation:dotpulse 2s ease-in-out infinite"></div>
+            <span style="color:oklch(0.95 0.01 150);font-size:13.5px;font-weight:500">{{ v.c.countText }}</span>
+          </div>
+
+          <div style="width:340px;border-radius:28px;background:oklch(0.22 0.02 155 / 0.55);backdrop-filter:blur(20px) saturate(150%);border:1px solid oklch(0.7 0.14 150 / 0.35);padding:18px;box-sizing:border-box;box-shadow:0 30px 60px rgba(0,0,0,.4);{{ v.c.panelDynStyle }}">
+            <div style="display:flex;gap:6px;margin-bottom:14px">
+              <div style="{{ v.c.tabAgentsStyle }}" onClick="{{ v.c.setAgentsTab }}">Agents</div>
+              <div style="{{ v.c.tabPlanStyle }}" onClick="{{ v.c.setPlanTab }}">Plan</div>
+              <div style="{{ v.c.tabSettingsStyle }}" onClick="{{ v.c.setSettingsTab }}">Settings</div>
+            </div>
+
+            <sc-if value="{{ v.c.showAgents }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:11px">
+                <sc-for list="{{ v.c.agentRows }}" as="row" hint-placeholder-count="4">
+                  <div style="display:flex;flex-direction:column;gap:6px;padding:11px;border-radius:16px;background:rgba(255,255,255,.045)">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div style="width:8px;height:8px;border-radius:999px;background:{{ row.dotColor }}"></div>
+                      <span style="color:oklch(0.95 0.01 150);font-size:12.5px;font-weight:600">{{ row.tool }}</span>
+                      <span style="color:oklch(0.72 0.02 150 / .7);font-size:11.5px">{{ row.proj }}</span>
+                      <span style="margin-left:auto;color:oklch(0.72 0.02 150 / .7);font-size:10.5px">{{ row.label }}</span>
+                    </div>
+                    <div style="color:oklch(0.75 0.02 150 / .85);font-size:11.5px">{{ row.detail }}</div>
+                    <sc-if value="{{ row.showApproval }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;gap:8px;margin-top:3px">
+                        <div style="padding:6px 16px;border-radius:999px;background:linear-gradient(180deg, oklch(0.82 0.16 150), oklch(0.72 0.16 150));color:oklch(0.14 0.02 150);font-size:12px;font-weight:700;cursor:pointer" onClick="{{ row.allow }}">Allow</div>
+                        <div style="padding:6px 16px;border-radius:999px;background:transparent;color:oklch(0.75 0.02 150 / .8);font-size:12px;font-weight:600;cursor:pointer" onClick="{{ row.deny }}">Deny</div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ row.decidedAllow }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.78 0.16 150)">✓ 已允许</div></sc-if>
+                    <sc-if value="{{ row.decidedDeny }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.68 0.1 30)">✕ 已拒绝</div></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ v.c.showPlan }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:9px">
+                <div style="color:oklch(0.95 0.01 150);font-size:13px;font-weight:600;margin-bottom:2px">重构支付模块</div>
+                <sc-for list="{{ planItems }}" as="it" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:9px">
+                    <sc-if value="{{ it.isDone }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.78 0.16 150);font-size:13px">✓</div></sc-if>
+                    <sc-if value="{{ it.isDoing }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.8 0.13 75);font-size:13px">…</div></sc-if>
+                    <sc-if value="{{ it.isTodo }}" hint-placeholder-val="{{ false }}"><div style="color:oklch(0.5 0.02 150 / .6);font-size:13px">○</div></sc-if>
+                    <div style="color:oklch(0.82 0.02 150 / .85);font-size:12px">{{ it.label }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ v.c.showSettings }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <sc-for list="{{ v.c.settingsRows }}" as="row" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;justify-content:space-between">
+                    <span style="color:oklch(0.85 0.02 150 / .85);font-size:12px">{{ row.label }}</span>
+                    <sc-if value="{{ row.on }}" hint-placeholder-val="{{ false }}">
+                      <div style="width:36px;height:20px;border-radius:999px;background:linear-gradient(180deg, oklch(0.82 0.16 150), oklch(0.7 0.16 150));position:relative;cursor:pointer" onClick="{{ row.toggle }}"><div style="position:absolute;right:2px;top:2px;width:16px;height:16px;border-radius:999px;background:white"></div></div>
+                    </sc-if>
+                    <sc-if value="{{ row.off }}" hint-placeholder-val="{{ true }}">
+                      <div style="width:36px;height:20px;border-radius:999px;background:rgba(255,255,255,.12);position:relative;cursor:pointer" onClick="{{ row.toggle }}"><div style="position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:999px;background:rgba(255,255,255,.65)"></div></div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <p class="dv-next">Try next: 把 <a href="#1b">1b</a> 的等宽字体质感用到 <a href="#1a">1a</a> 上 · <a href="#1c">1c</a> 再柔和一些、加大圆角 · 深入某一版本做完整多屏交互原型（含终端跳转 / 通知气泡等状态）</p>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+
+class Component extends DCLogic {
+  AGENTS = [
+    { id: 1, tool: 'Claude Code', proj: 'apps/api', status: 'running', detail: '正在编写 /orders 的 REST 接口...' },
+    { id: 2, tool: 'Codex', proj: 'ml-pipeline', status: 'needs_approval', detail: '请求执行: rm -rf dist/ 后再重建' },
+    { id: 3, tool: 'Gemini CLI', proj: 'docs-site', status: 'done', detail: '已重构导航结构，共修改 12 个文件' },
+    { id: 4, tool: 'Cursor', proj: 'mobile-app', status: 'running', detail: '正在添加生物识别登录校验...' },
+  ];
+
+  PLAN_ITEMS = [
+    { label: '拆分 PaymentService 为 Gateway / Ledger', state: 'done' },
+    { label: '迁移 Stripe Webhook 签名校验逻辑', state: 'doing' },
+    { label: '补充单元测试覆盖率至 90%', state: 'todo' },
+    { label: '更新 API 文档', state: 'todo' },
+  ];
+
+  defaultSettings() {
+    return { claude: true, codex: true, gemini: true, cursor: false, autostart: true, multiMonitor: true };
+  }
+
+  state = {
+    a: { revealed: false, expanded: false, tab: 'agents', decided: {}, settings: this.defaultSettings() },
+    b: { revealed: false, expanded: false, tab: 'agents', decided: {}, settings: this.defaultSettings() },
+    c: { revealed: false, expanded: false, tab: 'agents', decided: {}, settings: this.defaultSettings() },
+  };
+
+  PALETTE = {
+    a: { accent: 'oklch(0.78 0.19 150)', amber: 'oklch(0.78 0.15 75)', textDim: 'oklch(0.5 0.02 150)', font: "'Segoe UI',system-ui,sans-serif", tabActiveBg: 'oklch(0.78 0.19 150)', tabActiveText: 'oklch(0.12 0.02 150)', tabInactiveText: 'oklch(0.6 0.02 150)' },
+    b: { accent: 'oklch(0.85 0.19 150)', amber: 'oklch(0.78 0.15 75)', textDim: 'oklch(0.4 0.08 150)', font: "ui-monospace,'Cascadia Code',Consolas,monospace", tabActiveBg: 'transparent', tabActiveText: 'oklch(0.85 0.19 150)', tabInactiveText: 'oklch(0.45 0.1 150)' },
+    c: { accent: 'oklch(0.78 0.16 150)', amber: 'oklch(0.8 0.13 75)', textDim: 'oklch(0.55 0.02 150 / .6)', font: "'Segoe UI',system-ui,sans-serif", tabActiveBg: 'oklch(0.78 0.16 150)', tabActiveText: 'oklch(0.14 0.02 150)', tabInactiveText: 'oklch(0.78 0.02 150 / .65)' },
+  };
+
+  setVariant(key, updater) {
+    this.setState(st => ({ ...st, [key]: { ...st[key], ...updater(st[key]) } }));
+  }
+
+  buildVariant(key) {
+    const s = this.state[key];
+    const p = this.PALETTE[key];
+    const enter = () => this.setVariant(key, () => ({ revealed: true }));
+    const leave = () => this.setVariant(key, () => ({ revealed: false, expanded: false }));
+    const toggleExpand = () => this.setVariant(key, cur => ({ expanded: !cur.expanded }));
+    const setTab = (tab) => this.setVariant(key, () => ({ tab }));
+
+    const pillDynStyle = `max-height:${s.revealed ? '46px' : '0px'};opacity:${s.revealed ? 1 : 0};margin-top:${s.revealed ? '10px' : '0px'};transition:all .28s cubic-bezier(.4,0,.2,1);pointer-events:${s.revealed ? 'auto' : 'none'};`;
+    const panelDynStyle = `max-height:${s.expanded ? '460px' : '0px'};opacity:${s.expanded ? 1 : 0};margin-top:${s.expanded ? '10px' : '0px'};overflow:hidden;transition:all .3s cubic-bezier(.4,0,.2,1);pointer-events:${s.expanded ? 'auto' : 'none'};`;
+
+    const tabStyle = (name, extra) => {
+      const active = s.tab === name;
+      if (key === 'b') {
+        return `font:600 12px ${p.font};cursor:pointer;color:${active ? p.tabActiveText : p.tabInactiveText};text-decoration:${active ? 'underline' : 'none'};`;
+      }
+      return `padding:6px 14px;border-radius:999px;font:600 12px ${p.font};cursor:pointer;background:${active ? p.tabActiveBg : 'transparent'};color:${active ? p.tabActiveText : p.tabInactiveText};transition:all .15s;`;
+    };
+
+    const agentRows = this.AGENTS.map(a => {
+      const decided = s.decided[a.id];
+      const showApproval = a.status === 'needs_approval' && !decided;
+      let dotColor = p.accent, label = '运行中';
+      if (a.status === 'needs_approval') { dotColor = p.amber; label = '待处理'; }
+      if (a.status === 'done') { dotColor = p.textDim; label = '已完成'; }
+      return {
+        id: a.id, tool: a.tool, proj: a.proj, detail: a.detail,
+        dotColor, label, showApproval,
+        decidedAllow: decided === 'allow', decidedDeny: decided === 'deny',
+        allow: () => this.setVariant(key, cur => ({ decided: { ...cur.decided, [a.id]: 'allow' } })),
+        deny: () => this.setVariant(key, cur => ({ decided: { ...cur.decided, [a.id]: 'deny' } })),
+      };
+    });
+
+    const pendingCount = agentRows.filter(r => r.showApproval).length;
+    const countText = `${agentRows.length} 个 Agent${pendingCount ? ' · ' + pendingCount + ' 待处理' : ''}`;
+
+    const settingsDefs = [
+      { key: 'claude', label: 'Claude Code' },
+      { key: 'codex', label: 'Codex' },
+      { key: 'gemini', label: 'Gemini CLI' },
+      { key: 'cursor', label: 'Cursor' },
+      { key: 'autostart', label: '开机自启' },
+      { key: 'multiMonitor', label: '多显示器同步' },
+    ];
+    const settingsRows = settingsDefs.map(d => ({
+      label: d.label,
+      on: !!s.settings[d.key],
+      off: !s.settings[d.key],
+      toggle: () => this.setVariant(key, cur => ({ settings: { ...cur.settings, [d.key]: !cur.settings[d.key] } })),
+    }));
+
+    return {
+      enter, leave, toggleExpand,
+      setAgentsTab: () => setTab('agents'), setPlanTab: () => setTab('plan'), setSettingsTab: () => setTab('settings'),
+      pillDynStyle, panelDynStyle,
+      showAgents: s.tab === 'agents', showPlan: s.tab === 'plan', showSettings: s.tab === 'settings',
+      tabAgentsStyle: tabStyle('agents'), tabPlanStyle: tabStyle('plan'), tabSettingsStyle: tabStyle('settings'),
+      agentRows, countText, settingsRows,
+    };
+  }
+
+  renderVals() {
+    return {
+      v: { a: this.buildVariant('a'), b: this.buildVariant('b'), c: this.buildVariant('c') },
+      planItems: this.PLAN_ITEMS.map(it => ({ label: it.label, isDone: it.state === 'done', isDoing: it.state === 'doing', isTodo: it.state === 'todo' })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

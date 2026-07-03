@@ -1,0 +1,82 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 仓库现状（先读这一段）
+
+这**已经不是设计交付包**，而是一个功能完整、可打包安装的 Windows 桌面应用 **Agentic-Island（灵动岛）**：常驻屏幕顶部的 AI 编码 Agent 监控/审批/协作面板 + 个人工作台。技术栈 **Electron 33 + React 19 + TypeScript**（electron-vite 构建，vite 锁 ^5，**不要升 vite 6**）。已产出 NSIS 安装包（`dist/Agentic-Island-Setup-*.exe`）。
+
+`Vibeisland Windows 端复刻-handoff/` 是最初的 Claude Design 设计交付包（PRD + 高保真原型），**只作历史设计参考，勿改动**；视觉规范（OKLCH 主题、动效、字体栈）源于其中。
+
+## 常用命令
+
+```bash
+npm run dev          # 开发运行（app ready 会自动安装全局 hooks；AIISLAND_SKIP_HOOKS=1 可跳过）
+npm run typecheck    # 两套 tsconfig（node=main/preload+shared, web=renderer+shared）
+npm run build        # electron-vite 三端构建
+npm run package      # NSIS 安装包（原生模块经 asarUnpack **/*.node）
+npm run demo:plan    # 向运行中的岛注入一条演示计划（看 Plan 审阅长什么样）
+npm run probe        # 诊断：一键接入+实时打印 hook 事件，Ctrl+C 还原
+
+# 测试（raw node 直跑 TS，无测试框架）
+node --experimental-strip-types scripts/test-lifecycle.ts   # hook→桥→状态机全生命周期 + 安装器幂等
+node --experimental-strip-types scripts/test-loop.ts        # 审批阻塞闭环 + deny 理由回传
+node --experimental-strip-types scripts/test-stop.ts        # git 变更小结（真实临时仓库）
+node --experimental-strip-types scripts/test-codex-tail.ts  # Codex rollout 跟随
+node --experimental-strip-types scripts/test-ics.ts         # ICS 解析（时区/RRULE/EXDATE）
+node --experimental-strip-types scripts/test-notes.ts       # 便签 AI 解析器
+node --experimental-strip-types scripts/test-quote.ts       # 问答引用组装
+```
+
+## 架构总览
+
+```
+Claude Code (CLI/桌面端) ──hooks──► src/hooks-bin/cc-forward.mjs ──HTTP 127.0.0.1──►┐
+Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts（轮询跟随）──────────►│
+                                                                                    ▼
+              ┌────────────────────── Electron 主进程 (src/main) ──────────────────────┐
+              │ bridge-server  本地桥(随机端口+token→~/.agentic-island/bridge.json,    │
+              │                15s 自愈防覆盖)；permission 事件阻塞至用户裁决           │
+              │ agents-store   Agent 状态机(会话键=backend:sessionId；done 3min 自动隐藏)│
+              │ hook-installer 合并式安装/卸载 ~/.claude settings.json + ~/.codex hooks │
+              │ term-pty       真 PTY 终端(@lydell/node-pty N-API, ConPTY, 多会话)      │
+              │ calendar-ics / calendar-caldav  飞书日历(CalDAV multiget 两段式)        │
+              │ rss / media(SMTC) / clipboard-watch / sound / llm-proxy / git-summary  │
+              │ terminal-jump(HWND/UIA 切 WT 标签页) / settings-store(DPAPI 加密)      │
+              └───────────────────────────┬── Electron IPC ────────────────────────────┘
+                                          ▼
+              渲染进程 (src/renderer)：App.tsx 编排 + components/*Tab + logic/*
+              八个分区：Agents · Plan · 问答 · 待办 · 灵感便签 · 资讯 · 终端 · 设置
+              + AmbientBar 常驻迷你条（收起后的小状态条，多模式轮播）
+```
+
+- **协议契约**：`src/shared/protocol.ts`（三端共用；`IslandBridgeApi` 是 preload 暴露的全部能力面）。
+- **Claude Code 接入**：全生命周期 hooks（SessionStart/UserPromptSubmit/PreToolUse/Stop/Notification/SessionEnd）。PreToolUse 对非只读工具**阻塞审批**（stdout 返回 permissionDecision）；deny 理由回传实现接力 steer；ExitPlanMode→计划审阅；Stop→"等待回复"+ transcript 尾部提取最后回复 + turnEnd 触发 git 小结。
+- **Codex 接入**：rollout 日志跟随为主（`~/.codex/sessions/**/rollout-*.jsonl`，只监控无审批，15min 空闲自动归档）；hooks 桌面端实测会触发（审批可用），CLI 不触发。**CLI/桌面端无法区分**（originator 恒为 codex-tui），统一标 "Codex"。
+
+## 关键工程约束（踩过的坑，勿重蹈）
+
+1. **raw-node 测试约束**：被 `scripts/test-*.ts` 直接加载的主进程文件，顶层不得有无扩展名运行时 import（electron 也不行）——用依赖注入（`fetchCaldav(cfg, parseIcs)`、bridge-server 的 Summarizer）或函数内 `await import('electron')`（rss.ts）。strip 模式下 TS 参数属性/enum 不可用。
+2. **测试桥隔离**：测试实例化 BridgeServer 必须传临时 discoveryFile 并设 `AIISLAND_BRIDGE_FILE` 环境变量。**曾因测试覆盖真实 bridge.json 导致整条通信链路瘫痪**；主进程有 15s 自愈但别依赖它。
+3. **Electron 渲染层没有 `prompt()/alert()/confirm()`**（静默失效）——一律做行内编辑器/自定义弹层。
+4. **`resizable:false` 窗口 setBounds 改宽被 Windows 忽略**——positionWindow 先 `setResizable(true)` 再改再收回。
+5. **LLM 批量中文 JSON 生成必须按输出 token 预算分块**（fast 模式 900 tokens 一撞就截断、解析全败）；异步水合的 apiKey 要进 effect 依赖（`llmReady`）。
+6. **PowerShell 子进程输出必须显式 UTF-8**（`[Console]::OutputEncoding`），否则中文 GBK 乱码。
+7. **SVG 属性不解析 CSS var()**——渐变 stop 用 `style={{ stopColor }}`。
+8. **卡片入场动画禁用带 translate 的 keyframes**（ai-toast 是给居中 toast 的，会把卡片甩出面板）——用 `ai-fadein`。
+9. **hooks 转发脚本必须 fail-open**（岛没开时绝不能卡住用户 CLI）；诊断走 `~/.agentic-island/events.log`（cc 与 codex 都写）。
+10. **视觉体系**：OKLCH 色相令牌（`--th/--th2/--ths` + `--cs/--css` 饱和倍率、`--pl` 面板明度倍率），主题在 `logic/themes.ts`；语义色（琥珀警示 75 / 红危险 / 紫专注）跨主题固定。动效 keyframes 全部在 `src/renderer/index.html`。
+11. **原生依赖只用 N-API 预编译包**（@lydell/node-pty）——node-gyp 在用户机 Node 25 上编译不可行，非 N-API 包也没有 Electron 33 (ABI 130) 的 prebuild。
+12. **外网请求走 electron `net.fetch`**（继承系统代理）；Node 全局 fetch 不认代理（GitHub API 等会连不上）。
+
+## 数据与持久化
+
+- 渲染层状态经 `save-state` IPC 持久化到 `userData/config.json`（DPAPI 加密，含 API Key/CalDAV 密码）。**水合只执行一次且覆盖式**（StrictMode 双调用曾致待办翻倍）。
+- 运行时发现文件/缓存：`~/.agentic-island/`（bridge.json、events.log、sound.log、tc-*.json 终端句柄缓存）。
+- AI 能力统一走 `llm-proxy`（OpenAI 兼容 /chat/completions，多轮 history，deep 模式 3000 tokens，reasoning_content 捕获，多模态 parts 带图）。
+
+## 工作约定
+
+- 回复用简体中文；每轮改动跑 `typecheck + build` + 相关 test 脚本；安全分类器不可用导致无法编译时，人工核对并**如实告知未编译**。
+- 用户显式要求才做 git 操作。改动追求最小 diff，匹配现有内联样式/OKLCH 写法。
+- 长期记忆（进度流水、根因复盘）在 auto-memory 的 `m1-status.md`，比本文件更细。
