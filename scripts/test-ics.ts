@@ -9,8 +9,8 @@ const ok = (cond: boolean, msg: string): void => {
   if (!cond) failed++
 }
 
-// 固定“当前时间”：2026-07-02 10:00 本地
-const NOW = new Date(2026, 6, 2, 10, 0, 0).getTime()
+// 固定同一个绝对时刻：2026-07-02 02:00Z（北京 10:00），避免 CI 所在时区改变过滤窗口。
+const NOW = Date.UTC(2026, 6, 2, 2, 0, 0)
 const pad = (n: number): string => String(n).padStart(2, '0')
 const icsLocal = (d: Date): string =>
   `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`
