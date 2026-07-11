@@ -215,6 +215,8 @@ npm run probe           # hooks 接入诊断与事件跟踪
 
 `npm test` 会自动执行 `scripts/test-*.ts` 中除 `test-real-claude.ts` 外的离线测试，覆盖 Agent 生命周期、审批闭环、Codex 跟随、外部让位、日历、待办、快捷、终端、Markdown、便签、资讯、复盘、向量、知识链接、番茄钟、SRS、工程计算和工作台迁移。真实 Claude CLI 集成测试需在已登录环境中单独运行。
 
+`.github/workflows/release.yml` 提供可重复的 Windows Release 门禁：在 GitHub Windows runner 上重新安装依赖、执行类型检查和全部离线测试、生成 NSIS 安装包与 SHA-256，并上传到指定草稿 Release 后发布。
+
 ### 目录结构
 
 ```text

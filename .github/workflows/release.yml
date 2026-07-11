@@ -1,0 +1,55 @@
+name: Build and publish Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag
+        required: true
+        default: v0.2.0
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run offline tests
+        run: npm test
+
+      - name: Build NSIS installer
+        run: npm run package
+
+      - name: Generate checksum
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist/Agentic-Island-Setup-*.exe | Select-Object -First 1
+          $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content dist/SHA256SUMS.txt -Encoding ascii
+
+      - name: Upload assets and publish draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $installer = Get-ChildItem dist/Agentic-Island-Setup-*.exe | Select-Object -First 1
+          gh release upload $env:RELEASE_TAG $installer.FullName dist/SHA256SUMS.txt --clobber
+          gh release edit $env:RELEASE_TAG --draft=false --latest
