@@ -1,163 +1,55 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="660" viewBox="0 0 1060 660" font-family="'Segoe UI','PingFang SC','Microsoft YaHei UI',system-ui,sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Agentic-Island v0.2 总体架构</title>
+  <desc id="desc">展示 Agent 接入、Electron 主进程、预加载桥、React 工作台和本地数据边界。</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#0e1420"/>
-      <stop offset="1" stop-color="#0a0e16"/>
-    </linearGradient>
-    <linearGradient id="claude" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#c9a6ff"/>
-      <stop offset="1" stop-color="#8a63d2"/>
-    </linearGradient>
-    <linearGradient id="codex" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5a6b8c"/>
-      <stop offset="1" stop-color="#3a4560"/>
-    </linearGradient>
-    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#4ce39a"/>
-      <stop offset="1" stop-color="#22a86c"/>
-    </linearGradient>
-    <linearGradient id="mainbox" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#16202e"/>
-      <stop offset="1" stop-color="#111927"/>
-    </linearGradient>
-    <linearGradient id="renbox" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#151d2b"/>
-      <stop offset="1" stop-color="#0f1622"/>
-    </linearGradient>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.4"/>
-    </filter>
-    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0 0 L10 5 L0 10 z" fill="#4ce39a"/>
-    </marker>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#74e0bd"/></marker>
+    <filter id="shadow"><feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#000" flood-opacity=".28"/></filter>
+    <style>
+      .t{font-family:"Segoe UI","Microsoft YaHei",sans-serif;fill:#eaf7f2}.muted{fill:#8ea9a0}.small{font-size:14px}.label{font-size:16px;font-weight:650}.head{font-size:27px;font-weight:750}.box{stroke-width:1.4;rx:12}.line{stroke:#74e0bd;stroke-width:2;fill:none;marker-end:url(#arrow)}
+    </style>
   </defs>
+  <rect width="1200" height="720" fill="#071712"/>
+  <text class="t head" x="48" y="52">Agentic-Island v0.2 · Windows 本地优先桌面架构</text>
+  <text class="t muted small" x="48" y="78">Electron 39 · React 19 · TypeScript · loopback bridge · contextIsolation · DPAPI</text>
 
-  <rect x="0" y="0" width="1060" height="660" rx="20" fill="url(#bg)"/>
-  <rect x="0.5" y="0.5" width="1059" height="659" rx="20" fill="none" stroke="#4ce39a" stroke-opacity="0.12"/>
+  <g filter="url(#shadow)">
+    <rect class="box" x="42" y="118" width="225" height="245" fill="#0d2720" stroke="#357b65"/>
+    <text class="t label" x="62" y="148">Agent 与外部输入</text>
+    <rect class="box" x="62" y="170" width="185" height="46" fill="#12372c" stroke="#429476"/><text class="t small" x="80" y="199">Claude Code hooks</text>
+    <rect class="box" x="62" y="228" width="185" height="46" fill="#12372c" stroke="#429476"/><text class="t small" x="80" y="257">Codex hooks / rollout</text>
+    <rect class="box" x="62" y="286" width="185" height="56" fill="#132b35" stroke="#477f98"/><text class="t small" x="80" y="310">本地 CLI · RSS · CalDAV</text><text class="t muted small" x="80" y="330">GitHub · 文件 · 剪贴板</text>
 
-  <!-- 标题 -->
-  <g transform="translate(40,34)">
-    <rect x="0" y="-16" width="22" height="22" rx="7" fill="url(#green)"/>
-    <text x="7" y="1" font-size="14" fill="#0a0e16" font-weight="700">◆</text>
-    <text x="34" y="2" font-size="18" font-weight="700" fill="#eaf2ee">Agentic-Island · 架构</text>
-    <text x="34" y="22" font-size="12" fill="#8a97a4">三进程 + 本地桥 · Claude Code 走 hooks，Codex 走会话日志跟随</text>
+    <rect class="box" x="315" y="105" width="380" height="472" fill="#0b211b" stroke="#4ea789"/>
+    <text class="t label" x="339" y="138">Electron 主进程</text>
+    <text class="t muted small" x="339" y="160">权限、系统能力、网络与持久化的唯一可信边界</text>
+    <rect class="box" x="339" y="184" width="156" height="72" fill="#11352a" stroke="#59b895"/><text class="t small" x="357" y="211">Bridge Server</text><text class="t muted small" x="357" y="232">随机端口 + token</text>
+    <rect class="box" x="515" y="184" width="156" height="72" fill="#11352a" stroke="#59b895"/><text class="t small" x="533" y="211">Agents Store</text><text class="t muted small" x="533" y="232">会话状态机 / 审批</text>
+    <rect class="box" x="339" y="274" width="156" height="72" fill="#132b35" stroke="#4f8ca6"/><text class="t small" x="357" y="301">External Yield</text><text class="t muted small" x="357" y="322">外部应用焦点让位</text>
+    <rect class="box" x="515" y="274" width="156" height="72" fill="#132b35" stroke="#4f8ca6"/><text class="t small" x="533" y="301">ConPTY / System</text><text class="t muted small" x="533" y="322">终端 · 截图 · 媒体</text>
+    <rect class="box" x="339" y="364" width="156" height="72" fill="#282414" stroke="#a99143"/><text class="t small" x="357" y="391">LLM / RAG</text><text class="t muted small" x="357" y="412">代理 · 向量 · 知识库</text>
+    <rect class="box" x="515" y="364" width="156" height="72" fill="#282414" stroke="#a99143"/><text class="t small" x="533" y="391">Integrations</text><text class="t muted small" x="533" y="412">Git · RSS · 日历 · GitHub</text>
+    <rect class="box" x="339" y="454" width="332" height="90" fill="#201b2d" stroke="#806bb0"/><text class="t small" x="357" y="482">Encrypted local state</text><text class="t muted small" x="357" y="505">safeStorage / Windows DPAPI · 原子写入</text><text class="t muted small" x="357" y="526">KB 索引 · 运行缓存 · 诊断日志</text>
+
+    <rect class="box" x="744" y="118" width="414" height="459" fill="#0d221d" stroke="#438f77"/>
+    <text class="t label" x="768" y="149">Preload 契约与 React 工作台</text>
+    <rect class="box" x="768" y="173" width="366" height="58" fill="#142f29" stroke="#4aa184"/><text class="t small" x="790" y="198">contextBridge · IslandBridgeApi</text><text class="t muted small" x="790" y="217">最小化、类型化 IPC 能力面</text>
+    <rect class="box" x="768" y="252" width="108" height="52" fill="#12372c" stroke="#429476"/><text class="t small" x="789" y="284">Agents / Plan</text>
+    <rect class="box" x="888" y="252" width="108" height="52" fill="#12372c" stroke="#429476"/><text class="t small" x="915" y="284">AI 问答</text>
+    <rect class="box" x="1008" y="252" width="108" height="52" fill="#12372c" stroke="#429476"/><text class="t small" x="1036" y="284">快捷执行</text>
+    <rect class="box" x="768" y="316" width="108" height="52" fill="#132b35" stroke="#4f8ca6"/><text class="t small" x="802" y="348">待办</text>
+    <rect class="box" x="888" y="316" width="108" height="52" fill="#132b35" stroke="#4f8ca6"/><text class="t small" x="913" y="348">灵感便签</text>
+    <rect class="box" x="1008" y="316" width="108" height="52" fill="#132b35" stroke="#4f8ca6"/><text class="t small" x="1040" y="348">资讯</text>
+    <rect class="box" x="768" y="380" width="108" height="52" fill="#282414" stroke="#a99143"/><text class="t small" x="802" y="412">复盘</text>
+    <rect class="box" x="888" y="380" width="108" height="52" fill="#282414" stroke="#a99143"/><text class="t small" x="924" y="412">仓库</text>
+    <rect class="box" x="1008" y="380" width="108" height="52" fill="#282414" stroke="#a99143"/><text class="t small" x="1040" y="412">终端</text>
+    <rect class="box" x="768" y="444" width="348" height="104" fill="#201b2d" stroke="#806bb0"/><text class="t small" x="790" y="472">全局工具层</text><text class="t muted small" x="790" y="496">命令面板 · 第二大脑 · 知识库 · Markdown 工作台</text><text class="t muted small" x="790" y="518">截图工坊 · 工程计算 · 学习中心 · 主题设计器</text><text class="t muted small" x="790" y="540">迷你条 · 番茄钟 · 勿扰 · 桌面挂件</text>
   </g>
 
-  <!-- ① 上游 -->
-  <g filter="url(#soft)">
-    <rect x="150" y="92" width="330" height="66" rx="14" fill="#141b28" stroke="#c9a6ff" stroke-opacity="0.35"/>
-    <rect x="150" y="92" width="5" height="66" rx="2.5" fill="url(#claude)"/>
-    <text x="176" y="122" font-size="15" font-weight="700" fill="#eaf2ee">Claude Code</text>
-    <text x="176" y="142" font-size="12" fill="#9aa7b4">CLI / 桌面端</text>
-  </g>
-  <g filter="url(#soft)">
-    <rect x="580" y="92" width="330" height="66" rx="14" fill="#141b28" stroke="#5a6b8c" stroke-opacity="0.5"/>
-    <rect x="580" y="92" width="5" height="66" rx="2.5" fill="url(#codex)"/>
-    <text x="606" y="122" font-size="15" font-weight="700" fill="#eaf2ee">Codex</text>
-    <text x="606" y="142" font-size="12" fill="#9aa7b4">CLI / 桌面端</text>
-  </g>
+  <path class="line" d="M267 216H315"/><path class="line" d="M267 310H315"/>
+  <path class="line" d="M695 220H744"/><path class="line" d="M744 472H695"/>
+  <text class="t muted small" x="281" y="202">HTTP</text><text class="t muted small" x="703" y="205">IPC</text>
 
-  <!-- 箭头 上游→主进程 -->
-  <path d="M315 158 L315 208" stroke="#4ce39a" stroke-width="2" fill="none" marker-end="url(#arr)"/>
-  <text x="325" y="188" font-size="11.5" fill="#4ce39a" font-weight="600">hooks · 阻塞审批</text>
-  <path d="M745 158 L745 208" stroke="#4ce39a" stroke-width="2" fill="none" marker-end="url(#arr)"/>
-  <text x="755" y="188" font-size="11.5" fill="#4ce39a" font-weight="600">rollout 日志跟随</text>
-
-  <!-- ② 主进程容器 -->
-  <g filter="url(#soft)">
-    <rect x="40" y="214" width="980" height="252" rx="18" fill="url(#mainbox)" stroke="#4ce39a" stroke-opacity="0.22"/>
-  </g>
-  <text x="66" y="244" font-size="13.5" font-weight="700" fill="#7fe0ac">Electron 主进程 · src/main</text>
-  <text x="240" y="244" font-size="11" fill="#7f8a97">本地回环桥 · 状态机 · 系统能力封装</text>
-
-  <!-- 主进程内的模块 -->
-  <g font-size="12.5" font-weight="600" fill="#eaf2ee">
-    <!-- 核心：桥 + 状态机 -->
-    <g filter="url(#soft)">
-      <rect x="66" y="262" width="240" height="88" rx="13" fill="#182234" stroke="#4ce39a" stroke-opacity="0.4"/>
-      <text x="84" y="290">bridge-server</text>
-      <text x="84" y="311" font-size="11" font-weight="400" fill="#9aa7b4">随机端口+token · 审批阻塞</text>
-      <text x="84" y="330" font-size="11" font-weight="400" fill="#9aa7b4">15s 自愈防覆盖</text>
-    </g>
-    <g filter="url(#soft)">
-      <rect x="322" y="262" width="230" height="88" rx="13" fill="#182234" stroke="#4ce39a" stroke-opacity="0.4"/>
-      <text x="340" y="290">agents-store</text>
-      <text x="340" y="311" font-size="11" font-weight="400" fill="#9aa7b4">状态机 · 会话键</text>
-      <text x="340" y="330" font-size="11" font-weight="400" fill="#9aa7b4">backend:sessionId</text>
-    </g>
-    <g filter="url(#soft)">
-      <rect x="568" y="262" width="200" height="88" rx="13" fill="#151d2b" stroke="#2c3a4d"/>
-      <text x="586" y="290">codex-tail</text>
-      <text x="586" y="311" font-size="11" font-weight="400" fill="#9aa7b4">rollout 日志轮询</text>
-      <text x="586" y="330" font-size="11" font-weight="400" fill="#9aa7b4">映射会话/命令/完成</text>
-    </g>
-    <g filter="url(#soft)">
-      <rect x="784" y="262" width="212" height="88" rx="13" fill="#151d2b" stroke="#2c3a4d"/>
-      <text x="802" y="290">hook-installer</text>
-      <text x="802" y="311" font-size="11" font-weight="400" fill="#9aa7b4">合并式安装/卸载</text>
-      <text x="802" y="330" font-size="11" font-weight="400" fill="#9aa7b4">不覆盖用户配置</text>
-    </g>
-    <!-- 能力层 -->
-    <g filter="url(#soft)">
-      <rect x="66" y="362" width="180" height="84" rx="13" fill="#131b27" stroke="#243244"/>
-      <text x="84" y="390">term-pty</text>
-      <text x="84" y="410" font-size="11" font-weight="400" fill="#9aa7b4">真 ConPTY 终端</text>
-      <text x="84" y="428" font-size="11" font-weight="400" fill="#9aa7b4">node-pty · 多会话</text>
-    </g>
-    <g filter="url(#soft)">
-      <rect x="262" y="362" width="200" height="84" rx="13" fill="#131b27" stroke="#243244"/>
-      <text x="280" y="390">calendar · rss</text>
-      <text x="280" y="410" font-size="11" font-weight="400" fill="#9aa7b4">飞书 CalDAV</text>
-      <text x="280" y="428" font-size="11" font-weight="400" fill="#9aa7b4">AI 资讯抓取</text>
-    </g>
-    <g filter="url(#soft)">
-      <rect x="478" y="362" width="200" height="84" rx="13" fill="#131b27" stroke="#243244"/>
-      <text x="496" y="390">llm-proxy · sound</text>
-      <text x="496" y="410" font-size="11" font-weight="400" fill="#9aa7b4">OpenAI 兼容端点</text>
-      <text x="496" y="428" font-size="11" font-weight="400" fill="#9aa7b4">主进程原生播音</text>
-    </g>
-    <g filter="url(#soft)">
-      <rect x="694" y="362" width="302" height="84" rx="13" fill="#131b27" stroke="#243244"/>
-      <text x="712" y="390">terminal-jump · git-summary · media · clipboard</text>
-      <text x="712" y="410" font-size="11" font-weight="400" fill="#9aa7b4">HWND/UIA 切标签 · git 变更小结</text>
-      <text x="712" y="428" font-size="11" font-weight="400" fill="#9aa7b4">SMTC 媒体 · 剪贴板监听</text>
-    </g>
-  </g>
-
-  <!-- 箭头 主进程→渲染 -->
-  <path d="M530 466 L530 512" stroke="#4ce39a" stroke-width="2" fill="none" marker-end="url(#arr)"/>
-  <text x="540" y="493" font-size="11.5" fill="#4ce39a" font-weight="600">Electron IPC · 快照推送</text>
-
-  <!-- ③ 渲染进程 -->
-  <g filter="url(#soft)">
-    <rect x="40" y="518" width="980" height="118" rx="18" fill="url(#renbox)" stroke="#4ce39a" stroke-opacity="0.22"/>
-  </g>
-  <text x="66" y="548" font-size="13.5" font-weight="700" fill="#7fe0ac">渲染进程 · src/renderer</text>
-  <text x="220" y="548" font-size="11" fill="#7f8a97">App.tsx 编排 · 全内联样式 · OKLCH 色相令牌主题</text>
-
-  <!-- 八分区 chips -->
-  <g font-size="12" font-weight="600">
-    <g>
-      <rect x="66" y="566" width="104" height="46" rx="12" fill="url(#green)"/>
-      <text x="118" y="594" fill="#0a0e16" text-anchor="middle">Agents</text>
-    </g>
-    <g fill="#e6ebf1">
-      <rect x="182" y="566" width="88" height="46" rx="12" fill="#1a2432" stroke="#2c3a4d"/>
-      <text x="226" y="594" text-anchor="middle">Plan</text>
-      <rect x="282" y="566" width="88" height="46" rx="12" fill="#1a2432" stroke="#2c3a4d"/>
-      <text x="326" y="594" text-anchor="middle">问答</text>
-      <rect x="382" y="566" width="88" height="46" rx="12" fill="#1a2432" stroke="#2c3a4d"/>
-      <text x="426" y="594" text-anchor="middle">待办</text>
-      <rect x="482" y="566" width="112" height="46" rx="12" fill="#1a2432" stroke="#2c3a4d"/>
-      <text x="538" y="594" text-anchor="middle">灵感便签</text>
-      <rect x="606" y="566" width="88" height="46" rx="12" fill="#1a2432" stroke="#2c3a4d"/>
-      <text x="650" y="594" text-anchor="middle">资讯</text>
-      <rect x="706" y="566" width="88" height="46" rx="12" fill="#1a2432" stroke="#2c3a4d"/>
-      <text x="750" y="594" text-anchor="middle">终端</text>
-      <rect x="806" y="566" width="88" height="46" rx="12" fill="#1a2432" stroke="#2c3a4d"/>
-      <text x="850" y="594" text-anchor="middle">设置</text>
-      <rect x="906" y="566" width="90" height="46" rx="12" fill="#131b27" stroke="#243244"/>
-      <text x="951" y="594" text-anchor="middle" fill="#7fe0ac">〰 迷你条</text>
-    </g>
-  </g>
+  <rect x="42" y="616" width="1116" height="65" rx="14" fill="#10231e" stroke="#315d50"/>
+  <text class="t label" x="66" y="643">安全边界</text>
+  <text class="t muted small" x="66" y="666">仅监听 127.0.0.1 · token 鉴权 · hooks fail-open · contextIsolation · 外网经 electron net.fetch · 密钥 DPAPI 加密 · 外部窗口主动让位</text>
 </svg>

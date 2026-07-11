@@ -2,10 +2,11 @@
 // 通用开关(声音展开选择器 / 多显示器展开选择) + 问答助手模型配置 + 已支持工具网格。
 
 import { useEffect, useState } from 'react'
+import type { RuntimeInfo } from '../../../shared/protocol'
 import type { BarConfig } from '../types'
 import { SOUNDS, SOUND_TYPES, type SoundMap } from '../logic/sounds'
 import { PROVIDERS } from '../logic/providers'
-import { THEMES } from '../logic/themes'
+import { THEMES, type ThemeDef } from '../logic/themes'
 
 export interface LlmState {
   open: boolean
@@ -35,9 +36,22 @@ export interface SettingsFlags {
   clipWatch: boolean
   /** 常驻迷你条：岛收起后保留一条小状态条（名言/动态光带轮播）；关闭则完全收回 */
   ambientBar: boolean
+  /** 智能勿扰：检测到麦克风/摄像头占用（≈会议中）时自动静默弹窗与提示音 */
+  meetingDnd: boolean
+  /** 桌面挂件：独立小窗常驻桌面角，速览番茄/待办/Agent/媒体 */
+  desktopWidget: boolean
+  /** 自动化规则（当X则Y，本地触发） */
+  ruleMorning: boolean
+  ruleEvening: boolean
+  rulePomoCapsule: boolean
+  ruleMeetingNote: boolean
 }
 
 interface SettingsTabProps {
+  runtimeInfo: RuntimeInfo | null
+  bridgeConnected: boolean
+  activeAgents: number
+  totalAgents: number
   settings: SettingsFlags
   onToggle: (k: keyof SettingsFlags) => void
   /** 按通知类型的声效映射（等待回复/一般审批/危险审批/待办会议） */
@@ -66,6 +80,12 @@ interface SettingsTabProps {
   onUninstallHooks: () => void
   theme: string
   onSetTheme: (key: string) => void
+  /** 用户自定义主题 + 设计器 */
+  customThemes: ThemeDef[]
+  onOpenThemeDesigner: () => void
+  onDeleteCustomTheme: (key: string) => void
+  /** 二次编辑自定义主题（打开设计器带入该主题令牌） */
+  onEditTheme: (key: string) => void
   /** 飞书日历 ICS 订阅链接 + 同步状态 */
   icsUrl: string
   onSetIcsUrl: (v: string) => void
@@ -123,7 +143,17 @@ const GENERAL: { key: keyof SettingsFlags; label: string; desc: string }[] = [
   { key: 'sound', label: '声音提醒', desc: '需要处理时播放提示音' },
   { key: 'silentBg', label: '空闲时完全静默', desc: '无待办时隐藏胶囊' },
   { key: 'clipWatch', label: '剪贴板助手', desc: '记录剪贴板历史（仅内存不落盘），问答区 📋 面板可一键翻译/解释/清洗' },
-  { key: 'ambientBar', label: '常驻迷你条', desc: '岛收起后保留一条小状态条，轮播名人名言与动态光带；关闭则完全收回' }
+  { key: 'ambientBar', label: '常驻迷你条', desc: '岛收起后保留一条小状态条，轮播名人名言与动态光带；关闭则完全收回' },
+  { key: 'meetingDnd', label: '智能勿扰（会议自动静默）', desc: '检测到麦克风/摄像头被占用（≈正在开会/录屏）时，自动不弹窗、不响铃；会议结束自动恢复' },
+  { key: 'desktopWidget', label: '桌面挂件小窗', desc: '在桌面右下角常驻一个可拖动小窗，速览番茄钟 / 到期待办 / Agent / 正在播放；点「展开」回主岛' }
+]
+
+// 自动化规则：当 X 则 Y（本地触发，纯自用不打扰主力工作流）
+const AUTOMATION: { key: keyof SettingsFlags; label: string; desc: string }[] = [
+  { key: 'ruleMorning', label: '晨间简报 · 每天首次唤醒', desc: '每天第一次展开灵动岛时，自动生成"今日作战地图"晨间简报' },
+  { key: 'ruleEvening', label: '晚间复盘草稿 · 每天 20:00', desc: '每天晚上 8 点自动生成今日复盘草稿，等你回来查看' },
+  { key: 'rulePomoCapsule', label: '番茄结束记录', desc: '每个专注番茄结束后自动弹出闪念胶囊，趁热记下进展' },
+  { key: 'ruleMeetingNote', label: '会议结束提醒', desc: '检测到会议结束时，提示把要点记成便签' }
 ]
 
 const TOOLS: { key: keyof SettingsFlags; label: string }[] = [
@@ -192,34 +222,88 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
   const enabledTools = TOOLS.filter((t) => p.settings[t.key]).length
   const providerLabel = (PROVIDERS.find((x) => x.key === p.llm.provider) || {}).label
   const llmSummary = `${providerLabel} · ${p.llm.model || '未设置'}`
+  const statusItems = [
+    {
+      label: 'Agent 桥接',
+      ok: p.bridgeConnected,
+      detail: p.bridgeConnected ? `${p.activeAgents} 个活动 · ${p.totalAgents} 个会话` : '连接异常'
+    },
+    {
+      label: '安全隔离',
+      ok: !!p.runtimeInfo?.security.sandbox && !!p.runtimeInfo?.security.contextIsolation && !p.runtimeInfo?.security.nodeIntegration,
+      detail: p.runtimeInfo ? '沙箱与上下文隔离已启用' : '正在读取'
+    },
+    {
+      label: '问答模型',
+      ok: !!p.llm.apiKey && !!p.llm.model,
+      detail: p.llm.apiKey && p.llm.model ? p.llm.model : '尚未完成配置'
+    },
+    {
+      label: '日历同步',
+      ok: !!(p.caldav.server && p.caldav.username && p.caldav.password) || !!p.icsUrl,
+      detail: p.caldav.server ? 'CalDAV 已配置' : p.icsUrl ? 'ICS 已配置' : '尚未配置'
+    }
+  ]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* 运行状态：把版本和关键链路从后台实现变成用户可见的健康度。 */}
+      <div style={{ paddingBottom: 14, borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <div style={sectionTitle}>运行状态</div>
+          <span style={{ marginLeft: 'auto', color: 'oklch(0.72 0.02 var(--th) / .7)', fontSize: 10.5, fontFamily: 'ui-monospace,monospace' }}>
+            v{p.runtimeInfo?.version || '…'} · {p.runtimeInfo?.packaged ? '安装版' : '开发版'}
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 18px' }}>
+          {statusItems.map((item) => (
+            <div key={item.label} style={{ display: 'grid', gridTemplateColumns: '8px minmax(0, 1fr)', columnGap: 8, alignItems: 'start', minWidth: 0 }}>
+              <span style={{ width: 7, height: 7, marginTop: 4, borderRadius: 999, background: item.ok ? 'oklch(0.78 0.14 150)' : 'oklch(0.75 0.13 75)', boxShadow: item.ok ? '0 0 8px oklch(0.72 0.14 150 / .45)' : '0 0 8px oklch(0.75 0.13 75 / .35)' }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: 'oklch(0.9 0.02 var(--th))', fontSize: 11.5, fontWeight: 650 }}>{item.label}</div>
+                <div title={item.detail} style={{ marginTop: 2, color: 'oklch(0.62 0.02 var(--th) / .65)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.detail}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* 主题 */}
       <div>
-        <div style={sectionTitle}>灵动岛主题</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {THEMES.map((t) => {
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={sectionTitle}>灵动岛主题</div>
+          <span style={{ flex: 1 }} />
+          <div className="hv" onClick={p.onOpenThemeDesigner} style={{ padding: '4px 11px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 600, background: 'oklch(0.35 0.07 var(--th) / .5)', color: 'oklch(0.85 calc(0.1 * var(--cs, 1)) var(--th))' }}>🎨 自定义主题</div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+          {[...p.customThemes, ...THEMES].map((t) => {
             const sel = p.theme === t.key
+            const custom = t.key.startsWith('custom-')
             return (
               <div
                 key={t.key}
                 className="hv"
                 onClick={() => p.onSetTheme(t.key)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 11, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 11, cursor: 'pointer', position: 'relative',
                   background: sel ? 'oklch(0.3 0.05 var(--th) / .35)' : 'rgba(255,255,255,.04)',
                   border: `1px solid ${sel ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.07)'}`
                 }}
               >
                 <div style={{ width: 16, height: 16, flex: 'none', borderRadius: 999, background: t.dot, boxShadow: `0 0 8px ${t.dot}`, border: '1px solid rgba(255,255,255,.25)' }} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
                   <span style={{ color: sel ? 'oklch(0.95 0.01 var(--th))' : 'oklch(0.85 0.02 var(--th) / .85)', fontSize: 12, fontWeight: sel ? 700 : 500 }}>
-                    {t.label}
+                    {custom ? '✨ ' : ''}{t.label}
                     {sel && <span style={{ marginLeft: 6, fontSize: 9.5, color: 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))' }}>使用中</span>}
                   </span>
                   <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.desc}</span>
                 </div>
+                {custom && (
+                  <span style={{ flex: 'none', display: 'flex', gap: 2 }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                    <span className="hv" title="编辑该主题（带入令牌到设计器）" onClick={() => p.onEditTheme(t.key)} style={{ padding: '4px 7px', borderRadius: 7, color: 'oklch(0.78 0.02 var(--th) / .8)', fontSize: 11.5, cursor: 'pointer' }}>✎</span>
+                    <span className="hv" title="删除自定义主题" onClick={() => p.onDeleteCustomTheme(t.key)} style={{ padding: '4px 7px', borderRadius: 7, color: 'oklch(0.65 0.08 25 / .9)', fontSize: 11.5, cursor: 'pointer', background: 'rgba(255,255,255,.04)' }}>✕</span>
+                  </span>
+                )}
               </div>
             )
           })}
@@ -331,6 +415,21 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
               </div>
             )
           })}
+          {/* 自动化规则：当 X 则 Y */}
+          <div style={{ marginTop: 4, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.06)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ color: 'oklch(0.7 calc(0.08 * var(--cs, 1)) var(--th) / .8)', fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em' }}>⚙ 自动化 · 当 X 则 Y</div>
+            {AUTOMATION.map((r) => (
+              <div key={r.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span style={{ color: 'oklch(0.88 0.02 var(--th) / .9)', fontSize: 12.5 }}>{r.label}</span>
+                  <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 10.5 }}>{r.desc}</span>
+                </div>
+                <div style={track(p.settings[r.key])} onClick={() => p.onToggle(r.key)}>
+                  <div style={knob(p.settings[r.key])} />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

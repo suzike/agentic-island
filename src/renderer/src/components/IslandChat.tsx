@@ -3,12 +3,134 @@
 // 消息时间戳、悬停浮现复制（用户/AI 均可）。
 
 import { useEffect, useRef, useState } from 'react'
-import type { ChatProps, QuoteRef } from '../types'
+import type { Block, ChatMessage, ChatProps, QuoteRef } from '../types'
 import { Markdown, Collapsible } from './Markdown'
 import { blocksToText } from '../logic/chat'
-import { readAttachment } from '../logic/files'
+import { readAttachment, downscaleDataUrl, selectLocalFiles } from '../logic/files'
+import { island } from '../bridge'
 
 const attIcon = (t: string): string => (t === 'file' ? '📎' : '📷')
+
+/** 打字中三点脉冲 */
+function TypingDots(): React.JSX.Element {
+  return (
+    <div style={{ display: 'flex', gap: 4, padding: '2px 0' }}>
+      {[0, 0.2, 0.4].map((d) => (
+        <div key={d} style={{ width: 6, height: 6, borderRadius: 999, background: 'oklch(0.7 calc(0.08 * var(--cs, 1)) var(--th))', animation: `ai-dotpulse 1s ease-in-out ${d}s infinite` }} />
+      ))}
+    </div>
+  )
+}
+
+/** 本地 Agent 步骤时间线（工具/技能/MCP/命令）：进行中脉冲点，完成打勾 */
+function StepsTimeline({ steps }: { steps: { label: string; detail?: string; done?: boolean }[] }): React.JSX.Element {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderLeft: '2px solid oklch(0.55 0.1 var(--th) / .35)', paddingLeft: 9 }}>
+      {steps.map((s, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+          <span style={{ flex: 'none', width: 6, height: 6, borderRadius: 999, background: s.done ? 'oklch(0.75 0.13 150)' : 'oklch(0.8 0.13 75)', animation: s.done ? undefined : 'ai-dotpulse 1.4s ease-in-out infinite', alignSelf: 'center' }} />
+          <span style={{ flex: 'none', color: 'oklch(0.86 0.04 var(--th) / .92)', fontSize: 10.5, fontWeight: 600 }}>{s.label}</span>
+          {s.detail && <span style={{ flex: 1, minWidth: 0, color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 9.5, fontFamily: "ui-monospace,'Cascadia Code',monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.detail}</span>}
+          {s.done && <span style={{ flex: 'none', color: 'oklch(0.72 0.12 150)', fontSize: 9 }}>✓</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** 本地 Agent 流式气泡：思考过程（进行中展开，出正文/步骤后自动折叠）→ 步骤时间线 → 流式正文 + 停止按钮 */
+function AgentLiveBody({ live }: { live: NonNullable<ChatMessage['live']> }): React.JSX.Element {
+  const thinkCollapsed = !!live.text || live.steps.length > 0
+  return (
+    <>
+      {live.status && <div style={{ color: 'oklch(0.6 0.03 var(--th) / .6)', fontSize: 9, fontFamily: 'ui-monospace,monospace' }}>⚙ {live.status}</div>}
+      {live.think && (
+        <div style={{ borderLeft: '2px solid oklch(0.6 0.1 260 / .5)', paddingLeft: 9 }}>
+          <div style={{ color: 'oklch(0.7 0.06 260 / .8)', fontSize: 10.5, fontWeight: 600, marginBottom: 3 }}>💭 {thinkCollapsed ? '思考过程' : '思考中…'}</div>
+          {thinkCollapsed ? (
+            <div style={{ opacity: 0.72 }}>
+              <Collapsible collapsedHeight={26}>
+                <Markdown text={live.think} />
+              </Collapsible>
+            </div>
+          ) : (
+            // 进行中：只露最近几行，随流式自动"滚动"（column-reverse 让底部对齐）
+            <div style={{ maxHeight: 108, overflow: 'hidden', display: 'flex', flexDirection: 'column-reverse', opacity: 0.78 }}>
+              <div><Markdown text={live.think} /></div>
+            </div>
+          )}
+        </div>
+      )}
+      {live.steps.length > 0 && <StepsTimeline steps={live.steps} />}
+      {live.text && (
+        <div style={{ color: 'oklch(0.84 0.02 var(--th) / .9)' }}>
+          <Markdown text={live.text} />
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ display: 'inline-block', width: 7, height: 12, background: 'oklch(0.8 0.12 var(--th))', animation: 'ai-dotpulse 1s ease-in-out infinite' }} />
+        <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9 }}>{live.engine === 'claude' ? 'Claude Code' : 'Codex'} 执行中 · 需审批的操作会弹到 Agents 分区</span>
+        <span style={{ flex: 1 }} />
+        <span className="hv" onClick={() => island.agentCliCancel(live.engine)} style={{ cursor: 'pointer', padding: '2px 9px', borderRadius: 999, background: 'oklch(0.4 0.09 30 / .4)', color: 'oklch(0.85 0.1 30)', fontSize: 9.5, fontWeight: 700 }}>⏹ 停止</span>
+      </div>
+    </>
+  )
+}
+
+/** AI 回答正文：思考过程（可折叠）+ h/p/ul/code/note 富文本块。主气泡与就地追问子线程共用。 */
+function AnswerBody({ blocks }: { blocks?: Block[] }): React.JSX.Element {
+  const thinkText = (blocks || []).filter((b) => b.t === 'think').map((b) => b.text || '').filter(Boolean).join('\n\n')
+  return (
+    <>
+      {thinkText && (
+        <div style={{ borderLeft: '2px solid oklch(0.6 0.1 260 / .5)', paddingLeft: 9, margin: '1px 0 3px' }}>
+          <div style={{ color: 'oklch(0.7 0.06 260 / .8)', fontSize: 10.5, fontWeight: 600, marginBottom: 3 }}>💭 思考过程</div>
+          <div style={{ opacity: 0.72 }}>
+            <Collapsible collapsedHeight={52}>
+              <Markdown text={thinkText} />
+            </Collapsible>
+          </div>
+        </div>
+      )}
+      {(blocks || []).filter((b) => b.t !== 'think').map((b, bi) => {
+        if (b.t === 'steps')
+          return (
+            <div key={bi} style={{ opacity: 0.85 }}>
+              <div style={{ color: 'oklch(0.72 0.05 var(--th) / .8)', fontSize: 10, fontWeight: 600, marginBottom: 3 }}>🛠 执行过程 · {(b.steps || []).length} 步</div>
+              <Collapsible collapsedHeight={44}>
+                <StepsTimeline steps={(b.steps || []).map((s) => ({ ...s, done: true }))} />
+              </Collapsible>
+            </div>
+          )
+        if (b.t === 'h') return <div key={bi} style={{ color: 'oklch(0.94 0.02 var(--th))', fontSize: 12.5, fontWeight: 700 }}>{b.text}</div>
+        if (b.t === 'p')
+          return (
+            <div key={bi} style={{ color: 'oklch(0.84 0.02 var(--th) / .9)' }}>
+              <Markdown text={b.text || ''} />
+            </div>
+          )
+        if (b.t === 'ul')
+          return (
+            <div key={bi} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {(b.items || []).map((li, li2) => (
+                <div key={li2} style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+                  <div style={{ color: 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))', fontSize: 12, lineHeight: 1.5 }}>•</div>
+                  <div style={{ color: 'oklch(0.82 0.02 var(--th) / .88)', fontSize: 12, lineHeight: 1.5 }}>{li}</div>
+                </div>
+              ))}
+            </div>
+          )
+        if (b.t === 'code')
+          return (
+            <div key={bi} style={{ color: 'oklch(0.86 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 11.5, fontFamily: "ui-monospace,'Cascadia Code',Consolas,monospace", background: 'rgba(0,0,0,.32)', padding: '8px 10px', borderRadius: 8, overflowX: 'auto', whiteSpace: 'pre' }}>
+              {b.text}
+            </div>
+          )
+        return <div key={bi} style={{ color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 11, fontStyle: 'italic' }}>{b.text}</div>
+      })}
+    </>
+  )
+}
 
 /** 引用卡片：左侧主题色条 + 引用原文 + 可选疑问；输入区可删除，气泡内只读展示 */
 function QuoteCard({ q, onRemove, compact }: { q: QuoteRef; onRemove?: () => void; compact?: boolean }): React.JSX.Element {
@@ -45,16 +167,11 @@ const fmtTs = (ts?: number): string => {
 
 // 选择文件：真实读取内容（文本→content 拼进提问；图片→dataURL 发视觉模型）
 const pickFiles = (accept: string, onAttach: ChatProps['onAttach']): void => {
-  const inp = document.createElement('input')
-  inp.type = 'file'
-  inp.multiple = true
-  if (accept) inp.accept = accept
-  inp.onchange = (): void => {
-    Array.from(inp.files || []).forEach((f) => {
+  void selectLocalFiles(accept, true).then((files) => {
+    files.forEach((f) => {
       readAttachment(f).then((att) => onAttach(att.type, att))
     })
-  }
-  inp.click()
+  })
 }
 
 const copyChip = (active: boolean): React.CSSProperties => ({
@@ -74,17 +191,30 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   // 引用追问弹窗：框选 AI 片段后浮现，写疑问 → 贴入输入区
   const [sel, setSel] = useState<{ text: string; note: string; x: number; y: number } | null>(null)
+  // 就地追问：记录哪条回答下展开了输入框 + 其草稿文本
+  const [fuIdx, setFuIdx] = useState<number | null>(null)
+  const [fuText, setFuText] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
+  const fuRef = useRef<HTMLTextAreaElement>(null)
 
-  // 在 AI 气泡内框选文字 → 记录选区文本与位置，弹出备注窗
+  const sendFollowUp = (): void => {
+    const t = fuText.trim()
+    if (!t || !p.onFollowUp || fuIdx === null) return
+    p.onFollowUp(fuIdx, t) // 问答嵌套进第 fuIdx 条气泡；保持展开以便连续追问
+    setFuText('')
+  }
+
+  // 在 AI 气泡内先框选文字，再右键 → 弹出引用追问框。
+  // 用右键（而非松开鼠标）触发，是为了让普通选中+复制不被弹窗打断；无选区时右键不拦截。
   const onAiSelect = (e: React.MouseEvent): void => {
     if (!p.enableQuote) return
     const s = window.getSelection()
     if (!s || s.isCollapsed) return
     const text = s.toString().trim()
     if (!text || text.length < 2) return
+    e.preventDefault() // 有选区才弹自定义框，压掉原生右键菜单
     let x = e.clientX
     let y = e.clientY + 8
     try {
@@ -101,6 +231,10 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
   useEffect(() => {
     if (sel) noteRef.current?.focus()
   }, [sel])
+  // 展开就地追问输入框时自动聚焦
+  useEffect(() => {
+    if (fuIdx !== null) fuRef.current?.focus()
+  }, [fuIdx])
 
   const confirmQuote = (): void => {
     if (!sel) return
@@ -109,11 +243,12 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
     setSel(null)
   }
 
-  // 新消息自动滚到底部
+  // 新消息自动滚到底部（含本地 Agent 流式更新：正文/思考长度、步骤数变化都触发跟随）
+  const lastMsg = p.messages[p.messages.length - 1]
   useEffect(() => {
     const el = boxRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [p.messages.length, p.messages[p.messages.length - 1]?.typing])
+  }, [p.messages.length, lastMsg?.typing, lastMsg?.live?.text.length, lastMsg?.live?.think.length, lastMsg?.live?.steps.length])
 
   // 输入框自动增高（1~6 行）
   const autoGrow = (): void => {
@@ -167,7 +302,10 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                   </div>
                 )}
                 {!!m.text && (
-                  <div style={{ padding: '8px 12px', borderRadius: '14px 14px 4px 14px', background: 'linear-gradient(180deg, oklch(0.5 calc(0.11 * var(--cs, 1)) var(--th)), oklch(0.42 calc(0.11 * var(--cs, 1)) var(--th)))', color: 'oklch(0.98 0.01 var(--th))', fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  <div
+                    onContextMenu={p.enableQuote ? onAiSelect : undefined}
+                    style={{ padding: '8px 12px', borderRadius: '14px 14px 4px 14px', background: 'linear-gradient(180deg, oklch(0.5 calc(0.11 * var(--cs, 1)) var(--th)), oklch(0.42 calc(0.11 * var(--cs, 1)) var(--th)))', color: 'oklch(0.98 0.01 var(--th))', fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: p.enableQuote ? 'text' : undefined, cursor: p.enableQuote ? 'text' : undefined }}
+                  >
                     {m.text}
                   </div>
                 )}
@@ -185,66 +323,67 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                   ◆
                 </div>
                 <div
-                  onMouseUp={p.enableQuote && !m.typing ? onAiSelect : undefined}
+                  onContextMenu={p.enableQuote && !m.typing ? onAiSelect : undefined}
                   style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '11px 13px', borderRadius: '4px 14px 14px 14px', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.06)', minWidth: 0, userSelect: p.enableQuote ? 'text' : undefined, cursor: p.enableQuote && !m.typing ? 'text' : undefined }}
                 >
-                  {m.typing && (
-                    <div style={{ display: 'flex', gap: 4, padding: '2px 0' }}>
-                      {[0, 0.2, 0.4].map((d) => (
-                        <div key={d} style={{ width: 6, height: 6, borderRadius: 999, background: 'oklch(0.7 calc(0.08 * var(--cs, 1)) var(--th))', animation: `ai-dotpulse 1s ease-in-out ${d}s infinite` }} />
-                      ))}
+                  {m.typing && <TypingDots />}
+                  {m.live && <AgentLiveBody live={m.live} />}
+                  <AnswerBody blocks={m.blocks} />
+                  {/* 就地追问子线程：问答都嵌套在本气泡内，形成一条对话支线 */}
+                  {(m.followups?.length ?? 0) > 0 && (
+                    <div style={{ marginTop: 5, paddingLeft: 10, borderLeft: '2px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .32)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {m.followups!.map((fm, fi) =>
+                        fm.role === 'user' ? (
+                          <div key={fi} style={{ alignSelf: 'flex-start', maxWidth: '96%', padding: '5px 10px', borderRadius: '12px 12px 12px 4px', background: 'oklch(0.5 calc(0.1 * var(--cs, 1)) var(--th) / .38)', color: 'oklch(0.96 0.01 var(--th))', fontSize: 11.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {fm.text}
+                          </div>
+                        ) : fm.typing ? (
+                          <TypingDots key={fi} />
+                        ) : fm.live ? (
+                          <div key={fi} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <AgentLiveBody live={fm.live} />
+                          </div>
+                        ) : (
+                          <div key={fi} onContextMenu={p.enableQuote ? onAiSelect : undefined} style={{ display: 'flex', flexDirection: 'column', gap: 6, userSelect: p.enableQuote ? 'text' : undefined }}>
+                            <AnswerBody blocks={fm.blocks} />
+                          </div>
+                        )
+                      )}
                     </div>
                   )}
-                  {/* 思考过程：合并所有 think 块为一段，默认只露一部分、可展开（避免占用过多篇幅） */}
-                  {(() => {
-                    const thinks = (m.blocks || []).filter((b) => b.t === 'think')
-                    if (!thinks.length) return null
-                    const thinkText = thinks.map((b) => b.text || '').filter(Boolean).join('\n\n')
-                    return (
-                      <div style={{ borderLeft: '2px solid oklch(0.6 0.1 260 / .5)', paddingLeft: 9, margin: '1px 0 3px' }}>
-                        <div style={{ color: 'oklch(0.7 0.06 260 / .8)', fontSize: 10.5, fontWeight: 600, marginBottom: 3 }}>💭 思考过程</div>
-                        <div style={{ opacity: 0.72 }}>
-                          <Collapsible collapsedHeight={52}>
-                            <Markdown text={thinkText} />
-                          </Collapsible>
-                        </div>
-                      </div>
-                    )
-                  })()}
-                  {(m.blocks || []).filter((b) => b.t !== 'think').map((b, bi) => {
-                    if (b.t === 'h') return <div key={bi} style={{ color: 'oklch(0.94 0.02 var(--th))', fontSize: 12.5, fontWeight: 700 }}>{b.text}</div>
-                    if (b.t === 'p')
-                      return (
-                        <div key={bi} style={{ color: 'oklch(0.84 0.02 var(--th) / .9)' }}>
-                          <Markdown text={b.text || ''} />
-                        </div>
-                      )
-                    if (b.t === 'ul')
-                      return (
-                        <div key={bi} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          {(b.items || []).map((li, li2) => (
-                            <div key={li2} style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
-                              <div style={{ color: 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))', fontSize: 12, lineHeight: 1.5 }}>•</div>
-                              <div style={{ color: 'oklch(0.82 0.02 var(--th) / .88)', fontSize: 12, lineHeight: 1.5 }}>{li}</div>
-                            </div>
-                          ))}
-                        </div>
-                      )
-                    if (b.t === 'code')
-                      return (
-                        <div key={bi} style={{ color: 'oklch(0.86 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 11.5, fontFamily: "ui-monospace,'Cascadia Code',Consolas,monospace", background: 'rgba(0,0,0,.32)', padding: '8px 10px', borderRadius: 8, overflowX: 'auto', whiteSpace: 'pre' }}>
-                          {b.text}
-                        </div>
-                      )
-                    return <div key={bi} style={{ color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 11, fontStyle: 'italic' }}>{b.text}</div>
-                  })}
-                  {/* 悬停浮现：时间 + 复制整条回复 */}
+                  {/* 追问：就地在本气泡下展开输入框；问答嵌套在本气泡内，上下文含整段主对话 */}
                   {!m.typing && (m.blocks?.length ?? 0) > 0 && (
-                    <div className="row-acts" style={{ display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-end', marginTop: 1 }}>
-                      {m.ts && <span style={{ fontSize: 9, color: 'oklch(0.6 0.02 var(--th) / .5)' }}>{fmtTs(m.ts)}</span>}
-                      <div className="hv" onClick={() => copyText(mi, blocksToText(m.blocks!))} style={copyChip(copiedIdx === mi)}>
-                        {copiedIdx === mi ? '✓ 已复制' : '⧉ 复制'}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      {p.onFollowUp && (
+                        <div className="hv" onClick={() => { setFuIdx((v) => (v === mi ? null : mi)); setFuText('') }} title="就地追问（记得上文）" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 9px', borderRadius: 999, background: fuIdx === mi ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .28)' : 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .14)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .28)', color: 'oklch(0.85 calc(0.12 * var(--cs, 1)) var(--th))', fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>↳ 追问</div>
+                      )}
+                      <span style={{ flex: 1 }} />
+                      {/* 悬停浮现：时间 + 复制整条回复 */}
+                      <div className="row-acts" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {m.ts && <span style={{ fontSize: 9, color: 'oklch(0.6 0.02 var(--th) / .5)' }}>{fmtTs(m.ts)}</span>}
+                        <div className="hv" onClick={() => copyText(mi, blocksToText(m.blocks!))} style={copyChip(copiedIdx === mi)}>
+                          {copiedIdx === mi ? '✓ 已复制' : '⧉ 复制'}
+                        </div>
                       </div>
+                    </div>
+                  )}
+                  {/* 就地追问输入框：仅在该条回答下展开 */}
+                  {p.onFollowUp && fuIdx === mi && (
+                    <div style={{ marginTop: 4, borderRadius: 12, background: 'rgba(0,0,0,.28)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .3)', padding: 7, display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+                      <textarea
+                        ref={fuRef}
+                        value={fuText}
+                        onChange={(e) => setFuText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFollowUp() }
+                          else if (e.key === 'Escape') { setFuIdx(null); setFuText('') }
+                        }}
+                        placeholder="接着这段继续问…（Enter 发送 · Esc 收起）"
+                        rows={1}
+                        className="ai-scroll"
+                        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', resize: 'none', color: 'oklch(0.95 0.01 var(--th))', fontSize: 12, lineHeight: 1.5, fontFamily: 'var(--font)', padding: '4px 4px', maxHeight: 90, overflowY: 'auto' }}
+                      />
+                      <div className="hv" onClick={sendFollowUp} title="发送追问（Enter）" style={{ width: 28, height: 28, flex: 'none', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: fuText.trim() ? 'pointer' : 'default', background: fuText.trim() ? 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))' : 'rgba(255,255,255,.06)', color: fuText.trim() ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 13 }}>↑</div>
                     </div>
                   )}
                 </div>
@@ -312,10 +451,24 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                 if (canSend) p.onSend()
               }
             }}
+            onPaste={(e) => {
+              // 直接粘贴图片 → 作为附件（缩放控内存）走多模态；有图时阻止其默认文本粘贴
+              const imgItem = Array.from(e.clipboardData?.items || []).find((it) => it.type.startsWith('image/'))
+              if (!imgItem) return
+              const blob = imgItem.getAsFile()
+              if (!blob) return
+              e.preventDefault()
+              const reader = new FileReader()
+              reader.onload = (): void => {
+                const url = String(reader.result)
+                void downscaleDataUrl(url).then((small) => p.onAttach('screenshot', { name: '粘贴图片', thumb: small, dataUrl: small }))
+              }
+              reader.readAsDataURL(blob)
+            }}
             placeholder={p.placeholder}
             rows={1}
             className="ai-scroll"
-            style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', resize: 'none', color: 'oklch(0.95 0.01 var(--th))', fontSize: 12.5, lineHeight: 1.5, fontFamily: "'Segoe UI',system-ui,sans-serif", padding: '6px 4px', maxHeight: 116, overflowY: 'auto' }}
+            style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', resize: 'none', color: 'oklch(0.95 0.01 var(--th))', fontSize: 12.5, lineHeight: 1.5, fontFamily: 'var(--font)', padding: '6px 4px', maxHeight: 116, overflowY: 'auto' }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <div title="图片" onClick={() => pickFiles('image/*', p.onAttach)} className="hv" style={{ width: 30, height: 30, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'oklch(0.8 0.02 var(--th) / .8)', fontSize: 14 }}>
@@ -360,7 +513,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
               placeholder="写下你对这段的疑问（可留空，Enter 添加）"
               rows={2}
               className="ai-scroll"
-              style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(0,0,0,.3)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, outline: 'none', resize: 'none', color: 'oklch(0.95 0.01 var(--th))', fontSize: 11, lineHeight: 1.45, fontFamily: "'Segoe UI',system-ui,sans-serif", padding: '6px 8px', maxHeight: 70 }}
+              style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(0,0,0,.3)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, outline: 'none', resize: 'none', color: 'oklch(0.95 0.01 var(--th))', fontSize: 11, lineHeight: 1.45, fontFamily: 'var(--font)', padding: '6px 8px', maxHeight: 70 }}
             />
             <div style={{ display: 'flex', gap: 6 }}>
               <div className="hv" onClick={confirmQuote} style={{ flex: 1, textAlign: 'center', padding: '6px 0', borderRadius: 8, background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>

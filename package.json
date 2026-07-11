@@ -1,6 +1,6 @@
 {
   "name": "agentic-island",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "常驻 Windows 屏幕顶部的 AI 编码 Agent 状态监控、审批与协作面板",
   "main": "./out/main/index.js",
   "author": "Agentic-Island",
@@ -9,16 +9,20 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "probe": "node --experimental-strip-types scripts/probe.mjs",
     "demo:plan": "node scripts/demo-plan.mjs",
+    "docs:capture": "node scripts/capture-readme.mjs",
     "package": "electron-vite build && electron-builder --win nsis"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "electron-store": "^10.0.0"
+    "electron-store": "^10.0.0",
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5"
   },
   "build": {
     "appId": "com.agentic.island",
@@ -60,13 +64,17 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.15.6",
     "electron-vite": "^2.3.0",
     "png-to-ico": "^3.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
+  },
+  "overrides": {
+    "esbuild": "0.25.12",
+    "tar": "7.5.19"
   }
 }

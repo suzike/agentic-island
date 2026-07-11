@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="510" viewBox="0 0 1200 510" role="img" aria-labelledby="title desc">
+  <title id="title">Agent 通信通道与审批闭环</title><desc id="desc">Claude Code hooks 和 Codex 日志如何进入灵动岛，以及审批决定如何返回。</desc>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#70dcbc"/></marker><style>.t{font-family:"Segoe UI","Microsoft YaHei",sans-serif;fill:#edf8f4}.m{fill:#91aaa2}.h{font-size:26px;font-weight:750}.l{font-size:15px;font-weight:650}.s{font-size:13px}.b{rx:12;stroke-width:1.3}.p{fill:none;stroke:#70dcbc;stroke-width:2.2;marker-end:url(#a)}.dash{stroke-dasharray:7 7}</style></defs>
+  <rect width="1200" height="510" fill="#071712"/><text class="t h" x="45" y="48">Agent 通信通道 · 监控与阻塞审批</text><text class="t m s" x="45" y="72">主路径只走本机回环；灵动岛退出时转发器 fail-open，不阻塞 CLI</text>
+  <rect class="b" x="45" y="115" width="185" height="92" fill="#12352b" stroke="#44987b"/><text class="t l" x="67" y="148">Claude Code</text><text class="t m s" x="67" y="174">生命周期 hooks</text><text class="t m s" x="67" y="194">PreToolUse 可阻塞</text>
+  <rect class="b" x="276" y="115" width="185" height="92" fill="#12352b" stroke="#44987b"/><text class="t l" x="298" y="148">cc-forward.mjs</text><text class="t m s" x="298" y="174">读取 bridge.json</text><text class="t m s" x="298" y="194">15 秒内失败即放行</text>
+  <rect class="b" x="507" y="115" width="185" height="92" fill="#132c36" stroke="#4d8ca7"/><text class="t l" x="529" y="148">Bridge Server</text><text class="t m s" x="529" y="174">127.0.0.1 随机端口</text><text class="t m s" x="529" y="194">Bearer token</text>
+  <rect class="b" x="738" y="115" width="185" height="92" fill="#282414" stroke="#a38c42"/><text class="t l" x="760" y="148">Agents Store</text><text class="t m s" x="760" y="174">会话状态机</text><text class="t m s" x="760" y="194">风险 / 计划 / 等待</text>
+  <rect class="b" x="969" y="115" width="185" height="92" fill="#201b2d" stroke="#806bb0"/><text class="t l" x="991" y="148">React 审批卡</text><text class="t m s" x="991" y="174">允许 / 拒绝 / 理由</text><text class="t m s" x="991" y="194">跳回终端</text>
+  <path class="p" d="M230 161H276"/><path class="p" d="M461 161H507"/><path class="p" d="M692 161H738"/><path class="p" d="M923 161H969"/>
+  <path class="p" d="M1060 222V277H600V218"/><text class="t m s" x="752" y="267">permissionDecision + 拒绝理由回传</text>
+  <rect class="b" x="45" y="325" width="185" height="92" fill="#13252f" stroke="#477f98"/><text class="t l" x="67" y="358">Codex</text><text class="t m s" x="67" y="384">hooks + rollout JSONL</text><text class="t m s" x="67" y="404">日志跟随为监控主路</text>
+  <rect class="b" x="276" y="325" width="185" height="92" fill="#13252f" stroke="#477f98"/><text class="t l" x="298" y="358">codex-tail</text><text class="t m s" x="298" y="384">增量轮询与去重</text><text class="t m s" x="298" y="404">15 分钟空闲归档</text>
+  <path class="p" d="M230 371H276"/><path class="p dash" d="M461 371H830V218"/>
+  <text class="t m s" x="507" y="354">只监控，不伪造审批能力</text>
+  <rect x="738" y="325" width="416" height="92" rx="12" fill="#10231e" stroke="#315d50"/><text class="t l" x="760" y="356">统一呈现</text><text class="t m s" x="760" y="382">运行中 · 等待回复 · 审批中 · 已完成 · git 变更小结</text><text class="t m s" x="760" y="404">会话键 backend:sessionId，结束后延迟隐藏</text>
+</svg>

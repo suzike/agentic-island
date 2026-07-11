@@ -83,12 +83,14 @@ async function partA(): Promise<void> {
   await fire(script, 'Stop', { cwd, session_id: 's' }); await sleep(120)
   check(store.snapshot().agents[0]?.status === 'waiting' && detail().includes('等待你的回复'), `Stop → 等待你回复（立即弹出）→ "${detail()}"`)
 
-  await fire(script, 'SessionEnd', { cwd, session_id: 's' }); await sleep(120)
-  check(store.snapshot().agents[0]?.status === 'done', `SessionEnd → done`)
-
   // 多会话：不同 session_id（同一 cwd）→ 两个独立 Agent（多终端不再塌缩成一个）
   await fire(script, 'SessionStart', { cwd, session_id: 'session-2' }); await sleep(140)
   check(store.snapshot().agents.length >= 2, `多会话独立：agents 数=${store.snapshot().agents.length}（应≥2，多终端不塌缩）`)
+
+  // 会话真正结束 → 立即从岛上移除（不再保留 done 占位），其它会话不受影响
+  await fire(script, 'SessionEnd', { cwd, session_id: 's' }); await sleep(120)
+  const afterEnd = store.snapshot().agents
+  check(!afterEnd.some((a) => a.id.endsWith(':s')) && afterEnd.length === 1, `SessionEnd → 立即移除（剩 ${afterEnd.length} 个，且不含已结束会话）`)
 
   bridge.stop()
 }
@@ -106,7 +108,13 @@ async function partB(): Promise<void> {
   // 先放一个用户已有配置
   const fs = await import('fs')
   fs.mkdirSync(ccPath, { recursive: true })
-  writeFileSync(join(ccPath, 'settings.json'), JSON.stringify({ model: 'opus', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo user-own' }] }] } }))
+  writeFileSync(join(ccPath, 'settings.json'), JSON.stringify({
+    model: 'opus',
+    hooks: {
+      Stop: [{ hooks: [{ type: 'command', command: 'echo user-own' }] }],
+      PreToolUse: [{ hooks: [{ type: 'command', command: 'node "D:/old/Agentic-Island/resources/hooks-bin/cc-forward.mjs" claude-code PreToolUse' }] }]
+    }
+  }))
 
   inst.installClaudeCode('C:/app/cc-forward.mjs')
   inst.installClaudeCode('C:/app/cc-forward.mjs') // 二次安装应幂等
@@ -119,6 +127,7 @@ async function partB(): Promise<void> {
   check(stopHooks.some((c: string) => c.includes('echo user-own')), '保留了用户已有的 Stop hook')
   const ourPre = settings.hooks.PreToolUse.flatMap((m: { hooks: { command: string }[] }) => m.hooks).filter((h: { command: string }) => h.command.includes('cc-forward.mjs'))
   check(ourPre.length === 1, `PreToolUse 幂等（我方条目数=${ourPre.length}，应为 1）`)
+  check(ourPre[0]?.command.includes('C:/app/cc-forward.mjs'), '重新接入会清理迁移前的失效脚本路径')
   check(existsSync(join(ccPath, 'settings.json.aiisland.bak')), '生成了备份文件')
 
   // Codex notify（Windows 用）：config.toml 追加 notify，不覆盖用户已有内容

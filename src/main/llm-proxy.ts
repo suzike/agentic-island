@@ -2,6 +2,7 @@
 // 密钥仅存于本机（safeStorage 加密），此处直接使用。替代原型里的本地假回复。
 
 import type { LlmRequestConfig } from '../shared/protocol'
+import { netFetch } from './http-client'
 
 const chatUrl = (baseUrl: string): string => baseUrl.replace(/\/+$/, '') + '/chat/completions'
 
@@ -17,8 +18,9 @@ export async function complete(
   if (!cfg.apiKey) return { ok: false, error: 'API Key 未配置' }
   if (!cfg.model) return { ok: false, error: '未选择型号' }
   try {
-    const res = await fetch(chatUrl(cfg.baseUrl), {
+    const res = await netFetch(chatUrl(cfg.baseUrl), {
       method: 'POST',
+      timeoutMs: deep ? 120000 : 60000,
       headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({
         model: cfg.model,
@@ -30,6 +32,11 @@ export async function complete(
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
+      // 本轮带图但端点拒绝 image_url（模型不支持视觉）——给出可操作提示，而非生肉 400
+      const hasImage = Array.isArray(user) && user.some((p) => p && (p as { type?: string }).type === 'image_url')
+      if (hasImage && (res.status === 400 || /image_url|vision|multimodal|deserialize/i.test(body))) {
+        return { ok: false, error: `当前模型「${cfg.model}」不支持图片输入。请到「设置 › 问答助手模型」切换/新增一个支持视觉的模型（如 glm-4v、qwen-vl-max、gpt-4o、gemini 等）后再试。` }
+      }
       return { ok: false, error: `HTTP ${res.status} ${body.slice(0, 160)}` }
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[] }
@@ -38,6 +45,34 @@ export async function complete(
     // 推理型模型（如 deepseek-reasoner）会单独返回思维链
     const reasoning = msg?.reasoning_content || msg?.reasoning
     return typeof text === 'string' ? { ok: true, text, reasoning } : { ok: false, error: '响应为空' }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
+/** 文本向量化：OpenAI 兼容 /embeddings（第二大脑本地 RAG 用）。cfg.model = 向量模型名。 */
+export async function embed(cfg: LlmRequestConfig, texts: string[]): Promise<{ ok: boolean; vectors?: number[][]; error?: string }> {
+  if (!cfg.baseUrl || !/^https?:\/\//.test(cfg.baseUrl)) return { ok: false, error: 'Base URL 无效' }
+  if (!cfg.apiKey) return { ok: false, error: 'API Key 未配置' }
+  if (!cfg.model) return { ok: false, error: '未设置向量模型' }
+  try {
+    const url = cfg.baseUrl.replace(/\/+$/, '') + '/embeddings'
+    const res = await netFetch(url, {
+      method: 'POST',
+      timeoutMs: 60000,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({ model: cfg.model, input: texts })
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      return { ok: false, error: `embeddings HTTP ${res.status} · ${cfg.model} · ${body.slice(0, 160)}` }
+    }
+    const data = (await res.json()) as { data?: { embedding?: number[]; index?: number }[] }
+    // 按 index 归位（部分端点乱序返回），再取 embedding
+    const rows = (data.data || []).slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    const vectors = rows.map((d) => d.embedding || [])
+    if (!vectors.length || vectors.some((v) => !v.length)) return { ok: false, error: '端点未返回有效向量（检查该模型是否为 embedding 模型、端点是否支持 /embeddings）' }
+    return { ok: true, vectors }
   } catch (e) {
     return { ok: false, error: String(e) }
   }

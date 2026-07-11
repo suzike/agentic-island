@@ -2,10 +2,45 @@
 // 此前附件只是装饰（AI 声称"无法读取"）——现在是真的读。
 
 import type { Attachment } from '../types'
+import { island } from '../bridge'
 
 const TEXT_EXT = /\.(md|markdown|txt|log|json|jsonc|yaml|yml|toml|ini|cfg|conf|xml|html?|css|scss|less|csv|tsv|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|kt|c|h|cpp|hpp|cs|swift|m|sql|sh|bash|ps1|bat|cmd|dockerfile|env|gitignore|vue|svelte|php|lua|r|pl|scala|dart|gradle|properties|diff|patch)$/i
 const MAX_TEXT_BYTES = 512 * 1024 // 超过 512KB 的文本不读（提示过大）
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024 // 视觉模型请求体上限考虑
+
+/** 打开 Chromium 文件选择器，并在其整个生命周期内让主窗口退出最高层。 */
+export function selectLocalFiles(accept = '', multiple = false): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = multiple
+    if (accept) input.accept = accept
+
+    let settled = false
+    const finish = (files: File[]): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      window.removeEventListener('focus', onFocus)
+      island.setNativeDialogOpen(false)
+      resolve(files)
+    }
+    const onFocus = (): void => {
+      // change/cancel 通常先到；短暂延迟兼容 Windows 文件选择器的事件顺序。
+      setTimeout(() => finish(Array.from(input.files || [])), 80)
+    }
+    const timeout = window.setTimeout(() => finish([]), 5 * 60_000)
+    input.onchange = () => finish(Array.from(input.files || []))
+    input.addEventListener('cancel', () => finish([]), { once: true })
+    window.addEventListener('focus', onFocus)
+    island.setNativeDialogOpen(true)
+    try {
+      input.click()
+    } catch {
+      finish([])
+    }
+  })
+}
 
 const readAsText = (f: File): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -41,6 +76,27 @@ export async function readAttachment(f: File): Promise<Attachment> {
   } catch {
     return { type: 'file', name: `${f.name}（读取失败）` }
   }
+}
+
+/** 把 dataURL 降采样（最宽 maxW、JPEG 质量 q），控制发给视觉模型的体积 */
+export function downscaleDataUrl(dataUrl: string, maxW = 1280, q = 0.85): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, maxW / img.width)
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(dataUrl); return }
+      ctx.drawImage(img, 0, 0, w, h)
+      try { resolve(canvas.toDataURL('image/jpeg', q)) } catch { resolve(dataUrl) }
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
 }
 
 /** 便签插图：读图并降采样（最宽 720px、JPEG 0.82），控制持久化体积（典型 30-90KB） */

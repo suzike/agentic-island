@@ -1,5 +1,7 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, net, screen, shell, Tray } from 'electron'
-import { join } from 'path'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, screen, shell, Tray } from 'electron'
+import { spawn } from 'child_process'
+import { readFile, writeFile } from 'fs/promises'
+import { basename, join } from 'path'
 import { AgentsStore } from './agents-store'
 import { BridgeServer } from './bridge-server'
 import { CodexTail } from './codex-tail'
@@ -11,7 +13,9 @@ import {
   installCodexNotify,
   uninstallCodexNotify
 } from './hook-installer'
-import { complete as llmComplete, test as llmTest } from './llm-proxy'
+import { complete as llmComplete, test as llmTest, embed as llmEmbed } from './llm-proxy'
+import { agentCliStream, agentCliCancel, agentCliCheck, type AgentEngine } from './agent-cli'
+import * as kb from './kb'
 import { playSound } from './sound'
 import { loadState, saveState } from './settings-store'
 import { focusByHwnd, focusByPid, focusByTitle, focusAnyByTitle, selectWtTab } from './terminal-jump'
@@ -20,24 +24,63 @@ import { fetchIcs, parseIcs } from './calendar-ics'
 import { fetchCaldav } from './calendar-caldav'
 import { getMediaInfo, mediaKey } from './media'
 import { fetchRss } from './rss'
+import { netFetch } from './http-client'
 import { setPtySink, ptyEnsure, ptyInput, ptyResize, ptyKill, ptyKillAll } from './term-pty'
 import { startClipboardWatch } from './clipboard-watch'
+import { startDndWatch } from './dnd-watch'
+import { createExternalYieldController, type ExternalYieldController } from './external-yield'
 import type { DecisionMessage, LlmRequestConfig } from '../shared/protocol'
 
 // 允许 WebAudio 无需用户手势即可播放（提示音/试听）
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
-// 双尺寸工作台：标准 / 大尺寸（设置或主界面按钮切换）；标准宽度可由设置滑杆自定义（380–880）
-let largeMode = false
-let customPanelW = 468
-const winW = (): number => (largeMode ? 940 : Math.max(452, customPanelW + 72))
-const winH = (): number => (largeMode ? 1020 : 780)
+// 窗口策略：**常驻铺满当前显示器工作区，永不 resize**。
+// 曾按面板尺寸开窗、覆盖层/尺寸切换时再 resize——透明无边框窗口每次 resize 都会让整岛肉眼可见地抖一下
+// （"部分按钮点击时整岛抖动"的根因），且窗口边界还带来隐形暗框/阴影裁切/flare 余量等一整族问题。
+// 铺满后：面板大小纯属渲染层布局（largeSize/islandWidth/fullscreen 都只改 CSS），点击穿透仍由命中检测决定。
 
 let win: BrowserWindow | null = null
+let externalYield: ExternalYieldController | null = null
+let rendererDialogRelease: (() => void) | null = null
 const store = new AgentsStore()
 const bridge = new BridgeServer(store, gitSummary)
 // Codex 实时接入：跟随其 rollout 会话日志（Windows 上 hooks/notify 都不通，这是唯一可靠通道）
 const codexTail = new CodexTail(store, gitSummary)
+
+function yieldToExternalApp(): void {
+  externalYield?.yieldWindow()
+}
+
+function openExternalTarget(url: string): Promise<void> {
+  yieldToExternalApp()
+  return shell.openExternal(url)
+}
+
+function openPathTarget(path: string): Promise<string> {
+  yieldToExternalApp()
+  return shell.openPath(path)
+}
+
+async function withNativeDialog<T>(open: () => Promise<T>): Promise<T> {
+  const release = externalYield?.suspendTopmost()
+  try {
+    return await open()
+  } finally {
+    release?.()
+  }
+}
+
+function showOwnedOpenDialog(options: Electron.OpenDialogOptions): Promise<Electron.OpenDialogReturnValue> {
+  return withNativeDialog(() => win && !win.isDestroyed()
+    ? dialog.showOpenDialog(win, options)
+    : dialog.showOpenDialog(options))
+}
+
+function showOwnedSaveDialog(options: Electron.SaveDialogOptions): Promise<Electron.SaveDialogReturnValue> {
+  return withNativeDialog(() => win && !win.isDestroyed()
+    ? dialog.showSaveDialog(win, options)
+    : dialog.showSaveDialog(options))
+}
 
 // 转发脚本的绝对路径（dev 指向源码，打包后指向 resources）
 const forwarderPath = (name: string): string => {
@@ -75,6 +118,11 @@ function createTray(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '展开灵动岛', click: reveal },
+      { label: '命令面板  Ctrl+Alt+K', click: () => openPalette() },
+      { label: '第二大脑  Ctrl+Alt+F', click: () => openBrain() },
+      { label: '闪念胶囊  Ctrl+Alt+Space', click: () => openCapsule() },
+      { label: '智能截图  Ctrl+Alt+S', click: () => openScreenshot() },
+      { label: '分析当前屏幕  Ctrl+Alt+A', click: () => void openScreenAnalyze() },
       { type: 'separator' },
       { label: '重启应用', click: () => { app.relaunch(); app.quit() } },
       { label: '退出 Agentic-Island', click: () => app.quit() }
@@ -92,13 +140,91 @@ function positionWindow(w: BrowserWindow): void {
   const display = follow
     ? screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     : displays[monitorIndex] || displays[0]
-  const { x, width, y, height } = display.workArea
-  // 高度不超过工作区，避免小屏幕上窗口溢出
-  const h = Math.min(winH(), height - 4)
+  const { x, y, width, height } = display.workArea
+  // 恒定铺满工作区；边界相同就直接跳过（避免任何多余的 setBounds——透明窗 resize/重设都可能闪/抖）
+  const cur = w.getBounds()
+  if (cur.x === x && cur.y === y && cur.width === width && cur.height === height) return
   // 关键：resizable:false 的窗口在 Windows 上 setBounds 改宽会被忽略 → 先临时放开再收回
   w.setResizable(true)
-  w.setBounds({ x: Math.round(x + (width - winW()) / 2), y, width: winW(), height: h })
+  w.setBounds({ x, y, width, height })
   w.setResizable(false)
+  // 注意：这里不要 webContents.invalidate()——透明窗口上强制全量重绘会产生肉眼可见的闪屏
+}
+
+const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+const rendererHtmlPath = (): string => join(__dirname, '../renderer/index.html')
+const appWebPreferences = (): Electron.BrowserWindowConstructorOptions['webPreferences'] => ({
+  preload: join(__dirname, '../preload/index.js'),
+  sandbox: true,
+  contextIsolation: true,
+  nodeIntegration: false,
+  webSecurity: true,
+  allowRunningInsecureContent: false,
+  // 窗口从不获得焦点（常驻叠层），必须关闭后台节流，否则定时器/WebAudio 会被挂起（提示音不响）
+  backgroundThrottling: false
+})
+
+function safeExternalUrl(raw: unknown): string | null {
+  const text = String(raw || '').trim()
+  if (!text || text.length > 4096 || hasNul(text)) return null
+  try {
+    const url = new URL(text)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+function devRendererUrl(hash?: string): string | null {
+  if (app.isPackaged || !process.env['ELECTRON_RENDERER_URL']) return null
+  try {
+    const url = new URL(process.env['ELECTRON_RENDERER_URL'])
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !loopbackHosts.has(url.hostname)) {
+      console.warn('[security] ignore untrusted ELECTRON_RENDERER_URL:', process.env['ELECTRON_RENDERER_URL'])
+      return null
+    }
+    if (hash) url.hash = hash.replace(/^#/, '')
+    return url.toString()
+  } catch {
+    console.warn('[security] ignore invalid ELECTRON_RENDERER_URL')
+    return null
+  }
+}
+
+function fileUrlPath(raw: string): string {
+  return decodeURIComponent(raw).replace(/^\/([A-Za-z]:)/, '$1').replace(/\//g, '\\').toLowerCase()
+}
+
+function isTrustedRendererNavigation(raw: string): boolean {
+  try {
+    const url = new URL(raw)
+    const dev = devRendererUrl()
+    if (dev && (url.protocol === 'http:' || url.protocol === 'https:')) return url.origin === new URL(dev).origin
+    if (url.protocol === 'file:') return fileUrlPath(url.pathname) === rendererHtmlPath().toLowerCase()
+  } catch {
+    return false
+  }
+  return false
+}
+
+function loadRenderer(w: BrowserWindow, hash?: string): void {
+  const dev = devRendererUrl(hash)
+  if (dev) void w.loadURL(dev)
+  else void w.loadFile(rendererHtmlPath(), hash ? { hash } : undefined)
+}
+
+function hardenWindow(w: BrowserWindow): void {
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    const external = safeExternalUrl(url)
+    if (external) void openExternalTarget(external)
+    return { action: 'deny' }
+  })
+  w.webContents.on('will-navigate', (event, url) => {
+    if (isTrustedRendererNavigation(url)) return
+    event.preventDefault()
+    const external = safeExternalUrl(url)
+    if (external) void openExternalTarget(external)
+  })
 }
 
 // 多显示器跟随：持续跟踪光标所在显示器，变化时把岛移过去（此前只在启动时定位一次，导致"跟随"失效）
@@ -118,9 +244,12 @@ function startFollowLoop(): void {
 }
 
 function createWindow(): void {
+  const wa = screen.getPrimaryDisplay().workArea
   win = new BrowserWindow({
-    width: winW(),
-    height: winH(),
+    x: wa.x,
+    y: wa.y,
+    width: wa.width,
+    height: wa.height,
     frame: false,
     transparent: true,
     resizable: false,
@@ -129,13 +258,9 @@ function createWindow(): void {
     alwaysOnTop: true,
     hasShadow: false,
     fullscreenable: false,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
-      // 窗口从不获得焦点（常驻叠层），必须关闭后台节流，否则定时器/WebAudio 会被挂起（提示音不响）
-      backgroundThrottling: false
-    }
+    webPreferences: appWebPreferences()
   })
+  hardenWindow(win)
 
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -143,12 +268,18 @@ function createWindow(): void {
 
   // 默认整窗点击穿透，转发鼠标移动以便渲染层做命中检测
   win.setIgnoreMouseEvents(true, { forward: true })
+  externalYield?.dispose()
+  externalYield = createExternalYieldController({
+    collapse: () => win?.webContents.send('external-yield'),
+    blur: () => win?.blur(),
+    setClickThrough: (ignore) => {
+      if (ignore) win?.setIgnoreMouseEvents(true, { forward: true })
+      else win?.setIgnoreMouseEvents(false)
+    },
+    setTopmost: setAgenticWindowsTopmost
+  })
 
-  if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
-    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  loadRenderer(win)
 
   // 无边框窗口开不了 DevTools —— 把渲染进程的报错转发到启动终端，便于排查
   win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
@@ -159,13 +290,195 @@ function createWindow(): void {
   })
 }
 
+// 智能截图：拉起 Windows 原生框选截图（ms-screenclip），图进剪贴板后轮询取到 → 交给渲染层问 AI
+let shotPolling = false
+function openScreenshot(): void {
+  if (!win || shotPolling) return
+  shotPolling = true
+  yieldToExternalApp()
+  const before = clipboard.readImage().isEmpty() ? '' : clipboard.readImage().toDataURL()
+  try { spawn('explorer.exe', ['ms-screenclip:'], { detached: true, windowsHide: true }).unref() } catch { /* */ }
+  let tries = 0
+  const timer = setInterval(() => {
+    tries++
+    const img = clipboard.readImage()
+    if (!img.isEmpty()) {
+      const url = img.toDataURL()
+      if (url && url !== before) {
+        clearInterval(timer); shotPolling = false
+        win?.setAlwaysOnTop(true, 'screen-saver'); win?.setIgnoreMouseEvents(false); win?.show(); win?.focus()
+        win?.webContents.send('screenshot-captured', url)
+        return
+      }
+    }
+    if (tries > 120) { clearInterval(timer); shotPolling = false } // 60s 未截 → 放弃
+  }, 500)
+}
+
+// 屏幕理解：截取主屏（先藏岛避免拍到自己），返回 dataURL 交给视觉模型
+async function captureScreenDataUrl(): Promise<string | null> {
+  const PS =
+    'Add-Type -AssemblyName System.Windows.Forms,System.Drawing; ' +
+    '$b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; ' +
+    '$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height; ' +
+    '$g=[System.Drawing.Graphics]::FromImage($bmp); ' +
+    '$g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); ' +
+    '$ms=New-Object System.IO.MemoryStream; $bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png); ' +
+    '[Convert]::ToBase64String($ms.ToArray())'
+  try {
+    win?.hide()
+    await new Promise((r) => setTimeout(r, 160))
+    const b64 = await new Promise<string>((resolve) => {
+      const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS], { windowsHide: true })
+      let out = ''
+      p.stdout.on('data', (d) => { out += String(d) })
+      p.on('close', () => resolve(out.trim()))
+      p.on('error', () => resolve(''))
+    })
+    win?.show()
+    return b64 ? 'data:image/png;base64,' + b64.replace(/\s/g, '') : null
+  } catch {
+    win?.show()
+    return null
+  }
+}
+
+// 屏幕理解：全局热键截整屏 → 交给渲染层（复用截图问 AI 卡）
+async function openScreenAnalyze(): Promise<void> {
+  if (!win) return
+  const url = await captureScreenDataUrl()
+  if (!url) return
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setIgnoreMouseEvents(false)
+  win.show()
+  win.focus()
+  win.webContents.send('screenshot-captured', url)
+}
+
+// 闪念胶囊：全局热键唤出居中输入框（临时让常驻窗口可聚焦，输完/取消后还原点击穿透）
+function openCapsule(): void {
+  if (!win) return
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setIgnoreMouseEvents(false) // 让胶囊可输入
+  win.show()
+  win.focus()
+  win.webContents.send('capsule-toggle')
+}
+
+// 全局命令面板：热键唤出居中搜索框（展开岛并可聚焦，动作执行后停在对应分区）
+function openPalette(): void {
+  if (!win) return
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setIgnoreMouseEvents(false)
+  win.show()
+  win.focus()
+  win.webContents.send('palette-toggle')
+}
+
+// 第二大脑检索：热键唤出跨分区检索浮层
+function openBrain(): void {
+  if (!win) return
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setIgnoreMouseEvents(false)
+  win.show()
+  win.focus()
+  win.webContents.send('brain-toggle')
+}
+
+// 可拆分桌面挂件：独立小窗常驻桌面角，展示主渲染层每秒推送的速览数据（番茄/待办/Agent/媒体）
+let widgetWin: BrowserWindow | null = null
+let lastWidgetData: unknown = null
+function openWidget(): void {
+  if (widgetWin && !widgetWin.isDestroyed()) { widgetWin.show(); return }
+  const W = 268
+  const H = 236
+  widgetWin = new BrowserWindow({
+    width: W, height: H, frame: false, transparent: true, resizable: false, skipTaskbar: true,
+    alwaysOnTop: true, hasShadow: false, fullscreenable: false, maximizable: false, minimizable: false,
+    webPreferences: appWebPreferences()
+  })
+  hardenWindow(widgetWin)
+  widgetWin.setAlwaysOnTop(true, 'screen-saver')
+  widgetWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  const { workArea } = screen.getPrimaryDisplay()
+  widgetWin.setBounds({ x: workArea.x + workArea.width - W - 20, y: workArea.y + workArea.height - H - 20, width: W, height: H })
+  loadRenderer(widgetWin, 'widget')
+  widgetWin.webContents.on('did-finish-load', () => { if (lastWidgetData) widgetWin?.webContents.send('widget-data', lastWidgetData) })
+  widgetWin.on('closed', () => { widgetWin = null })
+}
+function closeWidget(): void {
+  if (widgetWin && !widgetWin.isDestroyed()) widgetWin.close()
+  widgetWin = null
+}
+
+// 钉屏便利贴：每条被钉的便签一个独立浮贴小窗（按便签 id 去重）
+interface StickyNoteData { id: number; emoji: string; title: string; md: string; color: string }
+const stickyWins = new Map<number, BrowserWindow>()
+
+function setAgenticWindowsTopmost(topmost: boolean): void {
+  const windows = [win, widgetWin, ...stickyWins.values()]
+  for (const current of windows) {
+    if (!current || current.isDestroyed()) continue
+    if (topmost) current.setAlwaysOnTop(true, 'screen-saver')
+    else current.setAlwaysOnTop(false)
+  }
+}
+
+function openSticky(note: StickyNoteData): void {
+  const exist = stickyWins.get(note.id)
+  if (exist && !exist.isDestroyed()) { exist.show(); exist.focus(); return }
+  const w = new BrowserWindow({
+    width: 240, height: 200, frame: false, transparent: true, resizable: true, skipTaskbar: true,
+    alwaysOnTop: true, hasShadow: false, fullscreenable: false, minWidth: 180, minHeight: 120,
+    webPreferences: appWebPreferences()
+  })
+  hardenWindow(w)
+  w.setAlwaysOnTop(true, 'screen-saver')
+  w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  const { workArea } = screen.getPrimaryDisplay()
+  const n = stickyWins.size
+  w.setBounds({ x: workArea.x + workArea.width - 268 - (n % 3) * 30, y: workArea.y + 60 + (n % 4) * 30, width: 240, height: 200 })
+  loadRenderer(w, 'sticky')
+  w.webContents.on('did-finish-load', () => w.webContents.send('sticky-data', note))
+  w.on('closed', () => stickyWins.delete(note.id))
+  stickyWins.set(note.id, w)
+}
+function closeSticky(id: number): void {
+  const w = stickyWins.get(id)
+  if (w && !w.isDestroyed()) w.close()
+  stickyWins.delete(id)
+}
+
 // 提示音偏好（主进程权威缓存，随 save-state 更新）：按通知类型分声效
 const soundPref = {
   on: true,
   map: { waiting: 'chime', approval: 'ping', danger: 'rising', todo: 'marimba' } as Record<string, string>
 }
+// 智能勿扰：渲染层据"会议检测 + 用户开关"算出的最终勿扰态；置真时主进程不自动弹窗、不响铃
+let dndActive = false
+let clipWatchEnabled = true
+let stopClipboardWatch: (() => void) | null = null
+function setClipboardWatch(on: boolean): void {
+  clipWatchEnabled = on
+  if (!on) {
+    stopClipboardWatch?.()
+    stopClipboardWatch = null
+    return
+  }
+  if (!stopClipboardWatch) {
+    stopClipboardWatch = startClipboardWatch((item) => win?.webContents.send('clipboard-new', item))
+  }
+}
 // 危险命令判定（与渲染层 logic/risk.ts 的 danger 正则同步）
 const DANGER_RE = /(rm\s+-[rf]{1,2}|git\s+push\s+.*(--force|-f)|--force\b|sudo\s|dd\s+if=|mkfs|chmod\s+777|>\s*\/dev\/|\bdel\s+\/[fqs]|format\s+[a-z]:|DROP\s+TABLE|TRUNCATE\s+TABLE|shutdown|reboot)/i
+
+const hasNul = (s: string): boolean => s.includes('\0')
+const safeName = (name: string, fallback: string): string =>
+  String(name || fallback).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim().slice(0, 120) || fallback
+const safeExt = (ext: string): string | null => {
+  const e = String(ext || '').replace(/^\./, '').toLowerCase()
+  return /^[a-z0-9]{1,8}$/.test(e) ? e : null
+}
 
 // 状态变化 → 推送快照给渲染层；出现新的待审批/等待回复时：置顶 + 主进程按类型响铃
 // （声音在主进程触发，不依赖渲染层——渲染层触发链曾在无焦点窗口下失效）
@@ -178,9 +491,9 @@ store.on('change', () => {
   const wait = snap.agents.filter((a) => a.status === 'waiting')
   const newPend = pend.filter((a) => a.requestId && !prevPending.has(a.requestId))
   const newWait = wait.filter((a) => !prevWaiting.has(a.id))
-  if (newPend.length > 0 || newWait.length > 0) {
+  if ((newPend.length > 0 || newWait.length > 0) && !dndActive) {
     if (win) {
-      win.setAlwaysOnTop(true, 'screen-saver')
+      if (!externalYield?.isLowered()) win.setAlwaysOnTop(true, 'screen-saver')
       win.moveTop()
       win.showInactive() // 显示但不抢键盘焦点
     }
@@ -198,7 +511,39 @@ store.on('change', () => {
   prevWaiting = new Set(wait.map((a) => a.id))
 })
 
+// 抓取网页正文 + <title>（问答附件与知识库共用）；粗提正文，压缩空白，截断上限
+async function fetchPageText(url: string, cap = 30000): Promise<{ ok: boolean; text?: string; title?: string; error?: string }> {
+  try {
+    if (!/^https?:\/\//i.test(url)) return { ok: false, error: '仅支持 http/https 链接' }
+    const res = await netFetch(url, { timeoutMs: 20000, redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } })
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+    const html = await res.text()
+    const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/\s+/g, ' ').trim().slice(0, 120)
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&(nbsp|#160);/g, ' ')
+      .replace(/&(amp|lt|gt|quot|#39);/g, (m) => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" })[m] || ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .slice(0, cap)
+    return text.length > 50 ? { ok: true, text, title } : { ok: false, error: '未能提取到正文（可能是动态渲染页面/需登录）' }
+  } catch (err) {
+    return { ok: false, error: String(err instanceof Error ? err.message : err) }
+  }
+}
+
 function wireIpc(): void {
+  ipcMain.handle('runtime-info', () => ({
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    security: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  }))
   ipcMain.handle('get-snapshot', () => store.snapshot())
 
   ipcMain.on('decide', (_e, msg: DecisionMessage) => {
@@ -209,6 +554,16 @@ function wireIpc(): void {
   ipcMain.on('set-ignore-mouse', (_e, ignore: boolean) => {
     if (ignore) win?.setIgnoreMouseEvents(true, { forward: true })
     else win?.setIgnoreMouseEvents(false)
+  })
+
+  // Chromium 的 <input type="file"> 不经过 Electron dialog API，由渲染层显式标记其生命周期。
+  ipcMain.on('set-native-dialog-open', (_e, active: boolean) => {
+    if (active) {
+      if (!rendererDialogRelease) rendererDialogRelease = externalYield?.suspendTopmost() || null
+      return
+    }
+    rendererDialogRelease?.()
+    rendererDialogRelease = null
   })
 
   ipcMain.on('play-sound', (_e, key: string) => playSound(key))
@@ -242,9 +597,174 @@ function wireIpc(): void {
     }
   })
 
+  // GitHub 富接入：结构化 trending（日/周/月高星）/ 我的仓库 / README（供 AI 解读）。走 net.fetch 继承代理。
+  const ghHeaders = (token?: string): Record<string, string> => ({
+    accept: 'application/vnd.github+json', 'user-agent': 'agentic-island',
+    ...(token ? { authorization: `Bearer ${token}` } : {})
+  })
+  interface GhRepo { full_name: string; owner: { login: string; avatar_url?: string }; name: string; description?: string; stargazers_count: number; forks_count?: number; language?: string; html_url: string; created_at?: string; updated_at?: string; topics?: string[] }
+  const mapRepo = (r: GhRepo): Record<string, unknown> => ({ fullName: r.full_name, owner: r.owner?.login, avatar: r.owner?.avatar_url, name: r.name, desc: r.description || '', stars: r.stargazers_count, forks: r.forks_count || 0, language: r.language || '', url: r.html_url, createdAt: r.created_at, updatedAt: r.updated_at, topics: r.topics || [] })
+
+  ipcMain.handle('github-trending-repos', async (_e, range: 'daily' | 'weekly' | 'monthly', token?: string) => {
+    try {
+      const days = range === 'daily' ? 1 : range === 'weekly' ? 7 : 30
+      const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
+      const res = await net.fetch(`https://api.github.com/search/repositories?q=created:%3E=${since}&sort=stars&order=desc&per_page=25`, { headers: ghHeaders(token) })
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+      const data = (await res.json()) as { items?: GhRepo[] }
+      return { ok: true, repos: (data.items || []).map(mapRepo) }
+    } catch (e) { return { ok: false, error: String(e) } }
+  })
+  ipcMain.handle('github-my-repos', async (_e, token: string) => {
+    if (!token) return { ok: false, error: '需要 GitHub Token' }
+    try {
+      const me = await net.fetch('https://api.github.com/user', { headers: ghHeaders(token) })
+      if (!me.ok) return { ok: false, error: me.status === 401 ? 'Token 无效' : `HTTP ${me.status}` }
+      const user = (await me.json()) as { login: string; avatar_url?: string; public_repos?: number; followers?: number; following?: number }
+      const res = await net.fetch('https://api.github.com/user/repos?sort=updated&per_page=30&affiliation=owner', { headers: ghHeaders(token) })
+      const data = res.ok ? ((await res.json()) as GhRepo[]) : []
+      return { ok: true, user: { login: user.login, avatar: user.avatar_url, repos: user.public_repos, followers: user.followers, following: user.following }, repos: data.map(mapRepo) }
+    } catch (e) { return { ok: false, error: String(e) } }
+  })
+  ipcMain.handle('github-search', async (_e, q: string, token?: string) => {
+    try {
+      const res = await net.fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc&per_page=20`, { headers: ghHeaders(token) })
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+      const data = (await res.json()) as { items?: GhRepo[] }
+      return { ok: true, repos: (data.items || []).map(mapRepo) }
+    } catch (e) { return { ok: false, error: String(e) } }
+  })
+  ipcMain.handle('github-readme', async (_e, owner: string, repo: string, token?: string) => {
+    try {
+      const res = await net.fetch(`https://api.github.com/repos/${owner}/${repo}/readme`, { headers: { ...ghHeaders(token), accept: 'application/vnd.github.raw+json' } })
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+      return { ok: true, text: (await res.text()).slice(0, 8000) }
+    } catch (e) { return { ok: false, error: String(e) } }
+  })
+
   // 正在播放的媒体（SMTC）+ 媒体键控制（迷你条音乐模式）
+  // 多仓库仪表盘：读单个本地仓库的 git 状态（只读，不改动仓库）
+  ipcMain.handle('git-status', async (_e, dir: string) => {
+    const run = (args: string[]): Promise<string> =>
+      new Promise((resolve) => {
+        const p = spawn('git', ['-C', dir, ...args], { windowsHide: true })
+        let out = ''
+        p.stdout.on('data', (d) => { out += String(d) })
+        p.on('close', () => resolve(out.trim()))
+        p.on('error', () => resolve(''))
+      })
+    try {
+      const inside = await run(['rev-parse', '--is-inside-work-tree'])
+      if (inside !== 'true') return { ok: false, error: '不是 git 仓库' }
+      const branch = await run(['rev-parse', '--abbrev-ref', 'HEAD'])
+      const porcelain = await run(['status', '--porcelain'])
+      const dirty = porcelain ? porcelain.split('\n').filter(Boolean).length : 0
+      const last = await run(['log', '-1', '--format=%h|%s|%cr'])
+      const [commit = '', subject = '', when = ''] = last.split('|')
+      let ahead = 0, behind = 0
+      const counts = await run(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'])
+      if (counts && /\d+\s+\d+/.test(counts)) { const [a, b] = counts.split(/\s+/).map(Number); ahead = a || 0; behind = b || 0 }
+      return { ok: true, branch, dirty, commit, subject, when, ahead, behind }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+  ipcMain.on('open-folder', (_e, dir: string) => {
+    const target = String(dir || '')
+    if (!target || target.length > 4096 || hasNul(target)) return
+    void openPathTarget(target)
+  })
+
+  ipcMain.handle('capture-screen', async () => {
+    const url = await captureScreenDataUrl()
+    return url ? { ok: true, dataUrl: url } : { ok: false }
+  })
+
+  // Markdown 本地文件：打开 / 另存为
+  ipcMain.handle('open-md-file', async () => {
+    try {
+      const r = await showOwnedOpenDialog({ title: '打开 Markdown 文件', properties: ['openFile'], filters: [{ name: 'Markdown / 文本', extensions: ['md', 'markdown', 'txt', 'mdx'] }] })
+      if (r.canceled || !r.filePaths[0]) return { ok: false }
+      const path = r.filePaths[0]
+      const content = await readFile(path, 'utf8')
+      return { ok: true, path, name: basename(path), content }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+  ipcMain.handle('save-md-file', async (_e, content: string, suggestName: string, existingPath?: string) => {
+    try {
+      let path = existingPath
+      if (!path) {
+        const r = await showOwnedSaveDialog({ title: '保存 Markdown', defaultPath: (suggestName || '未命名') + '.md', filters: [{ name: 'Markdown', extensions: ['md'] }] })
+        if (r.canceled || !r.filePath) return { ok: false }
+        path = r.filePath
+      }
+      await writeFile(path, content, 'utf8')
+      return { ok: true, path, name: basename(path) }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
+  // 导出 PDF：离屏窗口渲染 HTML → printToPDF → 另存
+  ipcMain.handle('export-pdf', async (_e, html: string, name: string) => {
+    let w: BrowserWindow | null = null
+    try {
+      if (typeof html !== 'string' || html.length > 5_000_000 || hasNul(html)) return { ok: false, error: 'HTML 内容无效或过大' }
+      w = new BrowserWindow({
+        show: false,
+        width: 900,
+        height: 1200,
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          webSecurity: true,
+          allowRunningInsecureContent: false
+        }
+      })
+      await w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+      const pdf = await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true })
+      const r = await showOwnedSaveDialog({ title: '导出 PDF', defaultPath: safeName(name, '文档') + '.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] })
+      if (r.canceled || !r.filePath) return { ok: false }
+      await writeFile(r.filePath, pdf)
+      return { ok: true, path: r.filePath }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    } finally {
+      w?.destroy()
+    }
+  })
+  // 导出任意文本文件（HTML / TXT 等）
+  ipcMain.handle('save-text', async (_e, content: string, name: string, ext: string) => {
+    try {
+      const safe = safeExt(ext)
+      if (!safe) return { ok: false, error: '文件扩展名无效' }
+      if (typeof content !== 'string' || content.length > 10_000_000 || hasNul(content)) return { ok: false, error: '内容无效或过大' }
+      const r = await showOwnedSaveDialog({ title: '导出', defaultPath: `${safeName(name, '文档')}.${safe}`, filters: [{ name: safe.toUpperCase(), extensions: [safe] }] })
+      if (r.canceled || !r.filePath) return { ok: false }
+      await writeFile(r.filePath, content, 'utf8')
+      return { ok: true, path: r.filePath }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
+
   ipcMain.handle('media-info', () => getMediaInfo())
   ipcMain.on('media-key', (_e, cmd: string) => mediaKey(String(cmd)))
+  // 歌词：从 lrclib.net（免费无鉴权）按曲名+歌手取 LRC；走 net.fetch 继承系统代理
+  ipcMain.handle('lyrics-fetch', async (_e, title: string, artist: string) => {
+    try {
+      const u = `https://lrclib.net/api/get?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist || '')}`
+      const res = await net.fetch(u)
+      if (!res.ok) return { ok: false }
+      const j = (await res.json()) as { syncedLyrics?: string; plainLyrics?: string }
+      return { ok: true, lrc: j.syncedLyrics || '', plain: j.plainLyrics || '' }
+    } catch {
+      return { ok: false }
+    }
+  })
 
   // 内嵌真 PTY 终端（ConPTY PowerShell，多标签）
   setPtySink((id, data) => win?.webContents.send('pty-data', { id, data }))
@@ -252,33 +772,39 @@ function wireIpc(): void {
   ipcMain.on('pty-input', (_e, id: string, data: string) => ptyInput(String(id), String(data)))
   ipcMain.on('pty-resize', (_e, id: string, cols: number, rows: number) => ptyResize(String(id), Number(cols), Number(rows)))
   ipcMain.on('pty-kill', (_e, id: string) => ptyKill(String(id)))
-  app.on('will-quit', () => ptyKillAll())
+  app.on('will-quit', () => { stopClipboardWatch?.(); ptyKillAll(); globalShortcut.unregisterAll() })
+
+  // 智能勿扰：渲染层把最终勿扰态告知主进程（真则不自动弹窗/响铃）
+  ipcMain.on('set-dnd', (_e, active: boolean) => { dndActive = !!active })
+
+  // 桌面挂件：开关 + 主渲染层推送速览数据 → 转发给挂件窗口
+  ipcMain.on('toggle-widget', (_e, active: boolean) => { if (active) openWidget(); else closeWidget() })
+  ipcMain.on('widget-push', (_e, data: unknown) => {
+    lastWidgetData = data
+    if (widgetWin && !widgetWin.isDestroyed()) widgetWin.webContents.send('widget-data', data)
+  })
+  ipcMain.on('widget-reveal', () => { win?.webContents.send('reveal') })
+
+  // 钉屏便利贴：开关 / 内容更新 / 浮贴自身关闭
+  ipcMain.on('toggle-sticky', (_e, note: StickyNoteData) => {
+    if (stickyWins.has(note.id)) closeSticky(note.id)
+    else openSticky(note)
+  })
+  ipcMain.on('sticky-push', (_e, note: StickyNoteData) => {
+    const w = stickyWins.get(note.id)
+    if (w && !w.isDestroyed()) w.webContents.send('sticky-data', note)
+  })
+  ipcMain.on('close-sticky', (_e, id: number) => closeSticky(id))
+
+  // 闪念胶囊：渲染层关闭后还原（若面板未展开则恢复点击穿透，让键盘焦点归还桌面）
+  ipcMain.on('capsule-closed', () => {
+    if (!win) return
+    win.blur()
+    win.setIgnoreMouseEvents(true, { forward: true })
+  })
 
   // 灵感便签：抓取网页正文（去标签的纯文本，供 AI 整理成便签）
-  ipcMain.handle('fetch-url-text', async (_e, url: string) => {
-    try {
-      if (!/^https?:\/\//i.test(String(url))) return { ok: false, error: '仅支持 http/https 链接' }
-      const ctrl = new AbortController()
-      const timer = setTimeout(() => ctrl.abort(), 20000)
-      const res = await fetch(String(url), { signal: ctrl.signal, redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } })
-      clearTimeout(timer)
-      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
-      const html = await res.text()
-      // 粗提正文：去 script/style/标签 → 压缩空白（够 AI 提炼用；不追求完美抽取）
-      const text = html
-        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&(nbsp|#160);/g, ' ')
-        .replace(/&(amp|lt|gt|quot|#39);/g, (m) => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" })[m] || ' ')
-        .replace(/\s{2,}/g, ' ')
-        .trim()
-        .slice(0, 30000)
-      return text.length > 50 ? { ok: true, text } : { ok: false, error: '未能提取到正文（可能是动态渲染页面/需登录）' }
-    } catch (err) {
-      return { ok: false, error: String(err instanceof Error ? err.message : err) }
-    }
-  })
+  ipcMain.handle('fetch-url-text', async (_e, url: string) => fetchPageText(String(url), 30000))
 
   // 飞书日历：拉取并解析 ICS 订阅链接（主进程 fetch，避免渲染层跨域限制）
   ipcMain.handle('calendar-fetch', async (_e, url: string) => {
@@ -309,6 +835,7 @@ function wireIpc(): void {
   ipcMain.handle('jump-to-terminal', async (_e, agentId: string) => {
     const agent = store.snapshot().agents.find((a) => a.id === agentId)
     if (!agent) return false
+    yieldToExternalApp()
     const tabHints = [agent.proj, agent.backend === 'codex' ? 'codex' : 'claude'].filter(Boolean)
     if (agent.termHwnd && (await focusByHwnd(agent.termHwnd))) {
       selectWtTab(agent.termHwnd, tabHints).catch(() => {}) // 尽力切标签页，失败不影响窗口聚焦
@@ -334,10 +861,9 @@ function wireIpc(): void {
     if (win) positionWindow(win)
   })
 
-  ipcMain.on('set-size-mode', (_e, large: boolean) => {
-    largeMode = !!large
-    if (win) positionWindow(win)
-  })
+  // 窗口恒定铺满工作区：尺寸/全屏切换只是渲染层布局变化，这两个通道保留为空实现（兼容旧调用）
+  ipcMain.on('set-size-mode', () => { /* no-op */ })
+  ipcMain.on('set-full-mode', () => { /* no-op */ })
 
   // 界面缩放（字体清晰度/可读性：0.9–1.3）
   ipcMain.on('set-zoom', (_e, z: number) => {
@@ -345,36 +871,139 @@ function wireIpc(): void {
   })
 
   // 灵动岛整体宽度（标准模式，380–880；迷你条宽度随之同步）
-  ipcMain.on('set-island-width', (_e, w: number) => {
-    customPanelW = Math.max(380, Math.min(880, Number(w) || 468))
-    if (win) positionWindow(win)
-  })
+  ipcMain.on('set-island-width', () => { /* 窗口恒定铺满，岛宽只是渲染层布局，无需 resize */ })
 
   ipcMain.handle('install-hooks', () => {
-    doInstallHooks()
-    return { ok: true }
+    try {
+      doInstallHooks()
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e instanceof Error ? e.message : e) }
+    }
   })
 
   ipcMain.handle('uninstall-hooks', () => {
-    uninstallClaudeCode(forwarderPath('cc-forward.mjs'))
-    uninstallCodex(forwarderPath('codex-forward.mjs'))
-    uninstallCodexNotify()
-    return { ok: true }
+    try {
+      uninstallClaudeCode(forwarderPath('cc-forward.mjs'))
+      uninstallCodex(forwarderPath('codex-forward.mjs'))
+      uninstallCodexNotify()
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: String(e instanceof Error ? e.message : e) }
+    }
   })
 
   ipcMain.handle('llm-complete', (_e, cfg: LlmRequestConfig, system: string, user: string | Array<Record<string, unknown>>, deep?: boolean, history?: { role: 'user' | 'assistant'; content: string }[]) =>
     llmComplete(cfg, system, user, deep, history || []))
 
   ipcMain.on('open-external', (_e, url: string) => {
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    const external = safeExternalUrl(url)
+    if (external) void openExternalTarget(external)
   })
   ipcMain.handle('llm-test', (_e, cfg: LlmRequestConfig) => llmTest(cfg))
+  // 截图工坊：渲染层主动触发框选截图（复用 ms-screenclip 流程，事件仍走 screenshot-captured）
+  ipcMain.on('trigger-screenshot', () => openScreenshot())
+  // 图片写剪贴板（PNG 无损）
+  ipcMain.on('copy-image', (_e, dataUrl: string) => {
+    const url = String(dataUrl || '')
+    if (!/^data:image\/(?:png|jpe?g);base64,/i.test(url) || url.length > 20_000_000) return
+    try { clipboard.writeImage(nativeImage.createFromDataURL(url)) } catch { /* */ }
+  })
+  // 图片存盘（PNG 无损，弹保存框）
+  ipcMain.handle('save-image', async (_e, dataUrl: string, name: string) => {
+    try {
+      if (!/^data:image\/png;base64,/i.test(String(dataUrl)) || String(dataUrl).length > 20_000_000) return { ok: false, error: '图片数据无效或过大' }
+      const r = await showOwnedSaveDialog({ title: '保存截图', defaultPath: `${safeName(name, 'screenshot')}.png`, filters: [{ name: 'PNG 图片', extensions: ['png'] }] })
+      if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+      const b64 = String(dataUrl).replace(/^data:image\/\w+;base64,/, '')
+      await writeFile(r.filePath, Buffer.from(b64, 'base64'))
+      return { ok: true, path: r.filePath }
+    } catch (e) { return { ok: false, error: String(e instanceof Error ? e.message : e) } }
+  })
+  // ===== 快捷指令（M1）：PowerShell 执行 / 万能打开 / 剪贴板读写 =====
+  ipcMain.handle('shortcut-shell', (_e, cmd: string, cwd?: string) => {
+    const command = String(cmd || '')
+    const workdir = cwd === undefined ? undefined : String(cwd)
+    if (!command.trim()) return Promise.resolve({ ok: false, error: '命令为空' })
+    if (command.length > 12000 || hasNul(command)) return Promise.resolve({ ok: false, error: '命令无效或过长' })
+    if (workdir && (workdir.length > 1000 || hasNul(workdir))) return Promise.resolve({ ok: false, error: '工作目录无效' })
+    return new Promise((resolve) => {
+      let done = false
+      const settle = (r: { ok: boolean; output?: string; error?: string }): void => { if (!done) { done = true; resolve(r) } }
+      try {
+        const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '-'], { cwd: workdir || app.getPath('home'), windowsHide: true })
+        let out = ''
+        let err = ''
+        const timer = setTimeout(() => { try { spawn('taskkill', ['/pid', String(p.pid), '/t', '/f'], { windowsHide: true }) } catch { /* */ } settle({ ok: false, output: out.trim(), error: '执行超时（60s），已终止' }) }, 60_000)
+        p.stdout.on('data', (d) => { out += String(d) })
+        p.stderr.on('data', (d) => { err += String(d) })
+        p.on('close', (code) => { clearTimeout(timer); settle({ ok: code === 0, output: out.trim().slice(0, 8000), error: err.trim().slice(0, 2000) || undefined }) })
+        p.on('error', (e) => { clearTimeout(timer); settle({ ok: false, error: String(e instanceof Error ? e.message : e) }) })
+        // 中文输出必须显式 UTF-8，否则 GBK 乱码（工程约束 #6）
+        p.stdin.write('[Console]::OutputEncoding=[System.Text.Encoding]::UTF8\n' + command + '\n', 'utf8')
+        p.stdin.end()
+      } catch (e) { settle({ ok: false, error: String(e) }) }
+    })
+  })
+  ipcMain.handle('shortcut-open', async (_e, target: string) => {
+    const t = String(target).trim().replace(/%home%/gi, app.getPath('home'))
+    if (t.length > 4096 || hasNul(t)) return { ok: false, error: '目标无效或过长' }
+    if (!t) return { ok: false, error: '目标为空' }
+    const external = safeExternalUrl(t)
+    if (external) { void openExternalTarget(external); return { ok: true } }
+    const r = await openPathTarget(t)
+    return r ? { ok: false, error: r } : { ok: true }
+  })
+  ipcMain.handle('clip-read-text', () => clipboard.readText())
+  ipcMain.on('clip-write-text', (_e, t: string) => clipboard.writeText(String(t)))
+
+  // 本地 Agent CLI（Claude Code / Codex 无头模式，JSONL 流式）：问答的另一种引擎，继承本机全部配置
+  ipcMain.handle('agent-cli-check', (_e, engine: AgentEngine) => agentCliCheck(engine))
+  let agentRunSeq = 0
+  ipcMain.handle('agent-cli-stream', async (_e, engine: AgentEngine, prompt: string, cwd?: string, cont?: boolean) => {
+    const runId = 'ar' + ++agentRunSeq
+    const r = await agentCliStream(engine, String(prompt), cwd, !!cont, (ev) => win?.webContents.send('agent-cli-event', { runId, ev }))
+    return r.ok ? { ok: true, runId } : { ok: false, error: r.error }
+  })
+  ipcMain.on('agent-cli-cancel', (_e, engine: AgentEngine) => agentCliCancel(engine))
+  ipcMain.handle('llm-embed', (_e, cfg: LlmRequestConfig, texts: string[]) => llmEmbed(cfg, texts))
+
+  // ===== 知识库（本地 RAG）===== 所有异步入口 try/catch，避免主进程抛出让渲染层 invoke 挂起（面板一直转圈=“失败”）
+  const kbGuard = async <T,>(fn: () => Promise<T>): Promise<T | { ok: false; error: string }> => {
+    try { return await fn() } catch (e) { console.error('[kb]', e); return { ok: false, error: String(e instanceof Error ? e.message : e) } }
+  }
+  ipcMain.handle('kb-list', async () => { try { return await kb.listSources() } catch { return [] } })
+  ipcMain.handle('kb-add-folder', (_e, cfg: LlmRequestConfig) => kbGuard(async () => {
+    const r = await showOwnedOpenDialog({ title: '选择要接入知识库的文件夹', properties: ['openDirectory'] })
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    return kb.addFolder(cfg, r.filePaths[0], Date.now())
+  }))
+  ipcMain.handle('kb-add-files', (_e, cfg: LlmRequestConfig) => kbGuard(async () => {
+    const r = await showOwnedOpenDialog({
+      title: '选择要接入知识库的文件', properties: ['openFile', 'multiSelections'],
+      filters: [{ name: '文档/文本/代码', extensions: ['md', 'markdown', 'mdx', 'txt', 'pdf', 'docx', 'json', 'csv', 'py', 'ts', 'js', 'tsx', 'jsx', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'html', 'css', 'sql', 'yaml', 'yml'] }]
+    })
+    if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true }
+    return kb.addFiles(cfg, r.filePaths, Date.now())
+  }))
+  ipcMain.handle('kb-add-url', (_e, cfg: LlmRequestConfig, url: string) => kbGuard(async () => {
+    const page = await fetchPageText(String(url), 60000)
+    if (!page.ok || !page.text) return { ok: false, error: page.error || '抓取失败' }
+    return kb.addUrl(cfg, String(url), page.title || String(url), page.text, Date.now())
+  }))
+  ipcMain.handle('kb-remove', (_e, id: string) => kbGuard(() => kb.removeSource(String(id))))
+  ipcMain.handle('kb-reindex', (_e, cfg: LlmRequestConfig) => kbGuard(() => kb.reindex(cfg)))
+  ipcMain.handle('kb-search', (_e, cfg: LlmRequestConfig, query: string, k?: number) => kbGuard(() => kb.search(cfg, String(query), k || 8)))
+  ipcMain.handle('kb-sample-chunks', (_e, max?: number, sourceId?: string) => kbGuard(() => kb.sampleChunks(max || 20, sourceId)))
+  ipcMain.handle('kb-get-wiki', async () => { try { return await kb.getWiki() } catch { return {} } })
+  ipcMain.handle('kb-save-wiki', (_e, key: string, md: string) => kbGuard(() => kb.saveWiki(String(key), String(md), Date.now())))
   ipcMain.handle('load-state', () => loadState())
   ipcMain.on('save-state', (_e, state: Record<string, unknown>) => {
     saveState(state)
     // 同步主进程的提示音偏好（按类型的声效映射）
-    const s = state as { settings?: { sound?: boolean }; soundMap?: Record<string, string> }
+    const s = state as { settings?: { sound?: boolean; clipWatch?: boolean }; soundMap?: Record<string, string> }
     if (typeof s.settings?.sound === 'boolean') soundPref.on = s.settings.sound
+    if (typeof s.settings?.clipWatch === 'boolean') setClipboardWatch(s.settings.clipWatch)
     if (s.soundMap && typeof s.soundMap === 'object') Object.assign(soundPref.map, s.soundMap)
   })
 }
@@ -384,29 +1013,28 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (win) { win.setAlwaysOnTop(true, 'screen-saver'); win.moveTop(); win.showInactive() }
+    if (win) { if (!externalYield?.isLowered()) win.setAlwaysOnTop(true, 'screen-saver'); win.moveTop(); win.showInactive() }
   })
 }
 
 app.whenReady().then(async () => {
   await bridge.start()
   codexTail.start() // Codex 实时接入：跟随 rollout 日志
+  kb.initKb(app.getPath('userData')) // 知识库索引存放于 userData/kb-index.json
   wireIpc()
 
   // 应用持久化的开机自启与显示器偏好，并按需自动接入所有 CLI/终端
   try {
     const st = loadState() as
-      | { settings?: { autostart?: boolean; multiMonitor?: boolean; autoConnect?: boolean; sound?: boolean; largeSize?: boolean }; activeMonitor?: number; selectedSound?: string }
+      | { settings?: { autostart?: boolean; multiMonitor?: boolean; autoConnect?: boolean; sound?: boolean; largeSize?: boolean; clipWatch?: boolean }; activeMonitor?: number; selectedSound?: string }
       | null
     if (st?.settings) {
       if (typeof st.settings.autostart === 'boolean') app.setLoginItemSettings({ openAtLogin: st.settings.autostart })
       if (typeof st.settings.multiMonitor === 'boolean') follow = st.settings.multiMonitor
       if (typeof st.settings.sound === 'boolean') soundPref.on = st.settings.sound
-      if (typeof st.settings.largeSize === 'boolean') largeMode = st.settings.largeSize
+      if (typeof st.settings.clipWatch === 'boolean') clipWatchEnabled = st.settings.clipWatch
     }
     if (typeof st?.activeMonitor === 'number') monitorIndex = Math.max(0, st.activeMonitor - 1)
-    const stw = (st as { islandWidth?: number } | null)?.islandWidth
-    if (typeof stw === 'number') customPanelW = Math.max(380, Math.min(880, stw))
     const stm = (st as { soundMap?: Record<string, string> } | null)?.soundMap
     if (stm && typeof stm === 'object') Object.assign(soundPref.map, stm)
 
@@ -422,8 +1050,16 @@ app.whenReady().then(async () => {
   createWindow()
   createTray()
   startFollowLoop()
-  // 剪贴板助手：变化推给渲染层（是否记录由渲染层 clipWatch 设置决定；历史仅内存不落盘）
-  startClipboardWatch((text) => win?.webContents.send('clipboard-new', text))
+  // 全局热键：命令面板 Ctrl+Alt+K · 闪念胶囊 Ctrl+Alt+Space · 智能截图 Ctrl+Alt+S（注册失败不影响其它功能）
+  try { globalShortcut.register('CommandOrControl+Alt+K', openPalette) } catch { /* 热键被占用 */ }
+  try { globalShortcut.register('CommandOrControl+Alt+F', openBrain) } catch { /* 热键被占用 */ }
+  try { globalShortcut.register('CommandOrControl+Alt+Space', openCapsule) } catch { /* 热键被占用 */ }
+  try { globalShortcut.register('CommandOrControl+Alt+S', openScreenshot) } catch { /* 热键被占用 */ }
+  try { globalShortcut.register('CommandOrControl+Alt+A', () => void openScreenAnalyze()) } catch { /* 热键被占用 */ }
+  // 剪贴板助手：clipWatch 关闭时主进程也停止读取系统剪贴板
+  setClipboardWatch(clipWatchEnabled)
+  // 会议检测：麦克风/摄像头占用变化推给渲染层（渲染层结合"自动勿扰"开关决定是否静默）
+  startDndWatch((active) => win?.webContents.send('dnd-state', active))
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -431,6 +1067,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  externalYield?.dispose()
   bridge.stop()
   if (process.platform !== 'darwin') app.quit()
 })

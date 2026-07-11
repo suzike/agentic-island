@@ -37,9 +37,13 @@ export class CodexTail {
   private ctxs = new Map<string, Ctx>() // 文件 → 会话上下文
   private lastGrow = new Map<string, number>() // 文件 → 最近一次新增数据的时间（空闲判定）
   private endedIdle = new Set<string>() // 已按空闲归档过的会话（新数据到来时移除，可复活）
+  private knownFiles = new Set<string>() // 周期性扫描发现的近期 rollout 文件
+  private lastScan = 0
 
   /** rollout 无"会话结束"信号（关终端不会写任何东西）——超过此时长无新数据即视为已结束 */
   private static IDLE_END_MS = 15 * 60 * 1000
+  /** 全树扫描间隔：活跃文件仍每秒跟随，新文件最多延迟几秒出现，避免历史多时每秒递归扫盘 */
+  private static SCAN_MS = 5000
 
   constructor(store: AgentsStore, summarize?: Summarizer, root: string = DEFAULT_SESSIONS_ROOT) {
     this.store = store
@@ -49,15 +53,17 @@ export class CodexTail {
 
   /** 供测试：直接跑一次轮询（跳过定时器） */
   pollOnce(): void {
+    this.scanFiles(Date.now())
     this.tick()
   }
 
   start(): void {
     if (this.timer) return
-    if (!existsSync(this.root)) return // 未装 Codex → 静默跳过
-    // 首扫：对已存在的活跃会话，提取上下文但把偏移设到文件末尾（只关心「从现在起」的新事件，不回放历史）
+    // 首扫：对已存在的活跃会话，提取上下文但把偏移设到文件末尾（只关心「从现在起」的新事件，不回放历史）。
+    // 若 sessions 目录尚不存在，也继续启动定时器；用户之后首次运行 Codex 创建目录时会自动接入。
     try {
-      for (const f of this.recentFiles()) {
+      this.scanFiles(Date.now())
+      for (const f of this.knownFiles) {
         this.ctxs.set(f, this.readHeadCtx(f))
         this.offsets.set(f, this.sizeOf(f))
       }
@@ -81,6 +87,7 @@ export class CodexTail {
   // 递归收集近 RECENT_MS 内修改过的 rollout JSONL
   private recentFiles(): string[] {
     const out: string[] = []
+    if (!existsSync(this.root)) return out
     const now = Date.now()
     const walk = (dir: string): void => {
       let entries
@@ -95,6 +102,11 @@ export class CodexTail {
     }
     walk(this.root)
     return out
+  }
+
+  private scanFiles(now: number): void {
+    this.lastScan = now
+    for (const f of this.recentFiles()) this.knownFiles.add(f)
   }
 
   // 从文件头部读取 session_meta，建立会话上下文（用于「岛启动前已在跑」的会话）
@@ -119,7 +131,8 @@ export class CodexTail {
 
   private tick(): void {
     const now = Date.now()
-    for (const f of this.recentFiles()) {
+    if (now - this.lastScan >= CodexTail.SCAN_MS) this.scanFiles(now)
+    for (const f of this.knownFiles) {
       const size = this.sizeOf(f)
       const off = this.offsets.get(f)
       if (off === undefined) {
@@ -189,10 +202,12 @@ export class CodexTail {
       ctx.cwd = String(p.cwd || ctx.cwd)
       ctx.entry = p.originator === 'codex-tui' ? 'cli' : String(p.originator || 'cli')
       this.store.handleSession(this.ev(ctx, 'session', { detail: '会话已开始 · 待命中…' }))
+      if (p.model) this.store.attachMeta(this.ev(ctx, 'session', {}), { model: String(p.model) })
       return
     }
     if (o.type === 'turn_context') {
       if (p.cwd) ctx.cwd = String(p.cwd)
+      if (p.model) this.store.attachMeta(this.ev(ctx, 'session', {}), { model: String(p.model) })
       return
     }
     if (!ctx.sessionId) return // 无会话上下文，忽略
@@ -233,6 +248,19 @@ export class CodexTail {
         this.store.handleNotification(ev)
         // 轮次结束 → 采集真实 git 变更小结（与 Claude Code 一致）
         this.summarize?.(ctx.cwd).then((s) => { if (s) this.store.attachSummary(ev, s) }).catch(() => {})
+        break
+      }
+      case 'token_count': {
+        // token 用量：兼容多种字段形态（total 累计 / last 本轮上下文占用）
+        const info = (p.info || p) as Record<string, unknown>
+        const num = (v: unknown): number | undefined => {
+          if (typeof v === 'number') return v
+          if (v && typeof v === 'object') { const o2 = v as Record<string, unknown>; return num(o2.total_tokens ?? o2.total ?? o2.tokens) }
+          return undefined
+        }
+        const total = num(info.total_token_usage) ?? num(info.total_tokens) ?? num(info.total)
+        const last = num(info.last_token_usage) ?? num(info.context_tokens) ?? num(info.last)
+        if (total !== undefined || last !== undefined) this.store.attachMeta(this.ev(ctx, 'activity', {}), { tokens: total, contextTokens: last })
         break
       }
       case 'turn_aborted':

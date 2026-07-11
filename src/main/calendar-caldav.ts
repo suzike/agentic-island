@@ -17,25 +17,27 @@ export interface CaldavConfig {
 /** ICS 解析器由调用方注入（与 git-summary 相同的 DI 惯例：raw-node 测试无法解析无扩展名运行时 import） */
 export type IcsParser = (text: string) => CalendarEvent[]
 
-const DAV = (auth: string, method: string, url: string, depth: string, body: string): Promise<string> => {
+const DAV = async (auth: string, method: string, url: string, depth: string, body: string): Promise<string> => {
+  const { net } = await import('electron')
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 20000)
-  return fetch(url, {
-    method,
-    signal: ctrl.signal,
-    headers: {
-      authorization: `Basic ${auth}`,
-      depth,
-      'content-type': 'application/xml; charset=utf-8'
-    },
-    body
-  })
-    .then(async (res) => {
-      if (res.status === 401) throw new Error('认证失败（401）——请核对 CalDAV 用户名/密码（在飞书里重新生成一份）')
-      if (!res.ok && res.status !== 207) throw new Error(`HTTP ${res.status}`)
-      return res.text()
+  try {
+    const res = await net.fetch(url, {
+      method,
+      signal: ctrl.signal,
+      headers: {
+        authorization: `Basic ${auth}`,
+        depth,
+        'content-type': 'application/xml; charset=utf-8'
+      },
+      body
     })
-    .finally(() => clearTimeout(timer))
+    if (res.status === 401) throw new Error('认证失败（401）——请核对 CalDAV 用户名/密码（在飞书里重新生成一份）')
+    if (!res.ok && res.status !== 207) throw new Error(`HTTP ${res.status}`)
+    return res.text()
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** 从多状态 XML 里提取所有 <href>（命名空间前缀不定：D:/d:/无） */

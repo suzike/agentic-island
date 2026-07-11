@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { BarConfig } from '../types'
+import { parseLrc, currentLine, type LrcLine } from '../logic/lrc'
 
 export interface BarMedia {
   title: string
@@ -26,7 +27,7 @@ const TEXT_MODES = ['quotes', 'exp', 'agent', 'thermal', 'github', 'custom', 'br
 const VISUAL_MODES = ['flow', 'eq', 'neon']
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
-export function AmbientBar({ cfg, media, brief, pools, width, onMediaKey, onOpen }: {
+export function AmbientBar({ cfg, media, brief, pools, width, onMediaKey, onOpen, fetchLyrics }: {
   cfg: BarConfig
   media: BarMedia | null
   /** 智能简报条目（App 实时拼装：下个会议/到期待办/活动 Agent） */
@@ -37,8 +38,31 @@ export function AmbientBar({ cfg, media, brief, pools, width, onMediaKey, onOpen
   width: number
   onMediaKey: (cmd: string) => void
   onOpen: () => void
+  /** 拉取当前歌曲的 LRC 歌词（迷你条歌词滚动用） */
+  fetchLyrics?: (title: string, artist: string) => Promise<{ ok: boolean; lrc?: string; plain?: string }>
 }): React.JSX.Element {
   const modes = cfg.modes.length ? cfg.modes : ['quotes']
+
+  // 歌词：按曲目变化拉取 LRC，按"检测起始"近似计时滚动（无播放位置，仅氛围展示）
+  const [lyric, setLyric] = useState<{ key: string; lines: LrcLine[]; startAt: number }>({ key: '', lines: [], startAt: 0 })
+  const [lyricNow, setLyricNow] = useState(0)
+  const songKey = media ? `${media.title}|${media.artist}` : ''
+  useEffect(() => {
+    if (!media || !songKey || !fetchLyrics) return
+    if (lyric.key === songKey) return
+    let dead = false
+    void fetchLyrics(media.title, media.artist).then((r) => {
+      if (dead) return
+      setLyric({ key: songKey, lines: r.ok && r.lrc ? parseLrc(r.lrc) : [], startAt: Date.now() })
+    })
+    return () => { dead = true }
+  }, [songKey, media, fetchLyrics, lyric.key])
+  useEffect(() => {
+    if (!lyric.lines.length || !media?.playing) return
+    const t = setInterval(() => setLyricNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [lyric.lines.length, media?.playing])
+  const lyricLine = lyric.lines.length ? currentLine(lyric.lines, (lyricNow - lyric.startAt) / 1000) : ''
   const [slot, setSlot] = useState(0)
   const [textIdx, setTextIdx] = useState(() => Math.floor(Math.random() * 997))
   useEffect(() => {
@@ -176,8 +200,8 @@ export function AmbientBar({ cfg, media, brief, pools, width, onMediaKey, onOpen
                   <div key={i} style={{ width: 2.5, height: 12, borderRadius: 999, transformOrigin: 'center', background: rainbow ? `oklch(0.75 0.15 ${i * 90})` : accent, animation: media.playing ? `ai-eq ${d}s ease-in-out ${i * 0.12}s infinite alternate` : undefined, transform: media.playing ? undefined : 'scaleY(0.3)' }} />
                 ))}
               </div>
-              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, color: TEXT_COLOR }}>
-                {media.title}{media.artist ? ` · ${media.artist}` : ''}
+              <span key={lyricLine} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, color: TEXT_COLOR, animation: lyricLine ? 'ai-riseblur .4s ease' : undefined }}>
+                {lyricLine || `${media.title}${media.artist ? ` · ${media.artist}` : ''}`}
               </span>
               {([['prev', '⏮'], ['playpause', media.playing ? '⏸' : '⏵'], ['next', '⏭'], ['voldown', '−'], ['volup', '＋']] as const).map(([c, icon]) => (
                 <span key={c} className="hv" onClick={(e) => { e.stopPropagation(); onMediaKey(c) }} style={{ flex: 'none', width: 19, height: 19, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: c === 'voldown' || c === 'volup' ? 11 : 10, cursor: 'pointer', color: TEXT_COLOR, background: 'rgba(255,255,255,.08)' }}>

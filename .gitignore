@@ -22,3 +22,6 @@ secrets.*
 .vscode/
 .idea/
 screenshots/_*
+.playwright-mcp/
+/agentic-island-ui.png
+/external-dialog-review*.png

@@ -1,17 +1,22 @@
-# 截图放这里
+# Screenshots
 
-把下面这些文件名的 PNG 截图放进本文件夹，主 README 会自动显示（建议宽度 1000–1400px，PNG）。
+`*-v020.png` 是 Agentic-Island `0.2.x` 的真实 Electron 界面截图。
 
-| 文件名 | 建议内容 | 怎么截 |
-|---|---|---|
-| `hero.png` | 岛完全展开、停在 Agents 页的全貌（含顶部标题栏与分区标签） | 鼠标贴屏幕顶边唤出 → Win+Shift+S 框选 |
-| `agents.png` | 有一张待审批卡片（跑个 `rm -rf` 类命令触发危险审批最出效果） | — |
-| `ask.png` | 一段带思维链的深度问答 / 或引用追问的引用卡片 | — |
-| `todos.png` | 待办页：进度环日历卡 + 近期日程 + 几条任务 | — |
-| `notes.png` | 灵感便签双栏瀑布流（有几张 AI 生成的卡片） | — |
-| `news.png` | 资讯「精选」页 + 今日 TOP + 一条展开的 AI 详细总结 | — |
-| `terminal.png` | 终端页跑着 `claude` 或 vim（体现真 PTY） | — |
-| `ambient.png` | 收起后的常驻迷你条（选个好看的模式，如跳动律动/音乐） | — |
-| `settings.png` | 设置页：主题选择 + 分型声效 / 迷你条自定义 | — |
+这些图片由以下命令生成：
 
-> 提示：应用是透明置顶悬浮窗，用 **Win + Shift + S** 框选截图最方便；深色壁纸下更好看。
+```powershell
+npm run build
+npm run docs:capture
+```
+
+截图脚本使用临时 Electron `userData` 和仓库内定义的演示数据，结束后删除临时配置。不得使用个人配置目录直接生成公开截图。
+
+| 文件 | 页面 |
+|---|---|
+| `ask-v020.png` | 问答 |
+| `shortcuts-v020.png` | 快捷 |
+| `todos-v020.png` | 待办 |
+| `notes-v020.png` | 灵感便签 |
+| `news-v020.png` | 资讯 |
+| `review-v020.png` | 复盘 |
+| `settings-v020.png` | 设置 |

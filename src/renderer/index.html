@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' https: http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*;"
+    />
     <title>Agentic-Island</title>
     <style>
       /* 主题令牌：--th 主色相 / --th2 渐变副色相 / --ths 面板底色相（JS 按所选主题覆写） */
@@ -127,6 +131,14 @@
       .ai-scroll::-webkit-scrollbar-thumb {
         background: oklch(0.55 calc(0.09 * var(--cs, 1)) var(--th) / 0.5);
         border-radius: 999px;
+      }
+      /* 无滚动条横滑容器（Tab 栏）：隐藏滚动条，仍可滚轮/拖拽横滑 */
+      .noscrollbar {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      .noscrollbar::-webkit-scrollbar {
+        display: none;
       }
       /* 交互反馈：按钮/标签悬停提亮、按压微缩 */
       .hv {

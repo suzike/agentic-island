@@ -2,6 +2,8 @@
 // 全部来自 `git` 命令的真实输出；非 git 仓库或无改动时返回 null。
 
 import { execFile } from 'child_process'
+import { readFile } from 'fs/promises'
+import { join } from 'path'
 import type { ChangeSummary } from '../shared/protocol'
 
 const git = (cwd: string, args: string[]): Promise<string> =>
@@ -10,6 +12,22 @@ const git = (cwd: string, args: string[]): Promise<string> =>
       resolve(err ? '' : stdout.toString())
     })
   })
+
+async function countNewFileLines(cwd: string, files: string[]): Promise<number> {
+  let total = 0
+  for (const f of files) {
+    try {
+      const buf = await readFile(join(cwd, f))
+      if (buf.length > 1_000_000 || buf.includes(0)) continue
+      const text = buf.toString('utf8')
+      if (!text) continue
+      total += text.endsWith('\n') ? text.split(/\r\n|\r|\n/).length - 1 : text.split(/\r\n|\r|\n/).length
+    } catch {
+      /* 跳过无法读取/二进制/瞬时消失的未跟踪文件 */
+    }
+  }
+  return total
+}
 
 export async function gitSummary(cwd: string): Promise<ChangeSummary | null> {
   if (!cwd) return null
@@ -25,7 +43,7 @@ export async function gitSummary(cwd: string): Promise<ChangeSummary | null> {
   const files = new Set([...nameOnly, ...untracked])
   if (files.size === 0) return null
 
-  const added = Number((shortstat.match(/(\d+) insertion/) || [])[1] || 0)
+  const added = Number((shortstat.match(/(\d+) insertion/) || [])[1] || 0) + await countNewFileLines(cwd, untracked)
   const removed = Number((shortstat.match(/(\d+) deletion/) || [])[1] || 0)
 
   // 建议提交信息：从真实改动文件推导一个可编辑的模板

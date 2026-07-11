@@ -2,8 +2,10 @@
 // · 模型 chip 下拉可在「已保存的配置」间一键切换（多厂商多模型自由切换）
 // · 快捷指令完全可自定义（增删改 + 恢复默认，持久化），空态卡片与输入区 chips 同源。
 
-import { useState } from 'react'
-import type { ChatProps, QuickPrompt } from '../types'
+import { useEffect, useMemo, useState } from 'react'
+import type { ChatProps, ClipItem, QuickPrompt } from '../types'
+import { CLIP_ACTIONS, tagHue } from '../logic/clip'
+import { island } from '../bridge'
 import { IslandChat } from './IslandChat'
 
 interface AskTabProps {
@@ -15,6 +17,16 @@ interface AskTabProps {
   empty: boolean
   mode: 'fast' | 'deep'
   onSetMode: (m: 'fast' | 'deep') => void
+  /** 知识库模式：开启后问答只依据用户接入的本地/网页知识库作答（RAG） */
+  kbMode: boolean
+  onToggleKb: () => void
+  onManageKb: () => void
+  kbCount: number
+  /** 问答引擎：llm=云端模型；claude/codex=本机 CLI（继承本地全部技能/工具/MCP） */
+  engine: 'llm' | 'claude' | 'codex'
+  onSetEngine: (e: 'llm' | 'claude' | 'codex') => void
+  agentCwd: string
+  onSetAgentCwd: (d: string) => void
   suggestions: { label: string; go: () => void }[]
   conv: ChatProps
   sessions: { id: number; title: string }[]
@@ -27,20 +39,20 @@ interface AskTabProps {
   onSavePrompt: (p: { id?: number; icon: string; label: string; text: string }) => void
   onDeletePrompt: (id: number) => void
   onResetPrompts: () => void
-  /** 剪贴板历史（仅内存）+ AI 快捷分析 */
-  clips: string[]
-  onRemoveClip: (i: number) => void
+  /** 剪贴板历史（文本+图片，收藏项持久化）+ AI 快捷动作 */
+  clips: ClipItem[]
+  onRemoveClip: (id: number) => void
   onClearClips: () => void
+  onToggleClipFav: (id: number) => void
   /** 直接发送一条组装好的提问（翻译/解释/分析剪贴板内容） */
   onSendClip: (text: string) => void
+  /** 图片剪贴板 → 走截图问 AI */
+  onAskClipImage: (dataUrl: string) => void
+  /** AI 聚类：把片段聚成集（组名 → id） */
+  onClusterClips: () => void
+  clipGroups: Record<number, string>
+  clipClustering: boolean
 }
-
-/** 剪贴板条目的 AI 快捷动作 */
-const CLIP_ACTIONS = [
-  { label: '译', title: '翻译', prefix: '翻译下面的内容（中英互译，保留术语）：\n\n' },
-  { label: '释', title: '解释代码/内容', prefix: '解释下面的内容（若是代码给出关键逻辑，若是报错给出原因与修复）：\n\n' },
-  { label: '洗', title: '清洗格式', prefix: '把下面的内容清洗成干净的纯文本/Markdown（去乱码、修正换行、保留结构）：\n\n' }
-]
 
 const iconBtn: React.CSSProperties = {
   height: 26,
@@ -87,7 +99,7 @@ const miniInput: React.CSSProperties = {
   fontSize: 11.5,
   padding: '6px 8px',
   outline: 'none',
-  fontFamily: "'Segoe UI',system-ui,sans-serif"
+  fontFamily: 'var(--font)'
 }
 
 const emptyEdit = { icon: '✨', label: '', text: '' }
@@ -97,6 +109,16 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
   const [showModels, setShowModels] = useState(false)
   const [manage, setManage] = useState(false)
   const [showClips, setShowClips] = useState(false)
+  const [clipQuery, setClipQuery] = useState('')
+  // 本地 Agent CLI 可用性探测（切到该引擎时检测一次）
+  const [engineStat, setEngineStat] = useState('')
+  useEffect(() => {
+    if (p.engine === 'llm') { setEngineStat(''); return }
+    setEngineStat('检测中…')
+    let alive = true
+    void island.agentCliCheck(p.engine).then((r) => { if (alive) setEngineStat(r.ok ? `✓ ${r.version || '已就绪'}` : `✗ 未检测到 ${p.engine} CLI（先在终端确认可运行）`) })
+    return () => { alive = false }
+  }, [p.engine])
   // 指令编辑表单：id 存在 = 更新已有，否则新增
   const [edit, setEdit] = useState<{ id?: number; icon: string; label: string; text: string }>(emptyEdit)
 
@@ -121,10 +143,30 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {/* 紧凑头部：模式 · 模型(下拉切换) · 指令管理 · 操作 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        {/* 引擎切换：云端模型 / 本机 Claude Code / 本机 Codex（本地引擎继承全部技能/工具/MCP 配置） */}
         <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 9, background: 'rgba(0,0,0,.25)' }}>
-          <div className="hv" style={segChip(p.mode === 'fast')} onClick={() => p.onSetMode('fast')}>⚡ 快速</div>
-          <div className="hv" style={segChip(p.mode === 'deep')} onClick={() => p.onSetMode('deep')}>🧠 深度</div>
+          <div className="hv" style={segChip(p.engine === 'llm')} onClick={() => p.onSetEngine('llm')} title="云端 LLM（设置里配置的模型）">☁ 模型</div>
+          <div className="hv" style={segChip(p.engine === 'claude')} onClick={() => p.onSetEngine('claude')} title="本机 Claude Code CLI（-p 无头模式，继承本地技能/MCP/CLAUDE.md）">◆ CC</div>
+          <div className="hv" style={segChip(p.engine === 'codex')} onClick={() => p.onSetEngine('codex')} title="本机 Codex CLI（exec 无头模式，继承本地配置）">⬡ Codex</div>
         </div>
+        {p.engine === 'llm' && (
+          <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 9, background: 'rgba(0,0,0,.25)' }}>
+            <div className="hv" style={segChip(p.mode === 'fast')} onClick={() => p.onSetMode('fast')}>⚡ 快速</div>
+            <div className="hv" style={segChip(p.mode === 'deep')} onClick={() => p.onSetMode('deep')}>🧠 深度</div>
+          </div>
+        )}
+        {/* 知识库模式：只依据接入的本地/网页资料作答（RAG，仅云端引擎）；⚙ 打开管理面板 */}
+        {p.engine === 'llm' && (
+          <div
+            className="hv"
+            onClick={p.onToggleKb}
+            title={p.kbMode ? '知识库模式已开启：只依据你接入的资料作答' : '开启知识库模式：只依据你接入的本地/网页资料作答'}
+            style={{ ...iconBtn, background: p.kbMode ? 'oklch(0.42 0.1 150 / .4)' : iconBtn.background, borderColor: p.kbMode ? 'oklch(0.7 0.13 150 / .5)' : 'rgba(255,255,255,.07)', color: p.kbMode ? 'oklch(0.88 0.12 150)' : iconBtn.color }}
+          >
+            📚 知识库{p.kbCount ? ' · ' + p.kbCount : ''}
+          </div>
+        )}
+        <div className="hv" onClick={p.onManageKb} title="管理知识库（添加文件夹 / 文件 / 网页）" style={iconBtn}>⚙ 库</div>
         <div
           className="hv"
           onClick={() => (p.models.length > 0 ? setShowModels((v) => !v) : p.onOpenLlmSettings())}
@@ -150,6 +192,22 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
           </div>
         )}
       </div>
+
+      {/* 本地 Agent 引擎配置：可用性 + 工作目录（本地技能/MCP/CLAUDE.md 按目录生效） */}
+      {p.engine !== 'llm' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px', borderRadius: 10, background: 'oklch(0.3 0.05 var(--th) / .25)', border: '1px solid oklch(0.6 0.1 var(--th) / .2)' }}>
+          <span style={{ flex: 'none', fontSize: 12 }}>{p.engine === 'claude' ? '◆' : '⬡'}</span>
+          <span style={{ flex: 'none', color: engineStat.startsWith('✗') ? 'oklch(0.78 0.12 30)' : 'oklch(0.8 0.1 150)', fontSize: 9.5, fontWeight: 600 }}>{engineStat || '…'}</span>
+          <input
+            value={p.agentCwd}
+            onChange={(e) => p.onSetAgentCwd(e.target.value)}
+            placeholder="工作目录（空=用户主目录），如 E:\proj\my-repo"
+            title="本地配置（CLAUDE.md/技能/MCP）按目录生效；也决定 Agent 能读写哪个项目"
+            style={{ flex: 1, minWidth: 0, background: 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 7, outline: 'none', color: 'oklch(0.93 0.01 var(--th))', fontSize: 10, padding: '4px 8px', fontFamily: 'ui-monospace,monospace' }}
+          />
+          <span style={{ flex: 'none', color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 8.5 }}>{p.engine === 'claude' ? '多轮续聊 ✓' : '单轮问答'}</span>
+        </div>
+      )}
 
       {/* 模型切换下拉：已保存的配置一键切换 */}
       {showModels && p.models.length > 0 && (
@@ -226,28 +284,72 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
         <div style={{ ...panelBox, gap: 6, maxHeight: 220, overflowY: 'auto' }} className="ai-scroll">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ color: 'oklch(0.85 0.02 var(--th) / .85)', fontSize: 11, fontWeight: 700 }}>📋 剪贴板</span>
-            <span style={{ color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 9.5 }}>仅内存 · 不落盘</span>
+            <span style={{ color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 9.5 }}>★ 收藏才落盘</span>
             <span style={{ flex: 1 }} />
-            <span className="hv" onClick={p.onClearClips} style={{ color: 'oklch(0.7 0.02 var(--th) / .6)', fontSize: 10, cursor: 'pointer' }}>清空</span>
+            <span className="hv" onClick={p.onClusterClips} title="AI 把片段按主题聚成集" style={{ color: p.clipClustering ? 'oklch(0.6 0.02 var(--th) / .5)' : 'oklch(0.85 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 10, cursor: 'pointer' }}>{p.clipClustering ? '聚类中…' : '🧩 归类'}</span>
+            <span className="hv" onClick={p.onClearClips} title="清空未收藏项" style={{ color: 'oklch(0.7 0.02 var(--th) / .6)', fontSize: 10, cursor: 'pointer' }}>清空</span>
           </div>
-          {p.clips.map((c, i) => (
-            <div key={i} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 9px', borderRadius: 9, background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.055)' }}>
-              <span
-                className="hv"
-                onClick={() => { p.conv.onText(c); setShowClips(false) }}
-                title="填入输入框"
-                style={{ flex: 1, minWidth: 0, color: 'oklch(0.8 0.02 var(--th) / .85)', fontSize: 10.5, fontFamily: "ui-monospace,'Cascadia Code',monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}
-              >
-                {c.replace(/\s+/g, ' ').slice(0, 72)}
-              </span>
-              {CLIP_ACTIONS.map((a) => (
-                <span key={a.label} className="hv" onClick={() => { p.onSendClip(a.prefix + c); setShowClips(false) }} title={`AI ${a.title}`} style={{ flex: 'none', padding: '2px 7px', borderRadius: 6, background: 'oklch(0.3 0.05 var(--th) / .35)', color: 'oklch(0.85 calc(0.08 * var(--cs, 1)) var(--th))', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>
-                  {a.label}
-                </span>
-              ))}
-              <span className="hv" onClick={() => p.onRemoveClip(i)} style={{ flex: 'none', color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 11, cursor: 'pointer' }}>✕</span>
-            </div>
-          ))}
+          <input
+            value={clipQuery}
+            onChange={(e) => setClipQuery(e.target.value)}
+            placeholder="搜索剪贴板…"
+            style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(0,0,0,.25)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, outline: 'none', color: 'oklch(0.9 0.01 var(--th))', fontSize: 11, padding: '5px 9px' }}
+          />
+          {(() => {
+            const q = clipQuery.trim().toLowerCase()
+            const filtered = q ? p.clips.filter((c) => (c.text || '').toLowerCase().includes(q) || c.tag.toLowerCase().includes(q)) : p.clips
+            const renderClip = (c: ClipItem): React.JSX.Element => {
+              const hue = tagHue[c.tag] ?? 200
+              const fav = <span className="hv" onClick={() => p.onToggleClipFav(c.id)} title={c.fav ? '取消收藏' : '收藏（持久保存）'} style={{ flex: 'none', color: c.fav ? 'oklch(0.82 0.14 85)' : 'oklch(0.6 0.02 var(--th) / .45)', fontSize: 11, cursor: 'pointer' }}>{c.fav ? '★' : '☆'}</span>
+              const del = <span className="hv" onClick={() => p.onRemoveClip(c.id)} style={{ flex: 'none', color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 11, cursor: 'pointer' }}>✕</span>
+              if (c.kind === 'image') {
+                return (
+                  <div key={c.id} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 9px', borderRadius: 9, background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.055)' }}>
+                    <img src={c.dataUrl} alt="剪贴板图片" style={{ flex: 'none', width: 40, height: 28, objectFit: 'cover', borderRadius: 5, border: '1px solid rgba(255,255,255,.08)' }} />
+                    <span style={{ flex: 1, minWidth: 0, color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 10.5 }}>图片 · 截图</span>
+                    <span className="hv" onClick={() => { p.onAskClipImage(c.dataUrl!); setShowClips(false) }} title="用 AI 分析这张图" style={{ flex: 'none', padding: '2px 8px', borderRadius: 6, background: 'oklch(0.3 0.05 260 / .4)', color: 'oklch(0.85 0.1 260)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>问 AI</span>
+                    {fav}{del}
+                  </div>
+                )
+              }
+              const text = c.text ?? ''
+              return (
+                <div key={c.id} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 9px', borderRadius: 9, background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.055)' }}>
+                  <span style={{ flex: 'none', padding: '1px 6px', borderRadius: 5, background: `oklch(0.32 0.06 ${hue} / .45)`, color: `oklch(0.85 0.1 ${hue})`, fontSize: 9, fontWeight: 700 }}>{c.tag}</span>
+                  <span className="hv" onClick={() => { p.conv.onText(text); setShowClips(false) }} title="填入输入框" style={{ flex: 1, minWidth: 0, color: 'oklch(0.8 0.02 var(--th) / .85)', fontSize: 10.5, fontFamily: "ui-monospace,'Cascadia Code',monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{text.replace(/\s+/g, ' ').slice(0, 60)}</span>
+                  {CLIP_ACTIONS.map((a) => (
+                    <span key={a.key} className="hv" onClick={() => { p.onSendClip(a.prefix + text); setShowClips(false) }} title={`AI ${a.title}`} style={{ flex: 'none', padding: '2px 6px', borderRadius: 6, background: 'oklch(0.3 0.05 var(--th) / .35)', color: 'oklch(0.85 calc(0.08 * var(--cs, 1)) var(--th))', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>{a.label}</span>
+                  ))}
+                  {fav}{del}
+                </div>
+              )
+            }
+            if (filtered.length === 0) return <div style={{ color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 10.5, padding: '6px 2px' }}>没有匹配的片段</div>
+            const groupNames = [...new Set(Object.values(p.clipGroups))]
+            const hasGroups = groupNames.length > 0
+            if (!hasGroups) return <>{filtered.map(renderClip)}</>
+            const ungrouped = filtered.filter((c) => !p.clipGroups[c.id])
+            return (
+              <>
+                {groupNames.map((name) => {
+                  const items = filtered.filter((c) => p.clipGroups[c.id] === name)
+                  if (!items.length) return null
+                  return (
+                    <div key={name} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      <div style={{ color: 'oklch(0.72 calc(0.1 * var(--cs, 1)) var(--th) / .85)', fontSize: 10, fontWeight: 700, marginTop: 2 }}>🧩 {name}</div>
+                      {items.map(renderClip)}
+                    </div>
+                  )
+                })}
+                {ungrouped.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{ color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 10, fontWeight: 700, marginTop: 2 }}>其它</div>
+                    {ungrouped.map(renderClip)}
+                  </div>
+                )}
+              </>
+            )
+          })()}
         </div>
       )}
 

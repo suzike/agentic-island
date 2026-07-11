@@ -1,11 +1,23 @@
 // 灵感便签：AI 把文章/网页/段落整理成排版优美的知识卡片（自动配色+标签），
 // 支持手动新建/编辑（Markdown）、按标签/日期筛选、AI 语义搜索。瀑布流双栏布局。
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { StickyNote } from '../types'
 import { NOTE_COLORS, colorOf } from '../logic/noteAi'
-import { imageToCompactDataUrl } from '../logic/files'
+import { imageToCompactDataUrl, selectLocalFiles } from '../logic/files'
+import { buildGraph } from '../logic/noteLinks'
+import { escHtml, mdToHtml } from '../logic/mdHtml'
+import { NOTE_POWER_ACTIONS, runNotePowerAction, type NotePowerGroup } from '../logic/notePower'
+import { island } from '../bridge'
 import { Markdown, Collapsible } from './Markdown'
+
+/** 便签模板：一键起草结构化便签 */
+const TEMPLATES = [
+  { label: '会议纪要', emoji: '📝', color: 'sky', title: '会议纪要 · ', tags: ['会议'], md: '## 主题\n\n## 参会\n\n## 结论\n- \n\n## 行动项\n- [ ] \n' },
+  { label: '技术决策', emoji: '⚖️', color: 'violet', title: '决策 · ', tags: ['决策', 'ADR'], md: '## 背景\n\n## 决策\n\n## 理由\n\n## 影响 / 取舍\n' },
+  { label: 'Bug 记录', emoji: '🐛', color: 'amber', title: 'Bug · ', tags: ['bug'], md: '## 现象\n\n## 复现步骤\n1. \n\n## 根因\n\n## 修复\n' },
+  { label: '日报', emoji: '☀️', color: 'emerald', title: '日报 · ', tags: ['日报'], md: '## 昨天\n- \n\n## 今天\n- \n\n## 阻塞\n- \n' }
+]
 
 interface NotesTabProps {
   notes: StickyNote[]
@@ -17,7 +29,64 @@ interface NotesTabProps {
   onAiCreate: (input: string) => Promise<string>
   /** AI 语义搜索：返回匹配 id 列表（null=AI 不可用，调用方回退关键词） */
   onAiSearch: (query: string) => Promise<number[] | null>
+  /** 从模板新建（整条便签直接入库） */
+  onAddNote: (n: StickyNote) => void
+  /** 钉屏：把便签钉成桌面浮贴 */
+  onPinDesktop: (n: StickyNote) => void
+  /** 在全屏 Markdown 工作台里编辑 */
+  onOpenStudio: (n: StickyNote) => void
+  /** 收藏星标 */
+  onStar: (id: number) => void
+  /** 回收站：恢复 / 彻底删除 */
+  onRestore: (id: number) => void
+  onPurge: (id: number) => void
+  /** 批量：改色 / 移入回收站 */
+  onBatchColor: (ids: number[], color: string) => void
+  onBatchTrash: (ids: number[]) => void
+  /** 通用 AI（单便签增强 / 周回顾 / 问便签 / 合并） */
+  onAI: (system: string, user: string) => Promise<{ ok: boolean; text?: string; error?: string }>
+  /** 提取行动项 → 一键进待办 */
+  onQuickTodo: (text: string) => void
 }
+
+/** 单便签 AI 增强动作 */
+const NOTE_AI: { key: string; icon: string; label: string; hint: string }[] = [
+  { key: 'summary', icon: '📄', label: '摘要', hint: '生成 2-3 句摘要插到顶部' },
+  { key: 'tags', icon: '🏷', label: '自动标签', hint: 'AI 补全标签' },
+  { key: 'polish', icon: '✨', label: '润色', hint: '全文改写更通顺清晰' },
+  { key: 'continue', icon: '⤵️', label: '续写', hint: '顺着结尾续写一段' },
+  { key: 'translate', icon: '🌐', label: '翻译', hint: '追加中英互译小节' },
+  { key: 'todos', icon: '✅', label: '提行动项', hint: '提取行动项直接进待办' },
+  { key: 'title', icon: '🪧', label: '起标题', hint: 'AI 重起标题+emoji' },
+  { key: 'quotes', icon: '❝', label: '提金句', hint: '提炼金句成引用块' },
+  { key: 'similar', icon: '🔗', label: '找相似', hint: '从其它便签找相关并建双链' },
+  { key: 'dig', icon: '🌱', label: '深挖3问', hint: '生成三个追问引导你想下去' },
+  { key: 'poster', icon: '🖼', label: '金句海报', hint: '提金句渲染成分享卡片' }
+]
+
+/** 全库级 AI 工具箱（超越单便签的 AI 能力） */
+const NOTE_TOOLS: { key: string; icon: string; label: string; hint: string }[] = [
+  { key: 'prompt', icon: '🌅', label: '灵感引导', hint: '基于你近期的便签主题，出一个思考引导问题' },
+  { key: 'batchtag', icon: '🧩', label: '批量标签', hint: '给所有无标签便签自动打标签' },
+  { key: 'collide', icon: '🔮', label: '灵感碰撞', hint: '随机抽两条便签，碰撞出新点子存为新便签' },
+  { key: 'insight', icon: '📈', label: '创作洞察', hint: '分析全部便签：主题分布/思考倾向/盲区' },
+  { key: 'weekplan', icon: '📅', label: '想法转周计划', hint: '从近期便签提取可执行项直接进待办' },
+  { key: 'health', icon: '🧹', label: '健康度体检', hint: '找出过短/重复/过时便签，给清理建议' },
+  { key: 'linkall', icon: '🕸', label: '批量建双链', hint: 'AI 扫描全库找隐含关联，自动补 [[双链]]' }
+]
+
+/** 从 Markdown 提取任务行（卡上直接勾选用） */
+const extractTasks = (md: string): { line: number; done: boolean; text: string }[] => {
+  const out: { line: number; done: boolean; text: string }[] = []
+  md.split('\n').forEach((l, i) => {
+    const m = l.match(/^\s*- \[( |x)\]\s*(.+)/)
+    if (m) out.push({ line: i, done: m[1] === 'x', text: m[2].slice(0, 40) })
+  })
+  return out
+}
+/** 提取正文里第一张图（画廊形态用） */
+const firstImage = (md: string): string | null => md.match(/!\[[^\]]*\]\(([^)]+)\)/)?.[1] || null
+const dayKey = (ts: number): string => { const d = new Date(ts); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}` }
 
 const fmtDate = (ts: number): string => {
   const d = new Date(ts)
@@ -57,6 +126,12 @@ const chip = (h: number): React.CSSProperties => ({
   whiteSpace: 'nowrap'
 })
 
+const ctrlChip = (active: boolean): React.CSSProperties => ({
+  padding: '4px 9px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap',
+  background: active ? 'oklch(0.4 0.07 var(--th) / .5)' : 'rgba(255,255,255,.05)',
+  border: '1px solid rgba(255,255,255,.07)', color: active ? 'oklch(0.9 0.02 var(--th))' : 'oklch(0.75 0.02 var(--th) / .75)'
+})
+
 const inputBase: React.CSSProperties = {
   boxSizing: 'border-box',
   background: 'rgba(0,0,0,.3)',
@@ -66,7 +141,7 @@ const inputBase: React.CSSProperties = {
   fontSize: 11.5,
   padding: '7px 9px',
   outline: 'none',
-  fontFamily: "'Segoe UI',system-ui,sans-serif"
+  fontFamily: 'var(--font)'
 }
 
 export function NotesTab(p: NotesTabProps): React.JSX.Element {
@@ -81,7 +156,427 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
   const [editId, setEditId] = useState<number | null>(null)
   const [draft, setDraft] = useState<StickyNote | null>(null)
   const [preview, setPreview] = useState(false)
+  const [tplOpen, setTplOpen] = useState(false)
+  const [graphOpen, setGraphOpen] = useState(false)
+  const [focusId, setFocusId] = useState<number | null>(null)
+  const [clipMsg, setClipMsg] = useState('')
+  // +10：视图 / 排序 / 收藏筛选 / 颜色筛选 / 批量选择 / 回收站
+  const [layout, setLayout] = useState<'grid' | 'list' | 'timeline' | 'gallery'>('grid')
+  const [sortBy, setSortBy] = useState<'created' | 'updated' | 'title'>('created')
+  const [starOnly, setStarOnly] = useState(false)
+  const [colorFilter, setColorFilter] = useState('')
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [showTrash, setShowTrash] = useState(false)
+  // AI 增强：单便签 AI 菜单 / 忙碌标记；周回顾 / 问便签 / 合并
+  const [aiMenuId, setAiMenuId] = useState<number | null>(null)
+  const [noteAiBusy, setNoteAiBusy] = useState('')
+  const [weekBusy, setWeekBusy] = useState(false)
+  const [askOpen, setAskOpen] = useState(false)
+  const [askQ, setAskQ] = useState('')
+  const [askA, setAskA] = useState('')
+  const [mergeBusy, setMergeBusy] = useState(false)
+  // 功能补全：阅读浮层 / 近7天 / 无标签筛选
+  const [readNote, setReadNote] = useState<StickyNote | null>(null)
+  const [recentOnly, setRecentOnly] = useState(false)
+  const [noTagOnly, setNoTagOnly] = useState(false)
+  // 多形态：灵感追加 / 速记收集箱 / 闪卡复习 / 放映 / 统计 / 稍后读 / AI 工具箱 / 金句海报
+  const [appendId, setAppendId] = useState<number | null>(null)
+  const [appendText, setAppendText] = useState('')
+  const [appendBusy, setAppendBusy] = useState(false)
+  const [inbox, setInbox] = useState('')
+  const [flashOpen, setFlashOpen] = useState(false)
+  const [flashIdx, setFlashIdx] = useState(0)
+  const [flashBack, setFlashBack] = useState(false)
+  const [showOpen, setShowOpen] = useState(false)
+  const [showIdx, setShowIdx] = useState(0)
+  const [showAuto, setShowAuto] = useState(true)
+  const [statsOpen, setStatsOpen] = useState(false)
+  const [laterOnly, setLaterOnly] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [powerOpen, setPowerOpen] = useState(false)
+  const [powerGroup, setPowerGroup] = useState<NotePowerGroup>('整理')
+  const [powerOut, setPowerOut] = useState<{ title: string; content: string } | null>(null)
+  const [powerBusy, setPowerBusy] = useState('')
+  const [toolBusy, setToolBusy] = useState('')
+  const [toolOut, setToolOut] = useState('')
+  const [topicQ, setTopicQ] = useState('')
+  const [poster, setPoster] = useState<{ note: StickyNote; quote: string } | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+
+  // 放映：自动翻页
+  useEffect(() => {
+    if (!showOpen || !showAuto) return
+    const t = setInterval(() => setShowIdx((i) => i + 1), 8000)
+    return () => clearInterval(t)
+  }, [showOpen, showAuto])
+
+  // ===== 灵感追加：直接追加 / AI 增强追加 =====
+  const stamp = (): string => { const d = new Date(); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+  const appendRaw = (n: StickyNote): void => {
+    const t = appendText.trim(); if (!t) return
+    p.onUpdate({ ...n, md: `${n.md.trimEnd()}\n\n---\n💡 **${stamp()} 追加**：${t}`, updatedAt: Date.now() })
+    setAppendText(''); setAppendId(null); flash('✓ 已追加')
+  }
+  const appendAi = async (n: StickyNote): Promise<void> => {
+    const t = appendText.trim(); if (!t || appendBusy) return
+    setAppendBusy(true)
+    const r = await p.onAI(
+      '用户在给一条已有便签追加新灵感碎片。把碎片扩写成 2-4 句成型的想法（承接便签主题、补充具体化），只输出扩写结果。',
+      `便签《${n.title}》：\n${n.md.slice(0, 1500)}\n\n新碎片：${t}`
+    )
+    setAppendBusy(false)
+    if (r.ok && r.text) {
+      p.onUpdate({ ...n, md: `${n.md.trimEnd()}\n\n---\n💡 **${stamp()} 追加**（✨增强）：\n\n${r.text.trim()}`, updatedAt: Date.now() })
+      setAppendText(''); setAppendId(null); flash('✓ AI 已增强并追加')
+    } else flash(r.error || '增强失败')
+  }
+  // 速记收集箱：回车即存碎片便签
+  const quickCapture = (): void => {
+    const t = inbox.trim(); if (!t) return
+    const now = Date.now()
+    p.onAddNote({ id: now, emoji: '💡', title: t.slice(0, 14), md: t, color: 'amber', tags: ['碎片'], createdAt: now, updatedAt: now })
+    setInbox(''); flash('✓ 已入收集箱')
+  }
+  // 今日日记：已有则打开编辑，没有则从模板创建
+  const openDiary = (): void => {
+    const d = new Date()
+    const title = `日记 ${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const exist = p.notes.find((n) => !n.trashed && n.title === title)
+    if (exist) { startEdit(exist); return }
+    const now = Date.now()
+    const n: StickyNote = { id: now, emoji: '📔', title, md: '## 今天\n\n## 想法\n\n## 感恩\n- \n', color: 'emerald', tags: ['日记'], createdAt: now, updatedAt: now }
+    p.onAddNote(n); setEditId(n.id); setDraft({ ...n }); setPreview(false)
+  }
+  // 卡上任务直接勾选：改写 md 里第 line 行的 [ ]/[x]
+  const toggleTask = (n: StickyNote, line: number): void => {
+    const lines = n.md.split('\n')
+    lines[line] = lines[line].includes('- [ ]') ? lines[line].replace('- [ ]', '- [x]') : lines[line].replace('- [x]', '- [ ]')
+    p.onUpdate({ ...n, md: lines.join('\n'), updatedAt: Date.now() })
+  }
+  // 合集成文：当前标签下全部便签装订成一篇文档进工作台
+  const bindCollection = (): void => {
+    const list = p.notes.filter((n) => !n.trashed && n.tags.includes(tagFilter))
+    if (!list.length) return
+    const md = list.map((n) => `# ${n.emoji} ${n.title}\n\n${n.md}`).join('\n\n---\n\n')
+    const now = Date.now()
+    p.onOpenStudio({ id: now, emoji: '📚', title: `合集 · ${tagFilter}`, md, color: 'violet', tags: [tagFilter], createdAt: now, updatedAt: now })
+  }
+  // 金句海报：AI 提金句 → canvas 渲染
+  const makePoster = async (n: StickyNote): Promise<void> => {
+    const r = await p.onAI('从下面的内容里选出最有力量的一句金句（≤40 字），只输出这一句，不带引号。', n.md.slice(0, 3000))
+    if (r.ok && r.text) setPoster({ note: n, quote: r.text.trim().split('\n')[0].slice(0, 60) })
+    else flash(r.error || '提取金句失败')
+  }
+  const renderPoster = (): string => {
+    if (!poster) return ''
+    const W = 1080, H = 720
+    const c = document.createElement('canvas'); c.width = W; c.height = H
+    const ctx = c.getContext('2d')!
+    const h = colorOf(poster.note.color)
+    const hex = (l: number, ch: number): string => `oklch(${l} ${ch} ${h})` // canvas 支持 oklch（Chromium 111+）
+    const g = ctx.createLinearGradient(0, 0, W, H)
+    g.addColorStop(0, hex(0.32, 0.09)); g.addColorStop(1, hex(0.16, 0.05))
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+    const orb = ctx.createRadialGradient(W * 0.85, H * 0.15, 0, W * 0.85, H * 0.15, 420)
+    orb.addColorStop(0, 'rgba(255,255,255,.14)'); orb.addColorStop(1, 'rgba(255,255,255,0)')
+    ctx.fillStyle = orb; ctx.fillRect(0, 0, W, H)
+    ctx.fillStyle = hex(0.8, 0.13); ctx.font = '700 44px "Segoe UI"'; ctx.fillText('❝', 80, 160)
+    ctx.fillStyle = 'rgba(255,255,255,.94)'; ctx.font = '600 52px "Segoe UI","Microsoft YaHei"'
+    // 手动换行（每行 ~16 中文字符宽）
+    const words = [...poster.quote]; const lines: string[] = []; let cur = ''
+    for (const ch of words) { cur += ch; if (ctx.measureText(cur).width > W - 200) { lines.push(cur); cur = '' } }
+    if (cur) lines.push(cur)
+    lines.slice(0, 5).forEach((l, i) => ctx.fillText(l, 96, 250 + i * 78))
+    ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '400 26px "Segoe UI"'
+    ctx.fillText(`—— ${poster.note.emoji} ${poster.note.title}`, 96, H - 90)
+    ctx.fillStyle = hex(0.75, 0.1); ctx.font = '600 22px "Segoe UI"'
+    ctx.fillText('Agentic-Island · 灵感便签', 96, H - 48)
+    return c.toDataURL('image/png')
+  }
+
+  // ===== AI 工具箱（全库级）=====
+  const runTool = async (key: string): Promise<void> => {
+    if (toolBusy) return
+    const live = p.notes.filter((n) => !n.trashed)
+    setToolBusy(key); setToolOut('')
+    try {
+      if (key === 'prompt') {
+        const topics = live.slice(0, 20).map((n) => n.title).join('、')
+        const r = await p.onAI('你是灵感教练。基于用户最近记录的主题，出一个能激发深入思考的引导问题（一句话），再给一句为什么值得想。格式：**问题**\n为什么值得想。', `近期主题：${topics || '（还没有便签）'}`)
+        if (r.ok && r.text) setToolOut(r.text.trim())
+      } else if (key === 'batchtag') {
+        const untagged = live.filter((n) => n.tags.length === 0).slice(0, 10)
+        if (!untagged.length) { flash('没有无标签的便签'); return }
+        const body = untagged.map((n) => `${n.id}｜${n.title}｜${n.md.slice(0, 150)}`).join('\n')
+        const r = await p.onAI('为每条便签生成 1-3 个中文标签（≤4字）。只输出 JSON 数组：[{"id":数字,"tags":["a","b"]}]', body)
+        if (r.ok && r.text) {
+          try {
+            const arr = JSON.parse(r.text.replace(/^```(json)?\s*|\s*```$/g, '')) as { id: number; tags: string[] }[]
+            let cnt = 0
+            arr.forEach((x) => { const n = untagged.find((u) => u.id === x.id); if (n && Array.isArray(x.tags)) { p.onUpdate({ ...n, tags: x.tags.slice(0, 3) }); cnt++ } })
+            flash(`✓ 已为 ${cnt} 条便签打标签`)
+          } catch { setToolOut(r.text.trim()) }
+        }
+      } else if (key === 'collide') {
+        if (live.length < 2) { flash('便签太少，攒一攒再碰'); return }
+        const a = live[Math.floor(Math.random() * live.length)]
+        let b = live[Math.floor(Math.random() * live.length)]
+        if (b.id === a.id) b = live[(live.indexOf(a) + 1) % live.length]
+        const r = await p.onAI('把两条不相干的便签碰撞出一个新点子：先一句说出它们的隐秘联系，再给出 1 个可执行的新想法（2-4 句）。Markdown。', `A《${a.title}》：${a.md.slice(0, 500)}\n\nB《${b.title}》：${b.md.slice(0, 500)}`)
+        if (r.ok && r.text) {
+          const now = Date.now()
+          p.onAddNote({ id: now, emoji: '🔮', title: `碰撞：${a.title.slice(0, 6)} × ${b.title.slice(0, 6)}`, md: r.text.trim() + `\n\n> 源自 [[${a.title}]] × [[${b.title}]]`, color: 'violet', tags: ['碰撞'], createdAt: now, updatedAt: now })
+          flash('✓ 新点子已存为便签')
+        }
+      } else if (key === 'insight') {
+        const body = live.slice(0, 40).map((n) => `${n.title}｜${n.tags.join(',')}｜${n.md.length}字`).join('\n')
+        const r = await p.onAI('你是知识管理顾问。基于便签清单（标题|标签|字数）输出「创作洞察」：## 你在想什么（主题分布）## 思考习惯（长短/频率特征）## 盲区与建议（2-3 条）。Markdown，具体不空泛。', body || '（空）')
+        if (r.ok && r.text) setToolOut(r.text.trim())
+      } else if (key === 'weekplan') {
+        const recent = live.filter((n) => n.createdAt > Date.now() - 7 * 86400_000).slice(0, 15)
+        if (!recent.length) { flash('近 7 天没有便签'); return }
+        const r = await p.onAI('从便签里提取本周可执行的行动项（≤6 条），每行一条，不要序号符号，只输出行动项。', recent.map((n) => `《${n.title}》${n.md.slice(0, 300)}`).join('\n\n'))
+        if (r.ok && r.text) {
+          const items = r.text.trim().split('\n').map((l) => l.replace(/^[-*•\d.\s[\]x]+/, '').trim()).filter(Boolean).slice(0, 6)
+          items.forEach((t) => p.onQuickTodo(t))
+          flash(`✓ ${items.length} 条已进待办`)
+        }
+      } else if (key === 'health') {
+        const body = live.slice(0, 40).map((n) => `${n.id}｜${n.title}｜${n.md.length}字｜${Math.round((Date.now() - n.updatedAt) / 86400_000)}天未更新`).join('\n')
+        const r = await p.onAI('你是便签库管家。基于清单（id|标题|字数|多久没更新）给出体检报告：## 建议清理（太短/疑似重复/太久）## 建议深化（有潜力但太薄）## 一句总评。提到便签用《标题》。Markdown。', body || '（空）')
+        if (r.ok && r.text) setToolOut(r.text.trim())
+      } else if (key === 'linkall') {
+        const pool = live.slice(0, 25)
+        const r = await p.onAI('从标题清单里找出 2-4 对主题相关的便签。只输出 JSON：[{"a":"标题1","b":"标题2"}]，标题必须一字不差照抄。没有就输出 []', pool.map((n) => n.title).join('\n'))
+        if (r.ok && r.text) {
+          try {
+            const pairs = JSON.parse(r.text.replace(/^```(json)?\s*|\s*```$/g, '')) as { a: string; b: string }[]
+            let cnt = 0
+            pairs.slice(0, 4).forEach(({ a, b }) => {
+              const na = pool.find((n) => n.title.trim() === a?.trim()); const nb = pool.find((n) => n.title.trim() === b?.trim())
+              if (na && nb && !na.md.includes(`[[${nb.title}]]`)) { p.onUpdate({ ...na, md: `${na.md.trimEnd()}\n\n> 🔗 相关：[[${nb.title}]]`, updatedAt: Date.now() }); cnt++ }
+            })
+            flash(cnt ? `✓ 已补 ${cnt} 条双链（看关系图）` : '没找到值得建链的关联')
+          } catch { setToolOut(r.text.trim()) }
+        }
+      } else if (key === 'topic') {
+        const q = topicQ.trim(); if (!q) { flash('先输入要追踪的主题'); return }
+        const hits = live.filter((n) => (n.title + n.md + n.tags.join('')).toLowerCase().includes(q.toLowerCase())).slice(0, 12)
+        if (!hits.length) { flash('没有该主题的便签'); return }
+        const body = hits.map((n) => `[${new Date(n.createdAt).toLocaleDateString('zh-CN')}]《${n.title}》${n.md.slice(0, 300)}`).join('\n\n')
+        const r = await p.onAI('梳理用户对某主题的想法演进：按时间线总结观点如何变化/深化，最后给「下一步值得想的问题」。Markdown，含日期。', `主题：${q}\n\n${body}`)
+        if (r.ok && r.text) setToolOut(r.text.trim())
+      }
+    } finally { setToolBusy('') }
+  }
+
+  const runPowerTool = async (id: string): Promise<void> => {
+    if (powerBusy) return
+    setPowerBusy(id)
+    try {
+      const result = runNotePowerAction(id, p.notes)
+      if (result.kind === 'updates' && result.updates) {
+        result.updates.forEach(p.onUpdate)
+        flash(`✓ ${result.title} · ${result.updates.length} 条`)
+      } else if (result.kind === 'document' && result.content) {
+        const now2 = Date.now()
+        p.onAddNote({ id: now2, emoji: '📚', title: result.title, md: result.content, color: 'sky', tags: ['索引'], createdAt: now2, updatedAt: now2 })
+        flash(`✓ 已生成《${result.title}》`)
+      } else if (result.kind === 'export' && result.content && result.ext) {
+        const saved = await island.saveText(result.content, result.title, result.ext)
+        flash(saved.ok ? `✓ 已导出 ${result.ext.toUpperCase()}` : '已取消导出')
+      } else if (result.content) {
+        setPowerOut({ title: result.title, content: result.content })
+      }
+    } finally { setPowerBusy('') }
+  }
+
+  // 阅读浮层打开时捕获 Esc（capture 阶段拦下，避免触发岛的全局 Esc 收起）
+  useEffect(() => {
+    if (!readNote) return
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') { e.stopPropagation(); setReadNote(null) } }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [readNote])
+
+  const flash = (m: string): void => { setClipMsg(m); setTimeout(() => setClipMsg(''), 2600) }
+
+  // ===== 单便签 AI 增强：按动作组 prompt → 结果落回便签 =====
+  const runNoteAi = async (n: StickyNote, key: string): Promise<void> => {
+    if (noteAiBusy) return
+    setNoteAiBusy(`${n.id}:${key}`)
+    setAiMenuId(null)
+    const done = (): void => setNoteAiBusy('')
+    const strip = (t: string): string => t.trim().replace(/^```(?:markdown|md|json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
+    try {
+      if (key === 'summary') {
+        const r = await p.onAI('为下面的便签写 2-3 句中文摘要，只输出摘要文字。', n.md.slice(0, 4000))
+        if (r.ok && r.text) { p.onUpdate({ ...n, md: `> 📄 **摘要**：${strip(r.text).replace(/\n+/g, ' ')}\n\n${n.md}`, updatedAt: Date.now() }); flash('✓ 已插入摘要') } else flash(r.error || '生成失败')
+      } else if (key === 'tags') {
+        const r = await p.onAI('为下面的便签生成 2-4 个中文标签（每个 ≤4 字），逗号分隔，只输出标签。', `${n.title}\n${n.md.slice(0, 2000)}`)
+        if (r.ok && r.text) { const tags = [...new Set([...n.tags, ...strip(r.text).split(/[,，、\s]+/).filter(Boolean)])].slice(0, 4); p.onUpdate({ ...n, tags, updatedAt: Date.now() }); flash('✓ 标签：' + tags.join(' / ')) } else flash(r.error || '生成失败')
+      } else if (key === 'polish') {
+        const r = await p.onAI('把下面的便签正文改写得更通顺、清晰、有条理，保持原意与 Markdown 结构，只输出结果。', n.md.slice(0, 6000))
+        if (r.ok && r.text) { p.onUpdate({ ...n, md: strip(r.text), updatedAt: Date.now() }); flash('✓ 已润色') } else flash(r.error || '润色失败')
+      } else if (key === 'continue') {
+        const r = await p.onAI('顺着下面的便签内容自然地继续写一小段（3-6 句），风格一致，只输出续写部分。', n.md.slice(-3000))
+        if (r.ok && r.text) { p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n' + strip(r.text), updatedAt: Date.now() }); flash('✓ 已续写') } else flash(r.error || '续写失败')
+      } else if (key === 'translate') {
+        const r = await p.onAI('翻译下面的内容：中文→英文，英文→中文，保留 Markdown 结构，只输出译文。', n.md.slice(0, 4000))
+        if (r.ok && r.text) { p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n## 🌐 译文\n\n' + strip(r.text), updatedAt: Date.now() }); flash('✓ 已追加译文') } else flash(r.error || '翻译失败')
+      } else if (key === 'todos') {
+        const r = await p.onAI('从下面的便签里提取可执行的行动项（没有就输出"无"）。每行一条，不要序号/符号，只输出行动项。', n.md.slice(0, 4000))
+        if (r.ok && r.text) {
+          const items = strip(r.text).split('\n').map((l) => l.replace(/^[-*•\d.\s[\]x]+/, '').trim()).filter((l) => l && l !== '无').slice(0, 8)
+          if (!items.length) { flash('没有提取到行动项') } else { items.forEach((t) => p.onQuickTodo(t)); flash(`✓ ${items.length} 条已加入待办`) }
+        } else flash(r.error || '提取失败')
+      } else if (key === 'title') {
+        const r = await p.onAI('为下面的便签起一个简洁有力的标题（≤16 字）和一个贴切的 emoji。输出格式：emoji|标题，只输出这一行。', n.md.slice(0, 2000))
+        if (r.ok && r.text) { const [em, ...rest] = strip(r.text).split('|'); const t = rest.join('|').trim(); p.onUpdate({ ...n, emoji: (em || '').trim().slice(0, 4) || n.emoji, title: t || n.title, updatedAt: Date.now() }); flash('✓ 已更新标题') } else flash(r.error || '生成失败')
+      } else if (key === 'quotes') {
+        const r = await p.onAI('从下面的内容里提炼 1-3 句最有价值的金句（原句或轻度改写），每句一行，只输出金句。', n.md.slice(0, 4000))
+        if (r.ok && r.text) { const qs = strip(r.text).split('\n').filter(Boolean).map((l) => `> ❝ ${l.replace(/^[->\s❝"]+/, '')}`).join('\n'); p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n' + qs, updatedAt: Date.now() }); flash('✓ 已提炼金句') } else flash(r.error || '提炼失败')
+      } else if (key === 'dig') {
+        const r = await p.onAI('针对下面的想法，提出 3 个能推动它往下走的追问（具体、尖锐、可回答），输出 Markdown 有序列表，只输出列表。', n.md.slice(0, 3000))
+        if (r.ok && r.text) { p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n## 🌱 深挖\n' + strip(r.text), updatedAt: Date.now() }); flash('✓ 已生成深挖三问') } else flash(r.error || '生成失败')
+      } else if (key === 'poster') {
+        await makePoster(n)
+      } else if (key === 'similar') {
+        const others = p.notes.filter((x) => !x.trashed && x.id !== n.id).slice(0, 40)
+        if (!others.length) { flash('没有其它便签可关联'); done(); return }
+        const list = others.map((x) => `- ${x.title}`).join('\n')
+        const r = await p.onAI('从候选便签标题里挑出与目标便签最相关的 1-3 个，只输出标题本身，每行一个，一字不差地照抄候选里的标题。没有相关的就输出"无"。', `目标便签：${n.title}\n${n.md.slice(0, 1500)}\n\n候选：\n${list}`)
+        if (r.ok && r.text) {
+          const titles = strip(r.text).split('\n').map((l) => l.replace(/^[-*\s]+/, '').trim()).filter((t) => t && t !== '无' && others.some((x) => x.title.trim() === t)).slice(0, 3)
+          if (!titles.length) { flash('没找到相关便签') } else { p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n## 🔗 相关\n' + titles.map((t) => `- [[${t}]]`).join('\n'), updatedAt: Date.now() }); flash(`✓ 已关联 ${titles.length} 条（看关系图）`) }
+        } else flash(r.error || '查找失败')
+      }
+    } finally { done() }
+  }
+
+  // ===== 全局 AI：周回顾 / 问便签 / 合并选中 =====
+  const weekReview = async (): Promise<void> => {
+    if (weekBusy) return
+    const recent = p.notes.filter((n) => !n.trashed && n.createdAt > Date.now() - 7 * 86400_000)
+    if (recent.length < 2) { flash('近 7 天便签太少，攒一攒再来'); return }
+    setWeekBusy(true)
+    const body = recent.slice(0, 25).map((n) => `【${n.title}】${n.md.slice(0, 400)}`).join('\n\n')
+    const r = await p.onAI('下面是用户近一周的灵感便签。写一篇「本周灵感回顾」：## 本周主线（2-3 句）、## 值得深挖的想法（要点）、## 下周行动建议（要点）。简体中文 Markdown，只输出正文。', body.slice(0, 12000))
+    setWeekBusy(false)
+    if (r.ok && r.text) {
+      const now = Date.now(); const d = new Date()
+      p.onAddNote({ id: now, emoji: '🗂', title: `本周灵感回顾 ${d.getMonth() + 1}/${d.getDate()}`, md: r.text.trim(), color: 'violet', tags: ['周回顾'], createdAt: now, updatedAt: now })
+      flash('✓ 周回顾已生成（置顶查看）')
+    } else flash(r.error || '生成失败')
+  }
+  const askNotes = async (): Promise<void> => {
+    const q = askQ.trim(); if (!q) return
+    setAskA('思考中…')
+    const pool = p.notes.filter((n) => !n.trashed)
+    const kw = q.toLowerCase()
+    const ranked = [...pool].sort((a, b) => Number((b.title + b.md).toLowerCase().includes(kw)) - Number((a.title + a.md).toLowerCase().includes(kw))).slice(0, 12)
+    const body = ranked.map((n, i) => `【${i + 1} · ${n.title}】${n.md.slice(0, 500)}`).join('\n\n')
+    const r = await p.onAI('你是用户的便签问答助手。只依据下面的便签内容回答问题，引用时提及便签标题；没有相关内容就直说。简洁，Markdown。', `问题：${q}\n\n便签：\n${body.slice(0, 10000)}`)
+    setAskA(r.ok && r.text ? r.text.trim() : (r.error || '回答失败'))
+  }
+  const mergeSelected = async (): Promise<void> => {
+    const list = p.notes.filter((n) => selected.has(n.id) && !n.trashed)
+    if (list.length < 2 || mergeBusy) { flash('先多选 2 条以上再合并'); return }
+    setMergeBusy(true)
+    const body = list.map((n) => `【${n.title}】\n${n.md}`).join('\n\n---\n\n')
+    const r = await p.onAI('把下面几条主题相近的便签合并成一条：去重、归纳、保留全部有效信息，结构清晰的 Markdown。第一行输出合并后的标题（# 开头），之后是正文。', body.slice(0, 10000))
+    setMergeBusy(false)
+    if (r.ok && r.text) {
+      const out = r.text.trim()
+      const first = out.split('\n')[0].replace(/^#+\s*/, '').trim()
+      const now = Date.now()
+      p.onAddNote({ id: now, emoji: '🧬', title: first.slice(0, 30) || '合并便签', md: out.split('\n').slice(1).join('\n').trim(), color: list[0].color, tags: [...new Set(list.flatMap((n) => n.tags))].slice(0, 4), createdAt: now, updatedAt: now })
+      p.onBatchTrash(list.map((n) => n.id))
+      setSelectMode(false); setSelected(new Set())
+      flash(`✓ ${list.length} 条已合并为「${first.slice(0, 14)}…」，原便签进回收站`)
+    } else flash(r.error || '合并失败')
+  }
+
+  // ===== 功能补全：副本 / 复制 MD / 单条导出 / 锁定 =====
+  const duplicate = (n: StickyNote): void => {
+    const now = Date.now()
+    p.onAddNote({ ...n, id: now, title: n.title + ' 副本', pinned: false, createdAt: now, updatedAt: now })
+    flash('✓ 已创建副本')
+  }
+  const copyMd = (n: StickyNote): void => {
+    void navigator.clipboard?.writeText(`# ${n.emoji} ${n.title}\n\n${n.md}`).catch(() => {})
+    flash('✓ 已复制 Markdown')
+  }
+  const exportOne = async (n: StickyNote): Promise<void> => {
+    const r = await island.saveMdFile(`# ${n.emoji} ${n.title}\n\n${n.md}\n\n${n.tags.map((t) => '#' + t).join(' ')}`, n.title || '便签')
+    if (r.ok) flash('✓ 已导出 ' + (r.name || ''))
+  }
+  const toggleLock = (n: StickyNote): void => { p.onUpdate({ ...n, locked: !n.locked }); flash(n.locked ? '🔓 已解锁' : '🔒 已锁定（防误编辑/误删）') }
+
+  const toggleSel = (id: number): void => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  // 导出选中/全部为单个 .md 文件
+  const exportMd = async (ids?: number[]): Promise<void> => {
+    const list = (ids && ids.length ? p.notes.filter((n) => ids.includes(n.id)) : p.notes.filter((n) => !n.trashed))
+    if (!list.length) return
+    const md = list.map((n) => `# ${n.emoji} ${n.title}\n\n${n.md}\n\n${n.tags.map((t) => '#' + t).join(' ')}`).join('\n\n---\n\n')
+    const r = await island.saveMdFile(md, `灵感便签导出_${list.length}条`)
+    if (r.ok) { setClipMsg(`✓ 已导出 ${list.length} 条`); setTimeout(() => setClipMsg(''), 2500); setSelectMode(false); setSelected(new Set()) }
+  }
+  // 随机漫步：翻出一条旧便签
+  const randomWalk = (): void => {
+    const pool = p.notes.filter((n) => !n.trashed)
+    if (!pool.length) return
+    const n = pool[Math.floor(Math.random() * pool.length)]
+    setQuery(''); setAiIds(null); setTagFilter(''); setColorFilter(''); setStarOnly(false); setShowTrash(false)
+    setFocusId(n.id); setTimeout(() => setFocusId(null), 2600)
+    setTimeout(() => document.getElementById('note-' + n.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80)
+  }
+
+  // ④ 双链跳转：按标题定位便签并高亮滚动
+  const jumpToTitle = (title: string): void => {
+    const target = p.notes.find((n) => n.title.trim().toLowerCase() === title.trim().toLowerCase())
+    if (!target) { setClipMsg(`没有名为「${title}」的便签`); setTimeout(() => setClipMsg(''), 2500); return }
+    setQuery(''); setAiIds(null); setTagFilter(''); setGraphOpen(false)
+    setFocusId(target.id); setTimeout(() => setFocusId(null), 2200)
+    setTimeout(() => document.getElementById('note-' + target.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 70)
+  }
+
+  // ⑤ 从模板新建并立即进入编辑
+  const useTemplate = (tpl: (typeof TEMPLATES)[number]): void => {
+    const now = Date.now()
+    const n: StickyNote = { id: now, emoji: tpl.emoji, title: tpl.title, md: tpl.md, color: tpl.color, tags: [...tpl.tags], createdAt: now, updatedAt: now }
+    p.onAddNote(n)
+    setEditId(n.id); setDraft({ ...n }); setPreview(false); setTplOpen(false)
+  }
+
+  // ⑭ 复制富文本（粘进飞书/Word 保留排版）
+  const copyRich = (n: StickyNote): void => {
+    const html = `<h3>${escHtml(n.emoji)} ${escHtml(n.title)}</h3>` + mdToHtml(n.md)
+    try {
+      const item = new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([`# ${n.title}\n\n${n.md}`], { type: 'text/plain' })
+      })
+      void navigator.clipboard.write([item]).catch(() => {})
+      setClipMsg('✓ 已复制富文本'); setTimeout(() => setClipMsg(''), 2000)
+    } catch {
+      void navigator.clipboard?.writeText(`# ${n.title}\n\n${n.md}`).catch(() => {})
+    }
+  }
+
+  // ③ 一键剪藏：读剪贴板里的网址，直接抓正文成便签
+  const clipUrl = async (): Promise<void> => {
+    try {
+      const t = (await navigator.clipboard.readText()).trim()
+      if (!/^https?:\/\/\S+$/i.test(t)) { setClipMsg('剪贴板里没有网址'); setTimeout(() => setClipMsg(''), 2500); return }
+      setClipMsg('✨ 正在剪藏网页…')
+      const msg = await p.onAiCreate(t)
+      setClipMsg(msg); setTimeout(() => setClipMsg(''), 3000)
+    } catch { setClipMsg('无法读取剪贴板'); setTimeout(() => setClipMsg(''), 2500) }
+  }
+
+  const graph = useMemo(() => buildGraph(p.notes), [p.notes])
 
   // 富文本工具栏：对选区包裹/插入 Markdown（用户无需手写语法）
   const wrapSel = (before: string, after = '', placeholder = '文字'): void => {
@@ -104,38 +599,53 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
   }
   // 🖼 插图：本地图片压缩为 dataURL（≈720px JPEG）嵌入便签
   const pickImage = (): void => {
-    const inp = document.createElement('input')
-    inp.type = 'file'
-    inp.accept = 'image/*'
-    inp.onchange = (): void => {
-      const f = inp.files?.[0]
+    void selectLocalFiles('image/*').then((files) => {
+      const f = files[0]
       if (!f) return
       imageToCompactDataUrl(f).then((url) => {
         if (url) insertLine(`![${f.name}](${url})`)
       })
-    }
-    inp.click()
+    })
   }
 
   // 全部标签（按出现频次）
   const allTags = useMemo(() => {
     const cnt = new Map<string, number>()
-    p.notes.forEach((n) => n.tags.forEach((t) => cnt.set(t, (cnt.get(t) || 0) + 1)))
+    p.notes.filter((n) => !n.trashed).forEach((n) => n.tags.forEach((t) => cnt.set(t, (cnt.get(t) || 0) + 1)))
     return [...cnt.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t).slice(0, 12)
   }, [p.notes])
+  const usedColors = useMemo(() => [...new Set(p.notes.filter((n) => !n.trashed).map((n) => n.color))], [p.notes])
+  const trashCount = useMemo(() => p.notes.filter((n) => n.trashed).length, [p.notes])
+  const stats = useMemo(() => {
+    const live = p.notes.filter((n) => !n.trashed)
+    return { total: live.length, star: live.filter((n) => n.starred).length, words: live.reduce((s, n) => s + n.md.length, 0) }
+  }, [p.notes])
 
-  // 过滤：AI 结果 > 关键词 > 标签
+  // 过滤：回收站 / AI 结果 / 关键词 / 标签 / 颜色 / 收藏，再排序
   const filtered = useMemo(() => {
-    let list = [...p.notes]
-    if (aiIds) list = aiIds.map((id) => list.find((n) => n.id === id)).filter(Boolean) as StickyNote[]
-    else if (query.trim()) {
-      const q = query.trim().toLowerCase()
-      list = list.filter((n) => (n.title + n.md + n.tags.join(' ')).toLowerCase().includes(q))
+    let list = p.notes.filter((n) => (showTrash ? n.trashed : !n.trashed))
+    if (!showTrash) {
+      if (aiIds) list = aiIds.map((id) => list.find((n) => n.id === id)).filter(Boolean) as StickyNote[]
+      else if (query.trim()) {
+        const q = query.trim().toLowerCase()
+        list = list.filter((n) => (n.title + n.md + n.tags.join(' ')).toLowerCase().includes(q))
+      }
+      if (tagFilter) list = list.filter((n) => n.tags.includes(tagFilter))
+      if (colorFilter) list = list.filter((n) => n.color === colorFilter)
+      if (starOnly) list = list.filter((n) => n.starred)
+      if (recentOnly) list = list.filter((n) => n.createdAt > Date.now() - 7 * 86400_000)
+      if (noTagOnly) list = list.filter((n) => n.tags.length === 0)
+      if (laterOnly) list = list.filter((n) => n.later)
+      if (layout === 'gallery') list = list.filter((n) => firstImage(n.md))
     }
-    if (tagFilter) list = list.filter((n) => n.tags.includes(tagFilter))
-    if (!aiIds) list.sort((a, b) => Number(b.pinned || 0) - Number(a.pinned || 0) || b.createdAt - a.createdAt)
+    if (!aiIds) {
+      const cmp = sortBy === 'title' ? (a: StickyNote, b: StickyNote) => a.title.localeCompare(b.title)
+        : sortBy === 'updated' ? (a: StickyNote, b: StickyNote) => b.updatedAt - a.updatedAt
+          : (a: StickyNote, b: StickyNote) => b.createdAt - a.createdAt
+      list = [...list].sort((a, b) => Number(b.pinned || 0) - Number(a.pinned || 0) || cmp(a, b))
+    }
     return list
-  }, [p.notes, query, aiIds, tagFilter])
+  }, [p.notes, query, aiIds, tagFilter, colorFilter, starOnly, showTrash, sortBy, recentOnly, noTagOnly, laterOnly, layout])
 
   const aiSearch = (): void => {
     if (!query.trim() || aiBusy) return
@@ -191,6 +701,194 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         </div>
       </div>
 
+      {/* 📥 速记收集箱：一行闪念，回车即存（碎片形态） */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input value={inbox} onChange={(e) => setInbox(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') quickCapture() }} placeholder="📥 闪念收集箱：一句话灵感，回车即存（不打断心流）" style={{ ...inputBase, flex: 1, background: 'oklch(0.3 0.05 85 / .18)', border: '1px solid oklch(0.7 0.1 85 / .25)' }} />
+        {inbox.trim() && <div className="hv" onClick={quickCapture} style={{ padding: '0 13px', borderRadius: 9, display: 'flex', alignItems: 'center', cursor: 'pointer', background: 'oklch(0.55 0.11 85 / .5)', color: 'oklch(0.95 0.04 85)', fontSize: 11.5, fontWeight: 700 }}>存</div>}
+      </div>
+
+      {/* 次级工具条：剪藏 / 模板 / 关系图 / 周回顾 / 问便签 / 日记 / 闪卡 / 放映 / 统计 / 工具箱 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        {([
+          ['🔗 剪藏网址', '把剪贴板里的网址抓成便签', () => void clipUrl(), false],
+          ['📄 模板', '从模板新建结构化便签', () => setTplOpen((v) => !v), tplOpen],
+          ['🕸 关系图', '便签双链关系图', () => setGraphOpen((v) => !v), graphOpen],
+          [weekBusy ? '🗂 生成中…' : '🗂 周回顾', 'AI 把近 7 天便签合成一篇回顾', () => void weekReview(), weekBusy],
+          ['💬 问便签', '跨全部便签问答（AI 只依据你的便签回答）', () => setAskOpen((v) => !v), askOpen],
+          ['📔 今日日记', '每天一条日记（已有则直接打开）', openDiary, false],
+          ['🎴 闪卡', '闪卡形态复习便签（翻面记忆）', () => { setFlashIdx(0); setFlashBack(false); setFlashOpen(true) }, false],
+          ['🎞 放映', '全屏轮播浏览便签', () => { setShowIdx(0); setShowOpen(true) }, false],
+          ['📊 统计', '创作热力图 / 标签分布', () => setStatsOpen((v) => !v), statsOpen],
+          ['🧰 AI 工具箱', '全库级 AI：洞察/碰撞/体检/批量整理…', () => setToolsOpen((v) => !v), toolsOpen],
+          [`⚙ 管理工具 ${NOTE_POWER_ACTIONS.length}`, '批量规范、质量审计、索引、洞察和结构化导出', () => setPowerOpen((v) => !v), powerOpen]
+        ] as [string, string, () => void, boolean][]).map(([label, title, fn, active]) => (
+          <div key={label} className="hv" onClick={fn} title={title} style={{ padding: '4px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 600, background: active ? 'oklch(0.35 0.07 var(--th) / .5)' : 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.07)', color: 'oklch(0.8 0.02 var(--th) / .82)' }}>{label}</div>
+        ))}
+        {tagFilter && <div className="hv" onClick={bindCollection} title={`把「${tagFilter}」下全部便签装订成一篇文档进工作台`} style={{ padding: '4px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 600, background: 'oklch(0.4 0.09 300 / .4)', border: '1px solid oklch(0.65 0.12 300 / .35)', color: 'oklch(0.88 0.08 300)' }}>📚 合集成文</div>}
+        {clipMsg && <span style={{ flex: 1, color: clipMsg.startsWith('✓') || clipMsg.startsWith('✨') ? 'oklch(0.82 calc(0.12 * var(--cs, 1)) var(--th))' : 'oklch(0.75 0.06 40 / .85)', fontSize: 10 }}>{clipMsg}</span>}
+      </div>
+
+      {/* 🧰 AI 工具箱：全库级智能 */}
+      {toolsOpen && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 10, borderRadius: 12, background: 'oklch(0.26 0.04 var(--th) / .25)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .3)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 5 }}>
+            {NOTE_TOOLS.map((t) => (
+              <div key={t.key} className="hv" title={t.hint} onClick={() => void runTool(t.key)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '8px 4px', borderRadius: 9, cursor: 'pointer', background: toolBusy === t.key ? 'oklch(0.4 0.09 var(--th) / .5)' : 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.07)' }}>
+                <span style={{ fontSize: 15 }}>{t.icon}</span>
+                <span style={{ color: 'oklch(0.85 0.02 var(--th) / .9)', fontSize: 9.5, fontWeight: 600 }}>{toolBusy === t.key ? '…' : t.label}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input value={topicQ} onChange={(e) => setTopicQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void runTool('topic') }} placeholder="🎯 主题追踪：输入主题，AI 梳理你对它的想法演进…" style={{ ...inputBase, flex: 1, fontSize: 10.5 }} />
+            <div className="hv" onClick={() => void runTool('topic')} style={{ padding: '0 12px', borderRadius: 9, display: 'flex', alignItems: 'center', cursor: 'pointer', background: 'oklch(0.5 0.12 var(--th) / .45)', color: 'oklch(0.92 0.06 var(--th))', fontSize: 10.5, fontWeight: 700 }}>{toolBusy === 'topic' ? '…' : '追踪'}</div>
+          </div>
+          {toolOut && (
+            <div className="ai-scroll" style={{ maxHeight: 220, overflowY: 'auto', padding: '9px 11px', borderRadius: 9, background: 'rgba(0,0,0,.24)', fontSize: 11, lineHeight: 1.6 }}>
+              <Markdown text={toolOut} />
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <span className="hv" onClick={() => { const now = Date.now(); p.onAddNote({ id: now, emoji: '🧠', title: toolOut.split('\n')[0].replace(/^#+\s*|\*+/g, '').slice(0, 16) || 'AI 洞察', md: toolOut, color: 'violet', tags: ['洞察'], createdAt: now, updatedAt: now }); flash('✓ 已存为便签') }} style={{ cursor: 'pointer', fontSize: 9.5, color: 'oklch(0.82 0.1 var(--th))', fontWeight: 600 }}>📌 存为便签</span>
+                <span className="hv" onClick={() => setToolOut('')} style={{ cursor: 'pointer', fontSize: 9.5, color: 'oklch(0.6 0.02 var(--th) / .6)' }}>清除</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 非 AI 高级工具：所有动作均可本地完成 */}
+      {powerOpen && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 10, borderRadius: 8, background: 'rgba(0,0,0,.2)', border: '1px solid rgba(255,255,255,.07)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+            <span style={{ color: 'oklch(0.84 0.04 var(--th))', fontSize: 10.5, fontWeight: 750, marginRight: 5 }}>便签库管理</span>
+            {(['整理', '质检', '索引', '洞察', '导出'] as NotePowerGroup[]).map((group) => (
+              <span key={group} className="hv" onClick={() => setPowerGroup(group)} style={ctrlChip(powerGroup === group)}>{group} · {NOTE_POWER_ACTIONS.filter((x) => x.group === group).length}</span>
+            ))}
+            <span style={{ flex: 1 }} />
+            <span style={{ color: 'oklch(0.56 0.02 var(--th) / .55)', fontSize: 9 }}>本地处理 · {NOTE_POWER_ACTIONS.length} 项</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 5 }}>
+            {NOTE_POWER_ACTIONS.filter((x) => x.group === powerGroup).map((action) => (
+              <button key={action.id} type="button" className="hv" onClick={() => void runPowerTool(action.id)} title={action.hint} style={{ height: 30, minWidth: 0, padding: '0 6px', borderRadius: 7, border: '1px solid rgba(255,255,255,.07)', background: powerBusy === action.id ? 'oklch(0.4 0.08 var(--th) / .4)' : 'rgba(255,255,255,.045)', color: 'oklch(0.78 0.03 var(--th))', cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 9.5, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{powerBusy === action.id ? '处理中…' : action.label}</button>
+            ))}
+          </div>
+          {powerOut && (
+            <div className="ai-scroll" style={{ maxHeight: 220, overflowY: 'auto', padding: '8px 10px', borderRadius: 7, background: 'rgba(0,0,0,.24)', border: '1px solid rgba(255,255,255,.055)', fontSize: 10.5, lineHeight: 1.55 }}>
+              <Markdown text={powerOut.content} />
+              <div style={{ display: 'flex', gap: 9, marginTop: 7 }}>
+                <span className="hv" onClick={() => { const now2 = Date.now(); p.onAddNote({ id: now2, emoji: '📋', title: powerOut.title, md: powerOut.content, color: 'violet', tags: ['审计'], createdAt: now2, updatedAt: now2 }); flash('✓ 报告已存为便签') }} style={{ cursor: 'pointer', color: 'oklch(0.82 0.1 var(--th))', fontSize: 9.5, fontWeight: 650 }}>存为便签</span>
+                <span className="hv" onClick={() => setPowerOut(null)} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 9.5 }}>关闭报告</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 📊 统计仪表盘：12 周创作热力图 + 标签分布 */}
+      {statsOpen && (() => {
+        const live = p.notes.filter((n) => !n.trashed)
+        const byDay = new Map<string, number>()
+        live.forEach((n) => byDay.set(dayKey(n.createdAt), (byDay.get(dayKey(n.createdAt)) || 0) + 1))
+        const weeks = 12
+        const today = new Date(); today.setHours(0, 0, 0, 0)
+        const start = new Date(today.getTime() - (weeks * 7 - 1) * 86400_000)
+        start.setDate(start.getDate() - start.getDay()) // 对齐周日
+        const cells: { k: string; n: number }[] = []
+        for (let i = 0; i < weeks * 7; i++) { const d = new Date(start.getTime() + i * 86400_000); if (d > today) break; cells.push({ k: dayKey(d.getTime()), n: byDay.get(dayKey(d.getTime())) || 0 }) }
+        const tagCnt = new Map<string, number>()
+        live.forEach((n) => n.tags.forEach((t) => tagCnt.set(t, (tagCnt.get(t) || 0) + 1)))
+        const topTags = [...tagCnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)
+        const maxTag = topTags[0]?.[1] || 1
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9, padding: 11, borderRadius: 12, background: 'rgba(0,0,0,.22)', border: '1px solid rgba(255,255,255,.06)' }}>
+            <div style={{ display: 'flex', gap: 14, color: 'oklch(0.75 0.02 var(--th) / .8)', fontSize: 10 }}>
+              <span>共 <b style={{ color: 'oklch(0.9 0.06 var(--th))' }}>{live.length}</b> 条</span>
+              <span>收藏 <b style={{ color: 'oklch(0.85 0.12 85)' }}>{live.filter((n) => n.starred).length}</b></span>
+              <span>本周新增 <b style={{ color: 'oklch(0.82 0.12 150)' }}>{live.filter((n) => n.createdAt > Date.now() - 7 * 86400_000).length}</b></span>
+              <span>累计 <b style={{ color: 'oklch(0.9 0.06 var(--th))' }}>{Math.round(live.reduce((s, n) => s + n.md.length, 0) / 1000)}k</b> 字</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, 9px)', gridAutoFlow: 'column', gap: 2.5 }}>
+              {cells.map((c, i) => (
+                <span key={i} title={`${c.k} · ${c.n} 条`} style={{ width: 9, height: 9, borderRadius: 2.5, background: c.n === 0 ? 'rgba(255,255,255,.06)' : `oklch(${0.45 + Math.min(3, c.n) * 0.12} calc(0.13 * var(--cs, 1)) var(--th) / ${0.5 + Math.min(3, c.n) * 0.16})` }} />
+              ))}
+            </div>
+            {topTags.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {topTags.map(([t, n]) => (
+                  <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <span style={{ width: 56, flex: 'none', color: 'oklch(0.78 0.02 var(--th) / .8)', fontSize: 9.5, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}># {t}</span>
+                    <div style={{ flex: 1, height: 7, borderRadius: 999, background: 'rgba(255,255,255,.05)', overflow: 'hidden' }}>
+                      <div style={{ width: `${(n / maxTag) * 100}%`, height: '100%', borderRadius: 999, background: 'linear-gradient(90deg, oklch(0.7 calc(0.13 * var(--cs, 1)) var(--th)), oklch(0.6 calc(0.12 * var(--cs, 1)) var(--th2)))' }} />
+                    </div>
+                    <span style={{ width: 22, flex: 'none', color: 'oklch(0.65 0.02 var(--th) / .6)', fontSize: 9 }}>{n}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* 💬 问便签：跨全部便签问答 */}
+      {askOpen && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 10, borderRadius: 12, background: 'oklch(0.26 0.04 var(--th) / .25)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .3)' }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input value={askQ} onChange={(e) => setAskQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void askNotes() }} placeholder="问你的便签库：我之前关于 X 记了什么？" style={{ ...inputBase, flex: 1 }} />
+            <div className="hv" onClick={() => void askNotes()} style={{ padding: '0 13px', borderRadius: 9, display: 'flex', alignItems: 'center', cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 11.5, fontWeight: 700 }}>问</div>
+          </div>
+          {askA && <div className="ai-scroll" style={{ maxHeight: 180, overflowY: 'auto', padding: '8px 10px', borderRadius: 9, background: 'rgba(0,0,0,.22)', fontSize: 11, lineHeight: 1.6 }}><Markdown text={askA} /></div>}
+        </div>
+      )}
+
+      {/* 模板选择 */}
+      {tplOpen && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: 9, borderRadius: 11, background: 'rgba(0,0,0,.22)' }}>
+          {TEMPLATES.map((t) => (
+            <div key={t.label} className="hv" onClick={() => useTemplate(t)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 9, cursor: 'pointer', background: `oklch(0.35 0.07 ${colorOf(t.color)} / .4)`, border: `1px solid oklch(0.65 0.11 ${colorOf(t.color)} / .35)`, color: 'oklch(0.9 0.02 var(--th))', fontSize: 11, fontWeight: 600 }}>
+              <span>{t.emoji}</span>{t.label}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 双链关系图 */}
+      {graphOpen && (
+        <div style={{ padding: 10, borderRadius: 13, background: 'rgba(0,0,0,.22)', border: '1px solid rgba(255,255,255,.06)' }}>
+          {graph.nodes.length ? (
+            <svg viewBox="0 0 300 200" style={{ width: '100%', height: 190 }}>
+              {(() => {
+                const cx = 150, cy = 100, R = 78
+                const pos = new Map(graph.nodes.map((n, i) => {
+                  const a = (i / graph.nodes.length) * Math.PI * 2 - Math.PI / 2
+                  return [n.id, { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) }]
+                }))
+                return (
+                  <>
+                    {graph.edges.map((e, i) => {
+                      const a = pos.get(e.from), b = pos.get(e.to)
+                      if (!a || !b) return null
+                      return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} style={{ stroke: 'oklch(0.6 calc(0.1 * var(--cs, 1)) var(--th) / .35)', strokeWidth: 1 }} />
+                    })}
+                    {graph.nodes.map((n) => {
+                      const pt = pos.get(n.id)!
+                      const h = colorOf(n.color)
+                      const r = 5 + Math.min(6, n.deg * 1.5)
+                      return (
+                        <g key={n.id} className="hv" onClick={() => jumpToTitle(n.title)} style={{ cursor: 'pointer' }}>
+                          <circle cx={pt.x} cy={pt.y} r={r} style={{ fill: `oklch(0.7 0.13 ${h})` }} />
+                          <text x={pt.x} y={pt.y - r - 3} textAnchor="middle" style={{ fill: 'oklch(0.85 0.02 var(--th) / .85)', fontSize: 7.5 }}>{n.title.slice(0, 8)}</text>
+                        </g>
+                      )
+                    })}
+                  </>
+                )
+              })()}
+            </svg>
+          ) : (
+            <div style={{ color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 10.5, padding: '14px 4px', textAlign: 'center', lineHeight: 1.6 }}>还没有双链。在便签正文里用 <code style={{ background: 'rgba(255,255,255,.08)', padding: '1px 5px', borderRadius: 4 }}>[[另一条便签的标题]]</code> 建立关联，这里会长出关系图。</div>
+          )}
+        </div>
+      )}
+
       {/* AI 生成面板 */}
       {genOpen && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 11, borderRadius: 13, background: 'oklch(0.26 0.04 var(--th) / .25)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .3)' }}>
@@ -223,6 +921,52 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
       )}
       {aiIds && <div style={{ color: 'oklch(0.78 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 10 }}>✨ AI 找到 {filtered.length} 条相关便签（<span className="hv" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setAiIds(null)}>返回全部</span>）</div>}
 
+      {/* 控制条：视图 / 排序 / 收藏 / 颜色 / 随机 / 导出 / 多选 / 回收站 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 2, background: 'rgba(0,0,0,.22)', borderRadius: 8, padding: 2 }}>
+          {([['grid', '▦', '瀑布流'], ['list', '☰', '列表'], ['timeline', '🕒', '时间线（按天分组）'], ['gallery', '🖼', '画廊（只看带图便签）']] as const).map(([v, ic, tip]) => (
+            <span key={v} className="hv" onClick={() => setLayout(v)} title={tip} style={{ padding: '3px 9px', borderRadius: 6, cursor: 'pointer', fontSize: 12, background: layout === v ? 'oklch(0.4 0.06 var(--th) / .5)' : 'transparent', color: layout === v ? 'oklch(0.9 0.02 var(--th))' : 'oklch(0.65 0.02 var(--th) / .6)' }}>{ic}</span>
+          ))}
+        </div>
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)} style={{ background: 'rgba(0,0,0,.22)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 8, color: 'oklch(0.82 0.02 var(--th))', fontSize: 10.5, padding: '4px 7px', outline: 'none' }}>
+          <option value="created">最新创建</option><option value="updated">最近更新</option><option value="title">标题</option>
+        </select>
+        <span className="hv" onClick={() => setStarOnly((v) => !v)} title="只看收藏" style={ctrlChip(starOnly)}>⭐ {stats.star}</span>
+        <span className="hv" onClick={() => setLaterOnly((v) => !v)} title="稍后读队列（卡片上点 🔖 加入）" style={ctrlChip(laterOnly)}>🔖 {p.notes.filter((n) => !n.trashed && n.later).length || ''}</span>
+        <span className="hv" onClick={() => setRecentOnly((v) => !v)} title="只看近 7 天新增" style={ctrlChip(recentOnly)}>🗓 近7天</span>
+        <span className="hv" onClick={() => setNoTagOnly((v) => !v)} title="只看还没打标签的（方便补标签）" style={ctrlChip(noTagOnly)}>∅ 无标签</span>
+        <span className="hv" onClick={randomWalk} title="随机翻一条旧便签" style={ctrlChip(false)}>🎲 漫步</span>
+        <span className="hv" onClick={() => { setSelectMode((v) => !v); setSelected(new Set()) }} title="批量选择" style={ctrlChip(selectMode)}>✓ 多选</span>
+        <span className="hv" onClick={() => void exportMd()} title="导出全部为 .md" style={ctrlChip(false)}>⬇ 导出</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 9.5 }}>{stats.total} 条 · {stats.words > 1000 ? (stats.words / 1000).toFixed(1) + 'k' : stats.words} 字</span>
+        {trashCount > 0 && <span className="hv" onClick={() => setShowTrash((v) => !v)} title="回收站" style={ctrlChip(showTrash)}>🗑 {trashCount}</span>}
+      </div>
+
+      {/* 颜色筛选 */}
+      {usedColors.length > 1 && !showTrash && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {usedColors.map((c) => (
+            <span key={c} className="hv" onClick={() => setColorFilter(colorFilter === c ? '' : c)} title={NOTE_COLORS.find((x) => x.key === c)?.label} style={{ width: 16, height: 16, borderRadius: 999, cursor: 'pointer', background: `oklch(0.6 0.13 ${colorOf(c)})`, border: colorFilter === c ? '2px solid #fff' : '2px solid transparent', boxSizing: 'border-box' }} />
+          ))}
+          {colorFilter && <span className="hv" onClick={() => setColorFilter('')} style={{ color: 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 10, cursor: 'pointer' }}>清除</span>}
+        </div>
+      )}
+
+      {/* 批量操作条 */}
+      {selectMode && selected.size > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', borderRadius: 11, background: 'oklch(0.3 0.05 var(--th) / .4)', border: '1px solid oklch(0.65 0.12 var(--th) / .35)', flexWrap: 'wrap' }}>
+          <span style={{ color: 'oklch(0.9 0.02 var(--th))', fontSize: 11, fontWeight: 700 }}>已选 {selected.size}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 10 }}>改色</span>
+          {NOTE_COLORS.map((c) => <span key={c.key} className="hv" onClick={() => { p.onBatchColor([...selected], c.key); setSelectMode(false); setSelected(new Set()) }} style={{ width: 15, height: 15, borderRadius: 999, cursor: 'pointer', background: `oklch(0.6 0.13 ${c.h})` }} />)}
+          <span className="hv" onClick={() => void exportMd([...selected])} style={ctrlChip(false)}>⬇ 导出</span>
+          {selected.size >= 2 && <span className="hv" onClick={() => void mergeSelected()} title="AI 把选中的几条相似便签合并成一条（原便签进回收站）" style={{ ...ctrlChip(false), color: 'oklch(0.85 calc(0.1 * var(--cs, 1)) var(--th))' }}>{mergeBusy ? '🧬 合并中…' : '🧬 AI 合并'}</span>}
+          <span className="hv" onClick={() => { p.onBatchTrash([...selected]); setSelectMode(false); setSelected(new Set()) }} style={{ ...ctrlChip(false), color: 'oklch(0.75 0.12 30)' }}>🗑 删除</span>
+        </div>
+      )}
+      {showTrash && <div style={{ color: 'oklch(0.7 0.08 40 / .8)', fontSize: 10.5 }}>🗑 回收站 · {trashCount} 条（<span className="hv" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setShowTrash(false)}>返回便签</span>）</div>}
+
       {/* 空态 */}
       {filtered.length === 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '28px 14px', borderRadius: 16, background: 'rgba(255,255,255,.03)', border: '1px dashed rgba(255,255,255,.09)' }}>
@@ -232,11 +976,15 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         </div>
       )}
 
-      {/* 瀑布流双栏（按日期分组仅在无筛选时显示组头） */}
-      <div style={{ columnCount: 2, columnGap: 9 }}>
-        {filtered.map((n) => {
+      {/* 瀑布流双栏 / 列表·时间线单栏 / 画廊双栏 */}
+      <div style={{ columnCount: layout === 'list' || layout === 'timeline' ? 1 : 2, columnGap: 9 }}>
+        {filtered.map((n, idx) => {
           const h = colorOf(n.color)
           const editing = editId === n.id && draft
+          // 时间线形态：日期变化处插分组头
+          const dayHead = layout === 'timeline' && !showTrash && (idx === 0 || dayKey(filtered[idx - 1].createdAt) !== dayKey(n.createdAt))
+            ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px 4px' }}><span style={{ color: 'oklch(0.8 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 10.5, fontWeight: 700 }}>{dayLabel(n.createdAt)}</span><span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.07)' }} /></div>
+            : null
           if (editing) {
             return (
               <div key={n.id} style={{ ...cardStyle(h), border: `1.5px solid oklch(0.75 0.13 ${h} / .7)` }}>
@@ -254,7 +1002,9 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
                     ['‹›', '代码', (): void => wrapSel('`', '`', 'code')],
                     ['▤', '代码块', (): void => insertLine('```\n代码\n```')],
                     ['🔗', '链接', (): void => wrapSel('[', '](https://)', '链接文字')],
-                    ['🖼', '插入图片', pickImage]
+                    ['⟦⟧', '双链到另一条便签', (): void => wrapSel('[[', ']]', '便签标题')],
+                    ['🖼', '插入图片', pickImage],
+                    ['📅', '插入今天日期', (): void => { const d = new Date(); insertLine(`**${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}**`) }]
                   ] as [string, string, () => void][]).map(([icon, title, fn]) => (
                     <div key={title} className="hv" title={title} onClick={fn} style={{ minWidth: 24, height: 22, padding: '0 5px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: 'rgba(255,255,255,.07)', color: 'oklch(0.85 0.02 var(--th) / .9)', fontSize: 10.5, fontWeight: 700 }}>
                       {icon}
@@ -270,7 +1020,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
                     <Markdown text={draft.md} />
                   </div>
                 ) : (
-                  <textarea ref={taRef} value={draft.md} onChange={(e) => setDraft((d) => d && { ...d, md: e.target.value })} placeholder="正文…（用上方按钮排版，或直接打字）" rows={8} className="ai-scroll" style={{ ...inputBase, width: '100%', resize: 'none', lineHeight: 1.55, fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 10.5, maxHeight: 220 }} />
+                  <textarea ref={taRef} value={draft.md} onChange={(e) => setDraft((d) => d && { ...d, md: e.target.value })} onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveEdit() } else if (e.key === 'Escape') { e.stopPropagation(); setEditId(null); setDraft(null) } }} placeholder="正文…（Ctrl+Enter 保存 · Esc 取消）" rows={8} className="ai-scroll" style={{ ...inputBase, width: '100%', resize: 'none', lineHeight: 1.55, fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 10.5, maxHeight: 220 }} />
                 )}
                 <input value={draft.tags.join(' ')} onChange={(e) => setDraft((d) => d && { ...d, tags: e.target.value.split(/[\s,，、]+/).filter(Boolean).slice(0, 4) })} placeholder="标签（空格分隔）" style={{ ...inputBase, fontSize: 10.5 }} />
                 {/* 配色盘 */}
@@ -286,34 +1036,204 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
               </div>
             )
           }
+          const sel = selected.has(n.id)
+          const tasks = extractTasks(n.md)
+          const cover = layout === 'gallery' ? firstImage(n.md) : null
           return (
-            <div key={n.id} className="ai-card" style={cardStyle(h, n.pinned)}>
+            <div key={n.id} style={{ breakInside: 'avoid' }}>
+            {dayHead}
+            <div id={'note-' + n.id} className="ai-card" onClick={selectMode ? () => toggleSel(n.id) : undefined} style={{ ...cardStyle(h, n.pinned), cursor: selectMode ? 'pointer' : undefined, ...(sel ? { border: `1.5px solid oklch(0.85 0.14 ${h})`, boxShadow: `0 0 0 2px oklch(0.82 0.14 ${h} / .4)` } : focusId === n.id ? { border: `1.5px solid oklch(0.82 0.14 ${h})`, boxShadow: `0 0 0 2px oklch(0.8 0.14 ${h} / .3)` } : {}) }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+                {selectMode && <span style={{ flex: 'none', width: 15, height: 15, borderRadius: 5, border: `1.5px solid oklch(0.7 0.1 ${h} / .6)`, background: sel ? `oklch(0.7 0.13 ${h})` : 'transparent', color: '#fff', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, marginTop: 2 }}>{sel ? '✓' : ''}</span>}
                 <span style={{ fontSize: 15, lineHeight: 1.2 }}>{n.emoji}</span>
                 <span style={{ flex: 1, color: `oklch(0.92 0.04 ${h})`, fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>{n.pinned ? '📌 ' : ''}{n.title}</span>
+                {!showTrash && <span className="hv" title={n.starred ? '取消收藏' : '收藏'} onClick={(e) => { e.stopPropagation(); p.onStar(n.id) }} style={{ flex: 'none', cursor: 'pointer', fontSize: 12, color: n.starred ? 'oklch(0.82 0.14 85)' : 'oklch(0.55 0.02 var(--th) / .4)' }}>{n.starred ? '★' : '☆'}</span>}
               </div>
-              <div style={{ fontSize: 11 }}>
-                <Collapsible collapsedHeight={110}>
-                  <Markdown text={n.md} />
-                </Collapsible>
-              </div>
+              {(layout === 'grid' || layout === 'timeline') && (
+                <div style={{ fontSize: 11 }}>
+                  <Collapsible collapsedHeight={110}>
+                    <Markdown text={n.md} onWikiLink={jumpToTitle} />
+                  </Collapsible>
+                </div>
+              )}
+              {layout === 'list' && <div style={{ color: 'oklch(0.72 0.02 var(--th) / .7)', fontSize: 10.5, lineHeight: 1.5, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as React.CSSProperties}>{n.md.replace(/[#*`>[\]!-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)}</div>}
+              {layout === 'gallery' && cover && (
+                <img src={cover} alt="" onClick={(e) => { e.stopPropagation(); setReadNote(n) }} style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 9, cursor: 'zoom-in', border: '1px solid rgba(255,255,255,.08)' }} />
+              )}
+              {/* ☑️ 卡上任务直接勾选（便签即轻待办） */}
+              {!showTrash && layout !== 'gallery' && tasks.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 8px', borderRadius: 8, background: 'rgba(0,0,0,.18)' }} onClick={(e) => e.stopPropagation()}>
+                  {tasks.slice(0, 4).map((t) => (
+                    <div key={t.line} className="hv" onClick={() => toggleTask(n, t.line)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <span style={{ flex: 'none', width: 12, height: 12, borderRadius: 4, border: `1.5px solid oklch(0.7 0.1 ${h} / .6)`, background: t.done ? `oklch(0.7 0.13 ${h})` : 'transparent', color: '#fff', fontSize: 8.5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900 }}>{t.done ? '✓' : ''}</span>
+                      <span style={{ flex: 1, minWidth: 0, color: t.done ? 'oklch(0.55 0.02 var(--th) / .5)' : 'oklch(0.82 0.02 var(--th) / .85)', fontSize: 10, textDecoration: t.done ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.text}</span>
+                    </div>
+                  ))}
+                  <span style={{ color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 8.5 }}>☑ {tasks.filter((t) => t.done).length}/{tasks.length}{tasks.length > 4 ? ` · 展开看全部` : ''}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                 {n.tags.map((t) => (
-                  <span key={t} onClick={() => setTagFilter(tagFilter === t ? '' : t)} style={chip(h)}># {t}</span>
+                  <span key={t} onClick={(e) => { e.stopPropagation(); setTagFilter(tagFilter === t ? '' : t) }} style={chip(h)}># {t}</span>
                 ))}
-                <span style={{ marginLeft: 'auto', color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 9 }}>{dayLabel(n.createdAt)} {fmtDate(n.createdAt) !== dayLabel(n.createdAt) ? '' : ''}</span>
+                <span style={{ marginLeft: 'auto', color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 9 }}>{n.md.length} 字 · {dayLabel(sortBy === 'updated' ? n.updatedAt : n.createdAt)}</span>
               </div>
-              {/* 悬停浮现操作 */}
-              <div className="row-acts" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <span className="hv" title={n.pinned ? '取消置顶' : '置顶'} onClick={() => p.onTogglePin(n.id)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.75 0.02 var(--th) / .7)' }}>📌</span>
-                <span className="hv" title="编辑" onClick={() => startEdit(n)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.75 0.02 var(--th) / .7)' }}>✎</span>
-                <span className="hv" title="复制内容" onClick={() => navigator.clipboard?.writeText(`# ${n.title}\n\n${n.md}`).catch(() => {})} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.75 0.02 var(--th) / .7)' }}>⧉</span>
-                <span className="hv" title="删除" onClick={() => p.onDelete(n.id)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.6 0.05 25 / .8)' }}>✕</span>
+              {/* 操作：回收站态 = 恢复/彻底删；正常态 = 全套 */}
+              <div className="row-acts" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
+                {showTrash ? (
+                  <>
+                    <span className="hv" title="恢复" onClick={() => p.onRestore(n.id)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.8 0.12 145)' }}>↩ 恢复</span>
+                    <span className="hv" title="彻底删除" onClick={() => p.onPurge(n.id)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.6 0.05 25 / .9)' }}>彻底删除</span>
+                  </>
+                ) : (
+                  <>
+                    {(() => { const bl = graph.edges.filter((e) => e.to === n.id).length; return bl > 0 ? <span title={`被 ${bl} 条便签引用（[[双链]]）`} style={{ marginRight: 'auto', fontSize: 9, color: `oklch(0.75 0.09 ${h} / .8)` }}>← {bl} 引用</span> : null })()}
+                    <span className="hv" title="AI 增强（摘要/标签/润色/翻译/行动项…）" onClick={() => setAiMenuId(aiMenuId === n.id ? null : n.id)} style={{ cursor: 'pointer', fontSize: 10, fontWeight: 700, color: noteAiBusy.startsWith(n.id + ':') ? 'oklch(0.6 0.02 var(--th) / .5)' : `oklch(0.85 0.12 ${h})` }}>{noteAiBusy.startsWith(n.id + ':') ? '✨…' : '✨AI'}</span>
+                    <span className="hv" title="灵感追加（可 AI 增强）" onClick={() => { setAppendId(appendId === n.id ? null : n.id); setAppendText('') }} style={{ cursor: 'pointer', fontSize: 10.5, fontWeight: 700, color: appendId === n.id ? `oklch(0.88 0.13 ${h})` : 'oklch(0.75 0.02 var(--th) / .7)' }}>➕</span>
+                    <span className="hv" title={n.later ? '移出稍后读' : '加入稍后读队列'} onClick={() => p.onUpdate({ ...n, later: !n.later })} style={{ cursor: 'pointer', fontSize: 10.5, color: n.later ? 'oklch(0.82 0.13 200)' : 'oklch(0.55 0.02 var(--th) / .4)' }}>🔖</span>
+                    <span className="hv" title="阅读模式（大屏浮层）" onClick={() => setReadNote(n)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.75 0.02 var(--th) / .7)' }}>👁</span>
+                    <span className="hv" title={n.pinned ? '取消置顶' : '置顶'} onClick={() => p.onTogglePin(n.id)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.75 0.02 var(--th) / .7)' }}>📌</span>
+                    <span className="hv" title={n.locked ? '已锁定：点击解锁' : '编辑'} onClick={() => { if (n.locked) { flash('🔒 便签已锁定，先点 🔒 解锁'); return } startEdit(n) }} style={{ cursor: 'pointer', fontSize: 10.5, color: n.locked ? 'oklch(0.55 0.02 var(--th) / .4)' : 'oklch(0.75 0.02 var(--th) / .7)' }}>✎</span>
+                    <span className="hv" title="在 Markdown 工作台里打开" onClick={() => p.onOpenStudio(n)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.75 0.02 var(--th) / .7)' }}>⛶</span>
+                    <span className="hv" title="钉到桌面（浮贴）" onClick={() => p.onPinDesktop(n)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.75 0.02 var(--th) / .7)' }}>📍</span>
+                    <span className="hv" title="复制富文本" onClick={() => copyRich(n)} style={{ cursor: 'pointer', fontSize: 10, fontWeight: 700, color: 'oklch(0.78 calc(0.1 * var(--cs, 1)) var(--th))' }}>富</span>
+                    <span className="hv" title="复制 Markdown 源码" onClick={() => copyMd(n)} style={{ cursor: 'pointer', fontSize: 10, fontWeight: 700, color: 'oklch(0.72 0.02 var(--th) / .7)' }}>MD</span>
+                    <span className="hv" title="导出为 .md 文件" onClick={() => void exportOne(n)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.72 0.02 var(--th) / .7)' }}>⬇</span>
+                    <span className="hv" title="创建副本" onClick={() => duplicate(n)} style={{ cursor: 'pointer', fontSize: 10.5, color: 'oklch(0.72 0.02 var(--th) / .7)' }}>⧉</span>
+                    <span className="hv" title={n.locked ? '解锁' : '锁定（防误编辑/误删）'} onClick={() => toggleLock(n)} style={{ cursor: 'pointer', fontSize: 10.5, color: n.locked ? 'oklch(0.82 0.13 75)' : 'oklch(0.6 0.02 var(--th) / .5)' }}>{n.locked ? '🔒' : '🔓'}</span>
+                    <span className="hv" title={n.locked ? '已锁定，先解锁' : '移入回收站'} onClick={() => { if (n.locked) { flash('🔒 便签已锁定，先解锁再删'); return } p.onDelete(n.id) }} style={{ cursor: 'pointer', fontSize: 10.5, color: n.locked ? 'oklch(0.45 0.03 25 / .5)' : 'oklch(0.6 0.05 25 / .8)' }}>🗑</span>
+                  </>
+                )}
               </div>
+              {/* ✨ AI 增强菜单 */}
+              {aiMenuId === n.id && !showTrash && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4, padding: 7, borderRadius: 10, background: 'rgba(0,0,0,.32)', border: `1px solid oklch(0.6 0.11 ${h} / .4)` }} onClick={(e) => e.stopPropagation()}>
+                  {NOTE_AI.map((a) => (
+                    <div key={a.key} className="hv" title={a.hint} onClick={() => void runNoteAi(n, a.key)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 6px', borderRadius: 7, cursor: 'pointer', background: 'rgba(255,255,255,.05)', color: 'oklch(0.86 0.02 var(--th))', fontSize: 9.5, fontWeight: 600 }}>
+                      <span style={{ flex: 'none' }}>{a.icon}</span>{a.label}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* 💡 灵感追加：直接追加 or AI 增强追加 */}
+              {appendId === n.id && !showTrash && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: 7, borderRadius: 10, background: 'rgba(0,0,0,.26)', border: `1px solid oklch(0.6 0.11 ${h} / .35)` }} onClick={(e) => e.stopPropagation()}>
+                  <textarea
+                    autoFocus
+                    value={appendText}
+                    onChange={(e) => setAppendText(e.target.value)}
+                    onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); appendRaw(n) } else if (e.key === 'Escape') { e.stopPropagation(); setAppendId(null) } }}
+                    placeholder="补一条新灵感…（Ctrl+Enter 直接追加 · Esc 取消）"
+                    rows={2}
+                    className="ai-scroll"
+                    style={{ ...inputBase, width: '100%', resize: 'none', fontSize: 10.5, lineHeight: 1.5, maxHeight: 90 }}
+                  />
+                  <div style={{ display: 'flex', gap: 5 }}>
+                    <div className="hv" onClick={() => appendRaw(n)} style={{ flex: 1, textAlign: 'center', padding: '5px 0', borderRadius: 7, cursor: 'pointer', background: `oklch(0.5 0.11 ${h} / .5)`, color: 'oklch(0.95 0.02 var(--th))', fontSize: 10.5, fontWeight: 700 }}>➕ 直接追加</div>
+                    <div className="hv" onClick={() => void appendAi(n)} style={{ flex: 1, textAlign: 'center', padding: '5px 0', borderRadius: 7, cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.7 0.14 var(--th) / .5), oklch(0.55 0.13 var(--th2) / .4))', color: 'oklch(0.95 0.02 var(--th))', fontSize: 10.5, fontWeight: 700 }}>{appendBusy ? '✨ 增强中…' : '✨ AI 增强追加'}</div>
+                  </div>
+                </div>
+              )}
+            </div>
             </div>
           )
         })}
       </div>
+
+      {/* 👁 阅读模式浮层：大屏舒适排版（data-solid 保证命中检测放行点击） */}
+      {readNote && (
+        <div data-solid onMouseDown={() => setReadNote(null)} style={{ position: 'fixed', inset: 0, zIndex: 230, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(0.08 0.02 var(--ths) / .6)', backdropFilter: 'blur(5px)', animation: 'ai-fadein .15s ease' }}>
+          <div onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(680px, 88vw)', maxHeight: '82vh', display: 'flex', flexDirection: 'column', borderRadius: 18, overflow: 'hidden', background: `linear-gradient(165deg, oklch(0.24 0.045 ${colorOf(readNote.color)} / .98), oklch(0.16 0.03 ${colorOf(readNote.color)} / .99))`, border: `1px solid oklch(0.65 0.11 ${colorOf(readNote.color)} / .4)`, animation: 'ai-riseblur .3s cubic-bezier(.22,.61,.36,1)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 18px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+              <span style={{ fontSize: 19 }}>{readNote.emoji}</span>
+              <span style={{ flex: 1, color: 'oklch(0.96 0.02 var(--th))', fontSize: 15, fontWeight: 800 }}>{readNote.title}</span>
+              <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9.5 }}>{readNote.md.length} 字 · {dayLabel(readNote.createdAt)}</span>
+              <span className="hv" onClick={() => { setReadNote(null); startEdit(readNote) }} title="编辑" style={{ cursor: 'pointer', color: 'oklch(0.8 0.02 var(--th) / .8)', fontSize: 13 }}>✎</span>
+              <span className="hv" onClick={() => setReadNote(null)} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 15 }}>✕</span>
+            </div>
+            <div className="ai-scroll" style={{ flex: 1, overflowY: 'auto', padding: '18px 26px 26px', fontSize: 13.5, lineHeight: 1.75 }}>
+              <Markdown text={readNote.md} reader onWikiLink={(t) => { setReadNote(null); jumpToTitle(t) }} />
+              {readNote.tags.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
+                  {readNote.tags.map((t) => <span key={t} style={chip(colorOf(readNote.color))}># {t}</span>)}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🎴 闪卡复习：正面标题、点击翻面看正文（把便签当记忆卡） */}
+      {flashOpen && (() => {
+        const pool = p.notes.filter((n) => !n.trashed)
+        if (!pool.length) return null
+        const n = pool[flashIdx % pool.length]; const h = colorOf(n.color)
+        return (
+          <div data-solid onMouseDown={() => setFlashOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 230, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: 'oklch(0.08 0.02 var(--ths) / .7)', backdropFilter: 'blur(6px)', animation: 'ai-fadein .15s ease' }}>
+            <div onMouseDown={(e) => e.stopPropagation()} onClick={() => setFlashBack((v) => !v)} style={{ width: 'min(520px, 86vw)', minHeight: 300, maxHeight: '62vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 12, padding: '30px 28px', borderRadius: 20, cursor: 'pointer', background: `linear-gradient(165deg, oklch(0.3 0.06 ${h} / .96), oklch(0.17 0.035 ${h} / .99))`, border: `1px solid oklch(0.65 0.12 ${h} / .5)`, animation: 'ai-riseblur .25s ease' }} className="ai-scroll">
+              {!flashBack ? (
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 34 }}>{n.emoji}</div>
+                  <div style={{ color: 'oklch(0.96 0.03 var(--th))', fontSize: 20, fontWeight: 800, marginTop: 12 }}>{n.title}</div>
+                  <div style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 11, marginTop: 18 }}>点击卡片翻面 →</div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, lineHeight: 1.7 }}><Markdown text={n.md} reader /></div>
+              )}
+            </div>
+            <div onMouseDown={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="hv" onClick={() => { setFlashIdx((i) => (i - 1 + pool.length) % pool.length); setFlashBack(false) }} style={{ cursor: 'pointer', color: 'oklch(0.85 0.02 var(--th))', fontSize: 20, padding: '4px 12px', borderRadius: 10, background: 'rgba(255,255,255,.08)' }}>‹</span>
+              <span style={{ color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{(flashIdx % pool.length) + 1} / {pool.length}</span>
+              <span className="hv" onClick={() => { setFlashIdx((i) => (i + 1) % pool.length); setFlashBack(false) }} style={{ cursor: 'pointer', color: 'oklch(0.85 0.02 var(--th))', fontSize: 20, padding: '4px 12px', borderRadius: 10, background: 'rgba(255,255,255,.08)' }}>›</span>
+              <span className="hv" onClick={() => { setFlashIdx(Math.floor(Math.random() * pool.length)); setFlashBack(false) }} title="随机" style={{ cursor: 'pointer', color: 'oklch(0.8 0.02 var(--th))', fontSize: 14, padding: '4px 10px', borderRadius: 10, background: 'rgba(255,255,255,.08)' }}>🎲</span>
+              <span className="hv" onClick={() => setFlashOpen(false)} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 14, padding: '4px 10px' }}>✕ 退出</span>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* 🎞 放映：全屏轮播浏览便签（8s 自动翻页） */}
+      {showOpen && (() => {
+        const pool = filtered.length ? filtered : p.notes.filter((n) => !n.trashed)
+        if (!pool.length) return null
+        const n = pool[showIdx % pool.length]; const h = colorOf(n.color)
+        return (
+          <div data-solid style={{ position: 'fixed', inset: 0, zIndex: 231, display: 'flex', flexDirection: 'column', background: `radial-gradient(120% 90% at 50% 0%, oklch(0.28 0.06 ${h} / .5), oklch(0.06 0.02 var(--ths)) 70%)`, animation: 'ai-fadein .2s ease' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px' }}>
+              <span style={{ color: 'oklch(0.75 0.02 var(--th) / .7)', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{(showIdx % pool.length) + 1} / {pool.length}</span>
+              <span className="hv" onClick={() => setShowAuto((v) => !v)} style={{ cursor: 'pointer', color: showAuto ? 'oklch(0.85 0.12 150)' : 'oklch(0.7 0.02 var(--th) / .6)', fontSize: 12, padding: '3px 10px', borderRadius: 8, background: 'rgba(255,255,255,.06)' }}>{showAuto ? '⏸ 暂停' : '▶ 自动'}</span>
+              <span style={{ flex: 1 }} />
+              <span className="hv" onClick={() => setShowOpen(false)} style={{ cursor: 'pointer', color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 14, padding: '3px 12px', borderRadius: 8, background: 'rgba(255,255,255,.06)' }}>✕ 退出放映</span>
+            </div>
+            <div className="ai-scroll" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '10px 8vw 40px' }}>
+              <div key={showIdx} style={{ maxWidth: 760, width: '100%', animation: 'ai-fadein .4s ease' }}>
+                <div style={{ fontSize: 42, textAlign: 'center' }}>{n.emoji}</div>
+                <div style={{ color: 'oklch(0.97 0.03 var(--th))', fontSize: 30, fontWeight: 900, textAlign: 'center', margin: '10px 0 26px', lineHeight: 1.3 }}>{n.title}</div>
+                <div style={{ fontSize: 16, lineHeight: 1.85 }}><Markdown text={n.md} reader onWikiLink={(t) => { setShowOpen(false); jumpToTitle(t) }} /></div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 22, padding: '10px 0 20px' }}>
+              <span className="hv" onClick={() => setShowIdx((i) => (i - 1 + pool.length) % pool.length)} style={{ cursor: 'pointer', color: 'oklch(0.85 0.02 var(--th))', fontSize: 26, padding: '2px 16px', borderRadius: 12, background: 'rgba(255,255,255,.07)' }}>‹</span>
+              <span className="hv" onClick={() => setShowIdx((i) => (i + 1) % pool.length)} style={{ cursor: 'pointer', color: 'oklch(0.85 0.02 var(--th))', fontSize: 26, padding: '2px 16px', borderRadius: 12, background: 'rgba(255,255,255,.07)' }}>›</span>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* 🖼 金句海报预览 + 保存 */}
+      {poster && (() => {
+        const url = renderPoster()
+        return (
+          <div data-solid onMouseDown={() => setPoster(null)} style={{ position: 'fixed', inset: 0, zIndex: 232, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: 'oklch(0.08 0.02 var(--ths) / .7)', backdropFilter: 'blur(6px)', animation: 'ai-fadein .15s ease' }}>
+            <img onMouseDown={(e) => e.stopPropagation()} src={url} alt="金句海报" style={{ maxWidth: 'min(620px, 84vw)', maxHeight: '64vh', borderRadius: 14, boxShadow: '0 16px 50px rgba(0,0,0,.5)' }} />
+            <div onMouseDown={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 10 }}>
+              <div className="hv" onClick={() => { island.copyImage(url); flash('✓ 海报已复制') }} style={{ padding: '8px 16px', borderRadius: 10, cursor: 'pointer', background: 'rgba(255,255,255,.08)', color: 'oklch(0.9 0.02 var(--th))', fontSize: 12, fontWeight: 700 }}>📋 复制</div>
+              <div className="hv" onClick={() => { void island.saveImage(url, `金句_${poster.note.title.slice(0, 10)}`).then((r) => { if (r.ok) flash('✓ 已保存海报') }) }} style={{ padding: '8px 16px', borderRadius: 10, cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 12, fontWeight: 700 }}>💾 保存 PNG</div>
+              <div className="hv" onClick={() => setPoster(null)} style={{ padding: '8px 14px', borderRadius: 10, cursor: 'pointer', color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 12 }}>关闭</div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

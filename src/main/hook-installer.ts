@@ -3,7 +3,7 @@
 // 识别我方条目的方式：命令行内包含转发脚本的绝对路径。
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs'
-import { join, dirname } from 'path'
+import { join, dirname, basename } from 'path'
 import { homedir } from 'os'
 
 const CC_SETTINGS = join(homedir(), '.claude', 'settings.json')
@@ -28,8 +28,8 @@ const readJson = (p: string): Record<string, unknown> => {
   if (!existsSync(p)) return {}
   try {
     return JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>
-  } catch {
-    return {}
+  } catch (err) {
+    throw new Error(`配置文件 JSON 解析失败，已停止写入以避免覆盖原配置：${p}。${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -41,8 +41,18 @@ const backup = (p: string): void => {
 
 const nodeCmd = (script: string, arg: string): string => `node "${script}" ${arg}`
 
-const isOurs = (h: HookCommand, script: string): boolean =>
-  typeof h.command === 'string' && h.command.includes(script)
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * 同一转发器可能随安装目录/开发仓库迁移。除当前绝对路径外，也识别 hooks-bin 下
+ * 同名脚本，确保重新接入时清理已经失效的历史路径。
+ */
+const isOurs = (h: HookCommand, script: string): boolean => {
+  if (typeof h.command !== 'string') return false
+  if (h.command.includes(script)) return true
+  const name = escapeRe(basename(script))
+  return new RegExp(`[\\\\/]hooks-bin[\\\\/]${name}(?=["\\s]|$)`, 'i').test(h.command)
+}
 
 /** 在某事件的 matcher 数组里，确保存在一条指向我方脚本的 hook（幂等） */
 const ensureHook = (

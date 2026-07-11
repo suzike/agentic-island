@@ -9,9 +9,10 @@ import type { Block, ChatMessage, QuoteRef } from '../types'
  */
 export function buildQuotedPrompt(quotes: QuoteRef[], text: string): string {
   if (!quotes.length) return text
+  // 注意：引用原文用缩进（而非 markdown 的 `>`）——避免把模型带进"markdown 语境"从而放弃 JSON 块协议
   const refs = quotes
     .map((q, i) => {
-      const quoted = q.text.split('\n').map((l) => `> ${l}`).join('\n')
+      const quoted = q.text.split('\n').map((l) => `    ${l}`).join('\n')
       const note = q.note && q.note.trim() ? `\n我的疑问：${q.note.trim()}` : ''
       return `【引用${i + 1}】\n${quoted}${note}`
     })
@@ -22,10 +23,10 @@ export function buildQuotedPrompt(quotes: QuoteRef[], text: string): string {
   return `关于你上一条回复中的以下内容：\n\n${refs}${tail ? `\n\n${tail}` : ''}`
 }
 
-/** 把富文本块还原为纯文本/Markdown（跳过思考过程），用于复制与多轮上下文 */
+/** 把富文本块还原为纯文本/Markdown（跳过思考过程与执行步骤时间线），用于复制与多轮上下文 */
 export function blocksToText(blocks: Block[]): string {
   return blocks
-    .filter((b) => b.t !== 'think')
+    .filter((b) => b.t !== 'think' && b.t !== 'steps')
     .map((b) => {
       if (b.t === 'h') return `## ${b.text || ''}`
       if (b.t === 'ul') return (b.items || []).map((i) => `- ${i}`).join('\n')
@@ -70,6 +71,34 @@ export function systemFor(key: string, deep = false): string {
     )
   }
   return base + '\n\n采用「快速」模式：直接给结论，整体控制在 2–5 个 block，简洁准确。' + blocks
+}
+
+/**
+ * 兜底解析：当 parseBlocks 失败（模型没按 JSON 块协议输出，常见于引用追问/便签备注把模型带进 markdown 语境）时，
+ * 尽力把输出还原成"干净的一段 markdown"，交给 <Markdown> 正常渲染——而不是把半截 JSON 原样糊在气泡里。
+ * ① 若像半截 block-JSON（含 "t": 和 "text":），抽取所有 text/items 字段按顺序拼成 markdown；
+ * ② 否则去掉可能残留的 ```json 围栏与首尾方括号噪声，当作纯 markdown。
+ */
+export function looseBlocks(raw?: string): Block[] {
+  const t = String(raw || '').trim()
+  if (!t) return [{ t: 'p', text: '' }]
+  if (/"t"\s*:/.test(t) && /"(?:text|items)"\s*:/.test(t)) {
+    const parts: string[] = []
+    const re = /"(?:text|items)"\s*:\s*("(?:[^"\\]|\\.)*"|\[[^\]]*\])/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(t))) {
+      try {
+        const v = JSON.parse(m[1])
+        if (Array.isArray(v)) parts.push(v.map((x) => `- ${String(x)}`).join('\n'))
+        else if (v) parts.push(String(v))
+      } catch { /* 跳过抽取失败的字段 */ }
+    }
+    if (parts.length) return [{ t: 'p', text: parts.join('\n\n') }]
+  }
+  // 纯 markdown：剥掉 ```json 围栏，避免整段被当代码块
+  let md = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+  if (md.startsWith('[') && md.endsWith(']')) md = md.slice(1, -1).trim()
+  return [{ t: 'p', text: md }]
 }
 
 export function parseBlocks(raw?: string): Block[] | null {

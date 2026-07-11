@@ -161,14 +161,23 @@ export class AgentsStore extends EventEmitter {
     })
   }
 
-  // 会话真正结束 → 已完成
+  // 会话真正结束 → 立即从岛上移除，不再占位（此前保留 3min，用户希望即时消失）
   handleEnd(e: BridgeEvent): void {
-    this.upsertAgent(e, {
-      status: 'done',
-      detail: e.detail || '会话已结束',
-      command: undefined,
-      requestId: undefined
-    })
+    const key = agentKey(e)
+    if (this.agents.delete(key)) this.emit('change')
+  }
+
+  /** 补充模型 / token 元信息（Codex rollout 可得），仅合并不改状态 */
+  attachMeta(e: BridgeEvent, meta: { model?: string; tokens?: number; contextTokens?: number }): void {
+    const key = agentKey(e)
+    const agent = this.agents.get(key)
+    if (!agent) return
+    const next = { ...agent }
+    if (meta.model) next.model = meta.model
+    if (typeof meta.tokens === 'number') next.tokens = meta.tokens
+    if (typeof meta.contextTokens === 'number') next.contextTokens = meta.contextTokens
+    this.agents.set(key, next)
+    this.emit('change')
   }
 
   /** Stop 后异步补充真实变更小结 */

@@ -157,10 +157,11 @@ export function parseIcs(text: string, now: number = Date.now()): CalendarEvent[
 /** 拉取并解析 ICS 订阅链接（webcal:// 自动转 https://） */
 export async function fetchIcs(url: string): Promise<CalendarEvent[]> {
   const real = url.replace(/^webcal:\/\//i, 'https://')
+  const { net } = await import('electron')
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 15000)
   try {
-    const res = await fetch(real, { signal: ctrl.signal, redirect: 'follow' })
+    const res = await net.fetch(real, { signal: ctrl.signal, redirect: 'follow' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const text = await res.text()
     // 常见错误：贴的是「分享日历」网页链接（返回 HTML），不是 ICS 数据 —— 如实报错并给出正确路径

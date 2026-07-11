@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig } from '../shared/protocol'
 
 const api: IslandBridgeApi = {
+  getRuntimeInfo: () => ipcRenderer.invoke('runtime-info'),
   onSnapshot: (cb: (snap: IslandSnapshot) => void): (() => void) => {
     const handler = (_e: unknown, snap: IslandSnapshot): void => cb(snap)
     ipcRenderer.on('snapshot', handler)
@@ -10,25 +11,113 @@ const api: IslandBridgeApi = {
   getSnapshot: (): Promise<IslandSnapshot> => ipcRenderer.invoke('get-snapshot'),
   decide: (msg: DecisionMessage): void => ipcRenderer.send('decide', msg),
   jumpToTerminal: (agentId: string): Promise<boolean> => ipcRenderer.invoke('jump-to-terminal', agentId),
+  onExternalYield: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('external-yield', handler)
+    return () => ipcRenderer.removeListener('external-yield', handler)
+  },
+  setNativeDialogOpen: (active: boolean): void => ipcRenderer.send('set-native-dialog-open', active),
   setIgnoreMouse: (ignore: boolean): void => ipcRenderer.send('set-ignore-mouse', ignore),
   playSound: (key: string): void => ipcRenderer.send('play-sound', key),
   setAutostart: (on: boolean): void => ipcRenderer.send('set-autostart', on),
   reposition: (opts: { follow: boolean; monitorIndex: number }): void => ipcRenderer.send('reposition', opts),
   setSizeMode: (large: boolean): void => ipcRenderer.send('set-size-mode', large),
+  setFullMode: (full: boolean): void => ipcRenderer.send('set-full-mode', full),
   setIslandWidth: (w: number): void => ipcRenderer.send('set-island-width', w),
   setZoom: (z: number): void => ipcRenderer.send('set-zoom', z),
   githubTrending: () => ipcRenderer.invoke('github-trending'),
+  githubTrendingRepos: (range: string, token?: string) => ipcRenderer.invoke('github-trending-repos', range, token),
+  githubMyRepos: (token: string) => ipcRenderer.invoke('github-my-repos', token),
+  githubSearch: (q: string, token?: string) => ipcRenderer.invoke('github-search', q, token),
+  githubReadme: (owner: string, repo: string, token?: string) => ipcRenderer.invoke('github-readme', owner, repo, token),
   rssFetch: (url: string) => ipcRenderer.invoke('rss-fetch', url),
+  onCapsuleToggle: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('capsule-toggle', handler)
+    return () => ipcRenderer.removeListener('capsule-toggle', handler)
+  },
+  capsuleClosed: (): void => ipcRenderer.send('capsule-closed'),
+  onPaletteToggle: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('palette-toggle', handler)
+    return () => ipcRenderer.removeListener('palette-toggle', handler)
+  },
+  onBrainToggle: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('brain-toggle', handler)
+    return () => ipcRenderer.removeListener('brain-toggle', handler)
+  },
+  onDnd: (cb: (active: boolean) => void): (() => void) => {
+    const handler = (_e: unknown, active: boolean): void => cb(active)
+    ipcRenderer.on('dnd-state', handler)
+    return () => ipcRenderer.removeListener('dnd-state', handler)
+  },
+  setDnd: (active: boolean): void => ipcRenderer.send('set-dnd', active),
+  toggleWidget: (active: boolean): void => ipcRenderer.send('toggle-widget', active),
+  widgetPush: (data: Record<string, unknown>): void => ipcRenderer.send('widget-push', data),
+  widgetReveal: (): void => ipcRenderer.send('widget-reveal'),
+  onWidgetData: (cb: (data: Record<string, unknown>) => void): (() => void) => {
+    const handler = (_e: unknown, data: Record<string, unknown>): void => cb(data)
+    ipcRenderer.on('widget-data', handler)
+    return () => ipcRenderer.removeListener('widget-data', handler)
+  },
+  toggleSticky: (note: Record<string, unknown>): void => ipcRenderer.send('toggle-sticky', note),
+  stickyPush: (note: Record<string, unknown>): void => ipcRenderer.send('sticky-push', note),
+  closeSticky: (id: number): void => ipcRenderer.send('close-sticky', id),
+  onStickyData: (cb: (note: Record<string, unknown>) => void): (() => void) => {
+    const handler = (_e: unknown, note: Record<string, unknown>): void => cb(note)
+    ipcRenderer.on('sticky-data', handler)
+    return () => ipcRenderer.removeListener('sticky-data', handler)
+  },
+  onScreenshot: (cb: (dataUrl: string) => void): (() => void) => {
+    const handler = (_e: unknown, url: string): void => cb(url)
+    ipcRenderer.on('screenshot-captured', handler)
+    return () => ipcRenderer.removeListener('screenshot-captured', handler)
+  },
   installHooks: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('install-hooks'),
   uninstallHooks: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('uninstall-hooks'),
   llmComplete: (cfg: LlmRequestConfig, system: string, user: string | Array<Record<string, unknown>>, deep?: boolean, history?: { role: 'user' | 'assistant'; content: string }[]) =>
     ipcRenderer.invoke('llm-complete', cfg, system, user, deep, history),
   openExternal: (url: string): void => ipcRenderer.send('open-external', url),
   llmTest: (cfg: LlmRequestConfig) => ipcRenderer.invoke('llm-test', cfg),
+  llmEmbed: (cfg: LlmRequestConfig, texts: string[]) => ipcRenderer.invoke('llm-embed', cfg, texts),
+  kbList: () => ipcRenderer.invoke('kb-list'),
+  kbAddFolder: (cfg: LlmRequestConfig) => ipcRenderer.invoke('kb-add-folder', cfg),
+  kbAddFiles: (cfg: LlmRequestConfig) => ipcRenderer.invoke('kb-add-files', cfg),
+  kbAddUrl: (cfg: LlmRequestConfig, url: string) => ipcRenderer.invoke('kb-add-url', cfg, url),
+  kbRemove: (id: string) => ipcRenderer.invoke('kb-remove', id),
+  kbReindex: (cfg: LlmRequestConfig) => ipcRenderer.invoke('kb-reindex', cfg),
+  kbSearch: (cfg: LlmRequestConfig, query: string, k?: number) => ipcRenderer.invoke('kb-search', cfg, query, k),
+  kbSampleChunks: (max?: number, sourceId?: string) => ipcRenderer.invoke('kb-sample-chunks', max, sourceId),
+  kbGetWiki: () => ipcRenderer.invoke('kb-get-wiki'),
+  kbSaveWiki: (key: string, md: string) => ipcRenderer.invoke('kb-save-wiki', key, md),
+  agentCliCheck: (engine: 'claude' | 'codex') => ipcRenderer.invoke('agent-cli-check', engine),
+  agentCliStream: (engine: 'claude' | 'codex', prompt: string, cwd?: string, cont?: boolean) => ipcRenderer.invoke('agent-cli-stream', engine, prompt, cwd, cont),
+  agentCliCancel: (engine: 'claude' | 'codex'): void => ipcRenderer.send('agent-cli-cancel', engine),
+  onAgentCliEvent: (cb: (p: { runId: string; ev: import('../shared/protocol').AgentCliEvent }) => void): (() => void) => {
+    const handler = (_e: unknown, p: { runId: string; ev: import('../shared/protocol').AgentCliEvent }): void => cb(p)
+    ipcRenderer.on('agent-cli-event', handler)
+    return () => ipcRenderer.removeListener('agent-cli-event', handler)
+  },
+  shortcutShell: (cmd: string, cwd?: string) => ipcRenderer.invoke('shortcut-shell', cmd, cwd),
+  shortcutOpen: (target: string) => ipcRenderer.invoke('shortcut-open', target),
+  clipReadText: () => ipcRenderer.invoke('clip-read-text'),
+  clipWriteText: (t: string): void => ipcRenderer.send('clip-write-text', t),
+  triggerScreenshot: (): void => ipcRenderer.send('trigger-screenshot'),
+  copyImage: (dataUrl: string): void => ipcRenderer.send('copy-image', dataUrl),
+  saveImage: (dataUrl: string, name: string) => ipcRenderer.invoke('save-image', dataUrl, name),
   fetchCalendar: (url: string) => ipcRenderer.invoke('calendar-fetch', url),
   fetchUrlText: (url: string) => ipcRenderer.invoke('fetch-url-text', url),
   fetchCaldav: (cfg: { server: string; username: string; password: string }) => ipcRenderer.invoke('caldav-fetch', cfg),
+  captureScreen: () => ipcRenderer.invoke('capture-screen'),
+  openMdFile: () => ipcRenderer.invoke('open-md-file'),
+  saveMdFile: (content: string, suggestName: string, existingPath?: string) => ipcRenderer.invoke('save-md-file', content, suggestName, existingPath),
+  exportPdf: (html: string, name: string) => ipcRenderer.invoke('export-pdf', html, name),
+  saveText: (content: string, name: string, ext: string) => ipcRenderer.invoke('save-text', content, name, ext),
+  gitStatus: (dir: string) => ipcRenderer.invoke('git-status', dir),
+  openFolder: (dir: string): void => ipcRenderer.send('open-folder', dir),
   mediaInfo: () => ipcRenderer.invoke('media-info'),
+  lyricsFetch: (title: string, artist: string) => ipcRenderer.invoke('lyrics-fetch', title, artist),
   mediaKey: (cmd: string): void => ipcRenderer.send('media-key', cmd),
   ptyEnsure: (id: string, cols: number, rows: number) => ipcRenderer.invoke('pty-ensure', id, cols, rows),
   ptyInput: (id: string, data: string): void => ipcRenderer.send('pty-input', id, data),
@@ -39,8 +128,8 @@ const api: IslandBridgeApi = {
     ipcRenderer.on('pty-data', handler)
     return () => ipcRenderer.removeListener('pty-data', handler)
   },
-  onClipboard: (cb: (text: string) => void): (() => void) => {
-    const handler = (_e: unknown, text: string): void => cb(text)
+  onClipboard: (cb: (item: { kind: 'text' | 'image'; text?: string; dataUrl?: string }) => void): (() => void) => {
+    const handler = (_e: unknown, item: { kind: 'text' | 'image'; text?: string; dataUrl?: string }): void => cb(item)
     ipcRenderer.on('clipboard-new', handler)
     return () => ipcRenderer.removeListener('clipboard-new', handler)
   },
