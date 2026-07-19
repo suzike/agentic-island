@@ -13,7 +13,9 @@ const port = 9337
 const now = Date.now()
 const day = 86_400_000
 const demoState = {
-  theme: 'aurora',
+  theme: 'custom-1783443856012',
+  // 用户自定义主题「林南橘」（夜幕紫玻璃 × 蜜橘暖光），截图统一以此主题采集
+  customThemes: [{ key: 'custom-1783443856012', label: '林南橘', desc: '自定义主题', dot: 'oklch(0.78 0.14 75)', th: '75', th2: '265', ths: '262', cs: '1.06', css: '1.5', pl: '0.68' }],
   islandWidth: 760,
   settings: {
     autostart: false, multiMonitor: false, sound: false, silentBg: true,

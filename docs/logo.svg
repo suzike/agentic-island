@@ -1,0 +1,24 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="brand" x1="24" y1="28" x2="136" y2="132" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f5b45c"/>
+      <stop offset="1" stop-color="#e89a2e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.6">
+      <stop offset="0" stop-color="#e89a2e" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#e89a2e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- 南橘环境光晕 -->
+  <rect width="160" height="160" rx="36" fill="url(#glow)"/>
+  <!-- 底托：深林绿圆角方 -->
+  <rect x="14" y="14" width="132" height="132" rx="34" fill="#171127"/>
+  <rect x="14.75" y="14.75" width="130.5" height="130.5" rx="33.25" stroke="#f0a233" stroke-opacity="0.22" stroke-width="1.5"/>
+  <!-- 灵动岛胶囊 -->
+  <rect x="34" y="62" width="92" height="36" rx="18" fill="url(#brand)"/>
+  <rect x="34" y="62" width="92" height="36" rx="18" fill="white" fill-opacity="0.08"/>
+  <!-- 状态点 -->
+  <circle cx="54" cy="80" r="5.5" fill="#171127" fill-opacity="0.85"/>
+  <!-- 脉搏线 -->
+  <path d="M68 80h9l5-9 7 18 5-9h14" stroke="#171127" stroke-opacity="0.85" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
