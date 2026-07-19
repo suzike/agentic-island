@@ -1,17 +1,21 @@
-// 待办 v4 —— 全面重构（设计优先）：
+// 待办 v5 —— 设计系统重做（ui/tokens 层级表面 + lucide 语义图标，功能零改动）：
 // ① 顶部日历卡：日期问候 + SVG 进度环 + 统计胶囊
-// ② 近期日程（7 天，今天/明天/周N 标签 + 一键入会）—— 修复"只显示今天"导致飞书会议不可见
-// ③ 统一智能输入胶囊：一个输入框 · ✨AI/手动 双模 · 渐进展开时间/优先级/重复
-// ④ 任务分组时间线：优先级色环勾选框 + 元信息 chips + 悬停操作 + 展开详情
-//    （子任务：进度条 / 连续快速添加 / ✨AI 一键拆解 / 备注 Markdown / 专注）
+// ② 近期日程（7 天，今天/明天/周N 标签 + 一键入会）
+// ③ 统一智能输入胶囊：一个输入框 · AI/手动 双模 · 渐进展开时间/优先级/重复
+// ④ 任务分组时间线：优先级色环勾选框（ai-pop 保留）+ 元信息 chips + 悬停操作 + 展开详情
+//    （子任务：进度条 / 连续快速添加 / AI 一键拆解 / 备注 Markdown / 专注）
 
 import { useMemo, useRef, useState } from 'react'
+import { Check, SkipForward, Undo2 } from 'lucide-react'
 import type { TodoItem, WorkbenchProject } from '../types'
 import type { CalendarEvent } from '../../../shared/protocol'
 import { Markdown } from './Markdown'
 import { WEEK, PRIO, pad, fmtHM, dayStart, dueLabel, dailyDoneSeries, groupTodos, buildExecutionPlan, projectRollups } from '../logic/todo'
 import { stripFence, parseJsonArray, normPrio, parseDue } from '../logic/todoAi'
 import { ProjectContextBar } from './ProjectContextBar'
+import { Button, Chip, EmptyState, Group, IconButton, Segmented } from '../ui/components'
+import { Ico } from '../ui/icons'
+import { accent, accent2, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text as txt, transition } from '../ui/tokens'
 
 interface TodoTabProps {
   projects: WorkbenchProject[]
@@ -52,18 +56,31 @@ interface TodoTabProps {
 
 const inputBase: React.CSSProperties = {
   background: 'transparent', border: 'none', outline: 'none',
-  color: 'oklch(0.95 0.01 var(--th))', fontSize: 12.5,
+  color: ink(1), fontSize: FS.body,
   fontFamily: 'inherit'
 }
-const chipS = (on: boolean): React.CSSProperties => ({
-  padding: '3.5px 10px', borderRadius: 999, fontSize: 10.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-  background: on ? 'oklch(0.32 calc(0.06 * var(--cs, 1)) var(--th) / .55)' : 'rgba(255,255,255,.05)',
-  border: `1px solid ${on ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.07)'}`,
-  color: on ? 'oklch(0.92 calc(0.06 * var(--cs, 1)) var(--th))' : 'oklch(0.75 0.02 var(--th) / .75)'
+/** 筛选/操作 chip：设计系统令牌版（active 时可用语义色描边） */
+const chipS = (on: boolean, color?: string): React.CSSProperties => {
+  const c = color || accent()
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '3.5px 10px', borderRadius: R.pill, fontSize: FS.tiny, fontWeight: on ? 700 : 500, cursor: 'pointer', whiteSpace: 'nowrap',
+    background: on ? semBg(c, 0.16) : fill(2),
+    border: `0.5px solid ${on ? c : hairline(0.07)}`,
+    color: on ? c : ink(2),
+    transition: transition('background, border-color, color')
+  }
+}
+/** 顶部日历卡统计胶囊 */
+const statPill = (color?: string): React.CSSProperties => ({
+  display: 'inline-flex', alignItems: 'center', gap: 4,
+  padding: '2px 9px', borderRadius: R.pill,
+  background: color ? semBg(color, 0.16) : fill(2),
+  color: color || ink(2), fontSize: FS.tiny, fontWeight: 600
 })
-const bulkBtn: React.CSSProperties = { height: 26, padding: '0 9px', borderRadius: 7, border: '1px solid rgba(255,255,255,.08)', background: 'rgba(255,255,255,.05)', color: 'oklch(0.78 0.03 var(--th))', cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 9.5, fontWeight: 650 }
-const detailInput: React.CSSProperties = { boxSizing: 'border-box', borderRadius: 8, border: '1px solid rgba(255,255,255,.08)', background: 'rgba(0,0,0,.24)', color: 'oklch(0.88 0.02 var(--th))', padding: '6px 8px', outline: 'none', fontFamily: 'var(--font)', fontSize: 10 }
-const microBtn: React.CSSProperties = { height: 25, padding: '0 8px', borderRadius: 7, border: '1px solid rgba(255,255,255,.07)', background: 'rgba(255,255,255,.04)', color: 'oklch(0.7 0.03 var(--th) / .75)', cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 9, fontWeight: 650 }
+const bulkBtn: React.CSSProperties = { height: 26, padding: '0 9px', borderRadius: R.sm, border: `0.5px solid ${hairline(0.09)}`, background: fill(2), color: ink(1), cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.tiny, fontWeight: 650 }
+const detailInput: React.CSSProperties = { boxSizing: 'border-box', borderRadius: R.sm, border: `0.5px solid ${hairline(0.08)}`, background: 'rgba(0,0,0,.24)', color: ink(1), padding: '6px 8px', outline: 'none', fontFamily: 'var(--font)', fontSize: FS.tiny }
+const microBtn: React.CSSProperties = { height: 25, padding: '0 8px', borderRadius: R.sm, border: `0.5px solid ${hairline(0.07)}`, background: fill(1), color: ink(2), cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.tiny, fontWeight: 650, display: 'inline-flex', alignItems: 'center', gap: 3 }
 
 /* ---------- 进度环 ---------- */
 function ProgressRing({ pct }: { pct: number }): React.JSX.Element {
@@ -71,7 +88,7 @@ function ProgressRing({ pct }: { pct: number }): React.JSX.Element {
   const C = 2 * Math.PI * R
   return (
     <svg width={52} height={52} style={{ flex: 'none' }}>
-      <circle cx={26} cy={26} r={R} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth={4.5} />
+      <circle cx={26} cy={26} r={R} fill="none" strokeWidth={4.5} style={{ stroke: fill(3) }} />
       <circle
         cx={26} cy={26} r={R} fill="none"
         stroke="url(#ring-grad)" strokeWidth={4.5} strokeLinecap="round"
@@ -81,11 +98,11 @@ function ProgressRing({ pct }: { pct: number }): React.JSX.Element {
       <defs>
         <linearGradient id="ring-grad" x1="0" y1="0" x2="1" y2="1">
           {/* SVG 属性不解析 CSS 变量 → 用 style 的 stopColor（CSS 属性可用 var） */}
-          <stop offset="0%" style={{ stopColor: 'oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th))' }} />
-          <stop offset="100%" style={{ stopColor: 'oklch(0.65 calc(0.15 * var(--cs, 1)) var(--th2))' }} />
+          <stop offset="0%" style={{ stopColor: accent(0.82) }} />
+          <stop offset="100%" style={{ stopColor: accent2(0.65) }} />
         </linearGradient>
       </defs>
-      <text x={26} y={30} textAnchor="middle" style={{ fill: 'oklch(0.94 0.01 var(--th))', fontSize: 12, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{pct}</text>
+      <text x={26} y={30} textAnchor="middle" style={{ fill: ink(1), fontSize: 12, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{pct}</text>
     </svg>
   )
 }
@@ -436,20 +453,20 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
         detail="新建任务自动进入当前项目，旧任务保持原归属"
       />
       {/* ① 顶部日历卡：日期 + 进度环 + 统计 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '13px 15px', borderRadius: 16, background: 'linear-gradient(135deg, oklch(0.3 calc(0.05 * var(--cs, 1)) var(--th) / .35), oklch(0.22 calc(0.03 * var(--cs, 1)) var(--th2) / .2))', border: '1px solid oklch(0.6 calc(0.1 * var(--cs, 1)) var(--th) / .25)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: SP.md, padding: `${SP.md}px ${SP.lg - 1}px`, ...surface.card(), background: `linear-gradient(135deg, ${accent(0.7, 0.16)}, ${accent2(0.6, 0.1)})`, border: `0.5px solid ${accent(0.6, 0.3)}` }}>
         <ProgressRing pct={pct} />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ color: 'oklch(0.96 0.01 var(--th))', fontSize: 16, fontWeight: 800, letterSpacing: '.01em' }}>{today.getMonth() + 1} 月 {today.getDate()} 日</span>
-            <span style={{ color: 'oklch(0.75 0.02 var(--th) / .75)', fontSize: 11 }}>{WEEK[today.getDay()]}</span>
+            <span style={{ ...txt.title(), fontSize: 17, fontWeight: 800 }}>{today.getMonth() + 1} 月 {today.getDate()} 日</span>
+            <span style={txt.dim()}>{WEEK[today.getDay()]}</span>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {overdue > 0 && <span style={{ padding: '2px 9px', borderRadius: 999, background: 'oklch(0.4 0.1 75 / .4)', color: 'oklch(0.88 0.11 75)', fontSize: 10, fontWeight: 700 }}>⏰ 到时 {overdue}</span>}
-            <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(255,255,255,.06)', color: 'oklch(0.82 0.02 var(--th) / .85)', fontSize: 10, fontWeight: 600 }}>今日 {todayCnt + overdue}</span>
-            <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(255,255,255,.06)', color: 'oklch(0.8 calc(0.12 * var(--cs, 1)) var(--th))', fontSize: 10, fontWeight: 600 }}>✓ {doneToday}</span>
-            {todayEstimate > 0 && <span title="今日任务预估工时合计" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(255,255,255,.06)', color: 'oklch(0.8 0.1 250)', fontSize: 10, fontWeight: 600 }}>⏱ {todayEstimate >= 60 ? `${(todayEstimate / 60).toFixed(1)}h` : `${todayEstimate}m`}</span>}
-            {totalSpent > 0 && <span title="累计专注投入" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(255,255,255,.06)', color: 'oklch(0.78 0.13 300)', fontSize: 10, fontWeight: 600 }}>🌙 {totalSpent >= 60 ? `${(totalSpent / 60).toFixed(1)}h` : `${totalSpent}m`}</span>}
-            <span style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(255,255,255,.06)', color: 'oklch(0.72 0.02 var(--th) / .65)', fontSize: 10 }}>全部 {active.length}</span>
+            {overdue > 0 && <span style={statPill(sem.warn)}><Ico.alarm size={10} strokeWidth={2} />到时 {overdue}</span>}
+            <span style={statPill()}>今日 {todayCnt + overdue}</span>
+            <span style={statPill(accent())}><Check size={10} strokeWidth={2.5} />{doneToday}</span>
+            {todayEstimate > 0 && <span title="今日任务预估工时合计" style={statPill(sem.run)}><Ico.timer size={10} strokeWidth={2} />{todayEstimate >= 60 ? `${(todayEstimate / 60).toFixed(1)}h` : `${todayEstimate}m`}</span>}
+            {totalSpent > 0 && <span title="累计专注投入" style={statPill(sem.focus)}><Ico.focus size={10} strokeWidth={2} />{totalSpent >= 60 ? `${(totalSpent / 60).toFixed(1)}h` : `${totalSpent}m`}</span>}
+            <span style={{ ...statPill(), color: ink(3) }}>全部 {active.length}</span>
           </div>
         </div>
         {/* 近 7 天完成趋势迷你柱状 */}
@@ -459,7 +476,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
             <div title="近 7 天每日完成数" style={{ flex: 'none', display: 'flex', alignItems: 'flex-end', gap: 3, height: 34, paddingLeft: 4 }}>
               {trend.map((n, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
-                  <div style={{ width: 5, height: `${Math.max(8, (n / max) * 100)}%`, borderRadius: 999, background: i === 6 ? 'oklch(0.8 calc(0.15 * var(--cs, 1)) var(--th))' : 'oklch(0.55 calc(0.08 * var(--cs, 1)) var(--th) / .5)' }} />
+                  <div style={{ width: 5, height: `${Math.max(8, (n / max) * 100)}%`, borderRadius: R.pill, background: i === 6 ? accent() : accent(0.55, 0.45) }} />
                 </div>
               ))}
             </div>
@@ -470,32 +487,33 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
       {/* AI 执行指挥条：规划、排期、风险、汇报形成闭环 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 5 }}>
         {([
-          ['plan', '目标拆解', '◎'], ['schedule', '智能排期', '⌁'], ['focus', '今日聚焦', '→'],
-          ['risk', '风险诊断', '△'], ['standup', '生成站会', '≡'], ['week', '本周计划', '▦']
-        ] as const).map(([key, label, icon]) => (
+          ['plan', '目标拆解', Ico.plan], ['schedule', '智能排期', Ico.calendar], ['focus', '今日聚焦', Ico.focus],
+          ['risk', '风险诊断', Ico.approval], ['standup', '生成站会', Ico.review], ['week', '本周计划', Ico.grid]
+        ] as const).map(([key, label, Icon]) => (
           <button
             key={key}
             type="button"
             className="hv"
             onClick={() => openAi(key)}
             title={label}
-            style={{ minWidth: 0, height: 36, padding: '0 6px', borderRadius: 8, border: `1px solid ${aiTool === key ? 'oklch(0.72 calc(0.13 * var(--cs, 1)) var(--th) / .55)' : 'rgba(255,255,255,.07)'}`, background: aiTool === key ? 'oklch(0.32 calc(0.06 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.035)', color: 'oklch(0.84 0.03 var(--th))', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontFamily: 'var(--font)' }}
+            style={{ minWidth: 0, height: 34, padding: '0 6px', borderRadius: R.md, border: `0.5px solid ${aiTool === key ? accent(0.72, 0.5) : hairline(0.07)}`, background: aiTool === key ? semBg(accent(), 0.2) : fill(1), color: ink(1), cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontFamily: 'var(--font)', transition: transition('background, border-color') }}
           >
-            <span style={{ color: 'oklch(0.82 calc(0.12 * var(--cs, 1)) var(--th))', fontSize: 12 }}>{icon}</span>
+            <Icon size={12} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 650 }}>{label}</span>
           </button>
         ))}
       </div>
 
       {aiTool && (
-        <div style={{ padding: 12, borderRadius: 8, background: 'oklch(0.2 calc(0.025 * var(--css, 1)) var(--ths) / .92)', border: '1px solid oklch(0.65 calc(0.1 * var(--cs, 1)) var(--th) / .28)', animation: 'ai-fadein .18s ease' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: aiTool === 'plan' || aiTool === 'clarify' || aiPanel || aiPlanItems ? 9 : 0 }}>
-            <span style={{ color: 'oklch(0.9 0.03 var(--th))', fontSize: 11.5, fontWeight: 750 }}>
+        <div style={{ padding: SP.md, ...surface.card(), border: `0.5px solid ${accent(0.65, 0.35)}`, animation: 'ai-fadein .18s ease' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: aiTool === 'plan' || aiTool === 'clarify' || aiPanel || aiPlanItems ? 9 : 0 }}>
+            <Ico.ai size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+            <span style={txt.subtitle()}>
               {aiTool === 'plan' ? '目标拆解与执行建模' : aiTool === 'schedule' ? '智能排期' : aiTool === 'focus' ? '今日聚焦' : aiTool === 'risk' ? '执行风险诊断' : aiTool === 'standup' ? '站会报告' : aiTool === 'week' ? '本周计划' : 'AI 增强'}
             </span>
-            {aiBusy && <span style={{ color: 'oklch(0.78 0.12 150)', fontSize: 9.5 }}>分析中…</span>}
+            {aiBusy && <span style={{ color: sem.calm, fontSize: 9.5 }}>分析中…</span>}
             <span style={{ flex: 1 }} />
-            <button type="button" className="hv" onClick={() => { setAiTool(null); setAiPanel(null); setAiPlanItems(null) }} title="关闭" style={{ width: 24, height: 24, border: 0, borderRadius: 7, background: 'rgba(255,255,255,.05)', color: 'oklch(0.66 0.02 var(--th) / .65)', cursor: 'pointer' }}>×</button>
+            <IconButton icon={Ico.close} size={22} onClick={() => { setAiTool(null); setAiPanel(null); setAiPlanItems(null) }} title="关闭" />
           </div>
           {(aiTool === 'plan' || aiTool === 'clarify') && !aiPlanItems && !aiPanel && (
             <div style={{ display: 'flex', gap: 7 }}>
@@ -506,33 +524,33 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                 placeholder={aiTool === 'plan' ? '描述目标、交付物、期限和约束，AI 会拆成带项目/估时/精力/验收标准的任务…' : '描述需要澄清的目标…'}
                 rows={3}
                 className="ai-scroll"
-                style={{ flex: 1, resize: 'none', minWidth: 0, borderRadius: 8, border: '1px solid rgba(255,255,255,.09)', background: 'rgba(0,0,0,.25)', color: 'oklch(0.92 0.02 var(--th))', padding: '8px 9px', outline: 'none', fontFamily: 'var(--font)', fontSize: 11, lineHeight: 1.5 }}
+                style={{ flex: 1, resize: 'none', minWidth: 0, ...surface.inset(), borderRadius: R.sm, color: ink(1), padding: '8px 9px', outline: 'none', fontFamily: 'var(--font)', fontSize: FS.small, lineHeight: 1.5 }}
               />
-              <button type="button" className="hv" disabled={!aiInput.trim() || aiBusy} onClick={() => void runAi(aiTool, aiInput.trim())} style={{ alignSelf: 'stretch', width: 74, borderRadius: 8, border: 0, background: aiInput.trim() ? 'oklch(0.72 calc(0.14 * var(--cs, 1)) var(--th))' : 'rgba(255,255,255,.06)', color: aiInput.trim() ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.55 0.02 var(--th))', cursor: aiInput.trim() ? 'pointer' : 'default', fontFamily: 'var(--font)', fontSize: 10.5, fontWeight: 750 }}>生成计划</button>
+              <button type="button" className="hv" disabled={!aiInput.trim() || aiBusy} onClick={() => void runAi(aiTool, aiInput.trim())} style={{ alignSelf: 'stretch', width: 74, borderRadius: R.md, border: 0, background: aiInput.trim() ? gradient.primary() : fill(3), color: aiInput.trim() ? gradient.onPrimary() : ink(3), cursor: aiInput.trim() ? 'pointer' : 'default', fontFamily: 'var(--font)', fontSize: 10.5, fontWeight: 750 }}>生成计划</button>
             </div>
           )}
           {aiPlanItems && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {aiPlanItems.map((item, i) => (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr) auto', gap: 8, alignItems: 'start', padding: '8px 9px', borderRadius: 8, background: 'rgba(255,255,255,.035)', border: '1px solid rgba(255,255,255,.06)' }}>
-                  <span style={{ color: 'oklch(0.72 0.1 var(--th))', fontSize: 10, fontWeight: 800 }}>{String(i + 1).padStart(2, '0')}</span>
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr) auto', gap: 8, alignItems: 'start', padding: '8px 9px', borderRadius: R.md, background: fill(1), border: `0.5px solid ${hairline(0.05)}` }}>
+                  <span style={{ ...txt.num(10), color: accent(0.72) }}>{String(i + 1).padStart(2, '0')}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ color: 'oklch(0.92 0.02 var(--th))', fontSize: 11.5, fontWeight: 650, lineHeight: 1.4 }}>{item.text}</div>
+                    <div style={{ color: ink(1), fontSize: FS.small, fontWeight: 650, lineHeight: 1.4 }}>{item.text}</div>
                     <div style={{ marginTop: 4, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                       {item.project && <span style={chipS(false)}>项目 · {item.project}</span>}
                       <span style={chipS(false)}>{item.estimate || 30}m</span>
                       <span style={chipS(false)}>{item.energy === 'deep' ? '深度' : item.energy === 'light' ? '轻量' : '常规'}</span>
-                      {item.blockedBy && <span style={{ ...chipS(false), color: 'oklch(0.84 0.12 40)' }}>阻塞 · {item.blockedBy}</span>}
+                      {item.blockedBy && <span style={{ ...chipS(false), border: `0.5px solid ${semBg(sem.warn, 0.45)}`, background: semBg(sem.warn, 0.12), color: sem.warn }}>阻塞 · {item.blockedBy}</span>}
                     </div>
-                    {item.acceptance && <div style={{ marginTop: 5, color: 'oklch(0.62 0.02 var(--th) / .7)', fontSize: 9.5, lineHeight: 1.45 }}>验收：{item.acceptance}</div>}
+                    {item.acceptance && <div style={{ marginTop: 5, ...txt.faint(), lineHeight: 1.45 }}>验收：{item.acceptance}</div>}
                   </div>
                   <span style={{ color: PRIO[(item.priority || 3) as 1 | 2 | 3].color, fontSize: 9.5, fontWeight: 700 }}>P{item.priority || 3}</span>
                 </div>
               ))}
-              <button type="button" className="hv" onClick={adoptPlan} style={{ alignSelf: 'flex-end', marginTop: 2, padding: '7px 14px', border: 0, borderRadius: 8, background: 'oklch(0.72 calc(0.14 * var(--cs, 1)) var(--th))', color: 'oklch(0.14 0.02 var(--th))', cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 10.5, fontWeight: 750 }}>采纳 {aiPlanItems.length} 项</button>
+              <Button variant="primary" onClick={adoptPlan} style={{ alignSelf: 'flex-end', marginTop: 2 }}>采纳 {aiPlanItems.length} 项</Button>
             </div>
           )}
-          {aiPanel && <div style={{ color: 'oklch(0.84 0.02 var(--th))', fontSize: 11, lineHeight: 1.55 }}><Markdown text={aiPanel.body} /></div>}
+          {aiPanel && <div style={{ color: ink(1), fontSize: FS.small, lineHeight: 1.55 }}><Markdown text={aiPanel.body} /></div>}
         </div>
       )}
 
@@ -540,24 +558,25 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
       {upcoming.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 3px' }}>
-            <span style={{ color: 'oklch(0.68 0.02 var(--th) / .65)', fontSize: 10, fontWeight: 700, letterSpacing: '.08em' }}>📅 近期日程</span>
-            <span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.05)' }} />
+            <Ico.calendar size={11} strokeWidth={2} style={{ color: ink(3), flex: 'none' }} />
+            <span style={txt.overline()}>近期日程</span>
+            <span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} />
           </div>
           {upcoming.map((m) => {
             const ongoing = m.start <= now
             return (
-              <div key={m.id} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: 12, background: ongoing ? 'oklch(0.32 0.06 75 / .25)' : 'rgba(255,255,255,.035)', border: `1px solid ${ongoing ? 'oklch(0.8 0.13 75 / .4)' : 'rgba(255,255,255,.05)'}` }}>
+              <div key={m.id} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: R.md, background: ongoing ? semBg(sem.warn, 0.14) : fill(1), border: `0.5px solid ${ongoing ? semBg(sem.warn, 0.45) : hairline(0.06)}` }}>
                 <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 44 }}>
-                  <span style={{ color: ongoing ? 'oklch(0.88 0.11 75)' : 'oklch(0.82 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 9.5, fontWeight: 700 }}>{meetDay(m.start)}</span>
-                  <span style={{ color: 'oklch(0.88 0.01 var(--th) / .9)', fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{m.allDay ? '全天' : fmtHM(m.start)}</span>
+                  <span style={{ color: ongoing ? sem.warn : accent(), fontSize: 9.5, fontWeight: 700 }}>{meetDay(m.start)}</span>
+                  <span style={{ color: ink(1), fontSize: FS.small, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{m.allDay ? '全天' : fmtHM(m.start)}</span>
                 </div>
-                <div style={{ width: 2.5, alignSelf: 'stretch', borderRadius: 999, background: ongoing ? 'oklch(0.8 0.13 75)' : 'oklch(0.6 calc(0.12 * var(--cs, 1)) var(--th) / .5)', flex: 'none' }} />
+                <div style={{ width: 2.5, alignSelf: 'stretch', borderRadius: R.pill, background: ongoing ? sem.warn : accent(0.6, 0.5), flex: 'none' }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: 'oklch(0.92 0.01 var(--th))', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
-                  <div style={{ color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 9.5 }}>{ongoing ? '进行中' : `${Math.max(1, Math.round((m.start - now) / 60000)) < 120 ? Math.max(1, Math.round((m.start - now) / 60000)) + ' 分钟后' : meetDay(m.start)}`}{m.location ? ` · ${m.location}` : ''}</div>
+                  <div style={{ color: ink(1), fontSize: FS.body, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
+                  <div style={{ ...txt.faint(), fontSize: 9.5 }}>{ongoing ? '进行中' : `${Math.max(1, Math.round((m.start - now) / 60000)) < 120 ? Math.max(1, Math.round((m.start - now) / 60000)) + ' 分钟后' : meetDay(m.start)}`}{m.location ? ` · ${m.location}` : ''}</div>
                 </div>
                 {m.link && (
-                  <span className="hv" onClick={() => p.onJoinMeeting(m.link!)} style={{ flex: 'none', padding: '5px 13px', borderRadius: 999, background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 10.5, fontWeight: 700, cursor: 'pointer' }}>⏵ 入会</span>
+                  <Button sm variant="primary" icon={Ico.play} onClick={() => p.onJoinMeeting(m.link!)} style={{ flex: 'none' }}>入会</Button>
                 )}
               </div>
             )
@@ -566,11 +585,11 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
       )}
 
       {/* ③ 统一智能输入胶囊 */}
-      <div style={{ borderRadius: 15, background: 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.09)', padding: 9 }}>
+      <div style={{ ...surface.inset(), borderRadius: R.lg, padding: 9 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           {/* AI / 手动 切换 */}
-          <div className="hv" onClick={() => setAiMode((v) => !v)} title={aiMode ? 'AI 智能模式：口语描述自动整理（点击切手动）' : '手动模式（点击切 AI）'} style={{ flex: 'none', width: 30, height: 30, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, background: aiMode ? 'linear-gradient(135deg, oklch(0.8 calc(0.15 * var(--cs, 1)) var(--th)), oklch(0.6 calc(0.14 * var(--cs, 1)) var(--th2)))' : 'rgba(255,255,255,.07)', boxShadow: aiMode ? '0 2px 10px oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .4)' : 'none' }}>
-            {aiMode ? '✨' : '✏️'}
+          <div className="hv" onClick={() => setAiMode((v) => !v)} title={aiMode ? 'AI 智能模式：口语描述自动整理（点击切手动）' : '手动模式（点击切 AI）'} style={{ flex: 'none', width: 30, height: 30, borderRadius: R.md, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: aiMode ? gradient.brand() : fill(3), color: aiMode ? gradient.onPrimary() : ink(2), boxShadow: aiMode ? `0 2px 10px ${accent(0.7, 0.4)}` : 'none', transition: transition('background, box-shadow') }}>
+            {aiMode ? <Ico.ai size={14} strokeWidth={2} /> : <Ico.edit size={13} strokeWidth={2} />}
           </div>
           <input
             value={text}
@@ -580,54 +599,58 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
             disabled={busy}
             style={{ ...inputBase, flex: 1, opacity: busy ? 0.6 : 1, padding: '4px 2px' }}
           />
-          <div className="hv" onClick={submit} style={{ flex: 'none', padding: '6.5px 15px', borderRadius: 999, cursor: text.trim() && !busy ? 'pointer' : 'default', background: text.trim() && !busy ? 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))' : 'rgba(255,255,255,.06)', color: text.trim() && !busy ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 11.5, fontWeight: 700 }}>
+          <div className="hv" onClick={submit} style={{ flex: 'none', padding: '6.5px 15px', borderRadius: R.pill, cursor: text.trim() && !busy ? 'pointer' : 'default', background: text.trim() && !busy ? gradient.primary() : fill(3), color: text.trim() && !busy ? gradient.onPrimary() : ink(3), fontSize: FS.small, fontWeight: 700, transition: transition('background, color') }}>
             {busy ? '…' : aiMode ? 'AI 添加' : '添加'}
           </div>
         </div>
         {/* 手动模式渐进展开：时间/优先级/重复 */}
         {!aiMode && text && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 8, animation: 'ai-fadein .2s ease' }}>
-            <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} style={{ background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, color: 'oklch(0.9 0.01 var(--th))', colorScheme: 'dark', fontSize: 10.5, padding: '4.5px 8px', outline: 'none', fontFamily: 'ui-monospace,monospace' }} />
+            <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} style={{ background: fill(2), border: `0.5px solid ${hairline(0.1)}`, borderRadius: R.sm, color: ink(1), colorScheme: 'dark', fontSize: 10.5, padding: '4.5px 8px', outline: 'none', fontFamily: 'ui-monospace,monospace' }} />
             <span className="hv" style={chipS(false)} onClick={() => preset('1h')}>+1小时</span>
             <span className="hv" style={chipS(false)} onClick={() => preset('tonight')}>今晚8点</span>
             <span className="hv" style={chipS(false)} onClick={() => preset('tomorrow')}>明早9点</span>
-            <span style={{ width: 1, height: 14, background: 'rgba(255,255,255,.1)' }} />
+            <span style={{ width: 0.5, height: 14, background: hairline(0.14) }} />
             {([1, 2, 3] as const).map((pr) => (
-              <span key={pr} className="hv" onClick={() => setPriority(pr)} style={{ ...chipS(priority === pr), color: priority === pr ? PRIO[pr].color : undefined }}>{PRIO[pr].label}</span>
+              <span key={pr} className="hv" onClick={() => setPriority(pr)} style={chipS(priority === pr, PRIO[pr].color)}>{PRIO[pr].label}</span>
             ))}
-            <span style={{ width: 1, height: 14, background: 'rgba(255,255,255,.1)' }} />
+            <span style={{ width: 0.5, height: 14, background: hairline(0.14) }} />
             {(['none', 'daily', 'weekly'] as const).map((r) => (
               <span key={r} className="hv" onClick={() => setRepeat(r)} style={chipS(repeat === r)}>{r === 'none' ? '不重复' : r === 'daily' ? '每天' : '每周'}</span>
             ))}
           </div>
         )}
-        {msg && <div style={{ marginTop: 7, color: msg.startsWith('✓') ? 'oklch(0.8 calc(0.14 * var(--cs, 1)) var(--th))' : 'oklch(0.75 0.02 var(--th) / .75)', fontSize: 10.5 }}>{msg}</div>}
+        {msg && <div style={{ marginTop: 7, color: msg.startsWith('✓') ? accent() : ink(2), fontSize: 10.5 }}>{msg}</div>}
       </div>
 
       {/* 视图切换 + 搜索 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 9, background: 'rgba(0,0,0,.25)' }}>
-          {(['plan', 'active', 'board', 'done'] as const).map((v) => (
-            <span key={v} className="hv" onClick={() => setView(v)} style={{ padding: '4px 12px', borderRadius: 7, fontSize: 11, fontWeight: view === v ? 700 : 500, cursor: 'pointer', background: view === v ? 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))' : 'transparent', color: view === v ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.78 0.02 var(--th) / .7)' }}>
-              {v === 'plan' ? '今日计划' : v === 'active' ? `待办 ${active.length}` : v === 'done' ? '已完成' : '看板'}
-            </span>
-          ))}
-        </div>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', borderRadius: 9, background: 'rgba(0,0,0,.22)', border: '1px solid rgba(255,255,255,.06)' }}>
-          <span style={{ fontSize: 10, opacity: 0.45 }}>🔍</span>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索…" style={{ ...inputBase, flex: 1, fontSize: 11, padding: '5.5px 0' }} />
-          {query && <span className="hv" onClick={() => setQuery('')} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 10 }}>✕</span>}
+        <Segmented
+          options={[
+            { key: 'plan', label: '今日计划', icon: Ico.flag },
+            { key: 'active', label: `待办 ${active.length}`, icon: Ico.todos },
+            { key: 'board', label: '看板', icon: Ico.grid },
+            { key: 'done', label: '已完成', icon: Ico.done }
+          ]}
+          value={view}
+          onChange={setView}
+          style={{ flex: 'none' }}
+        />
+        <div style={{ ...surface.inset(), flex: 1, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', borderRadius: R.pill }}>
+          <Ico.search size={12} strokeWidth={2} style={{ color: ink(3), flex: 'none' }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索…" style={{ ...inputBase, flex: 1, fontSize: FS.small, padding: '5.5px 0' }} />
+          {query && <span className="hv" onClick={() => setQuery('')} style={{ cursor: 'pointer', color: ink(3), display: 'flex' }}><Ico.close size={11} strokeWidth={2} /></span>}
         </div>
         {view === 'done' && filtered.length > 0 && (
-          <span className="hv" onClick={p.onClearDone} style={{ flex: 'none', padding: '5px 11px', borderRadius: 999, background: 'rgba(255,255,255,.05)', color: 'oklch(0.72 0.02 var(--th) / .7)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>清空</span>
+          <Chip onClick={p.onClearDone} style={{ flex: 'none' }}>清空</Chip>
         )}
       </div>
 
       {(view === 'active' || view === 'plan') && (projects.length > 0 || projectStats.some((x) => x.project === '未归属')) && (
         <div className="noscrollbar" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 1 }}>
-          <span className="hv" onClick={() => setProjectFilter(null)} style={chipS(projectFilter === null)}>全部项目</span>
+          <Chip active={projectFilter === null} onClick={() => setProjectFilter(null)}>全部项目</Chip>
           {projectStats.map((x) => (
-            <span key={x.project} className="hv" onClick={() => setProjectFilter(projectFilter === x.project ? null : x.project)} style={chipS(projectFilter === x.project)}>{x.project} · {x.total - x.done}</span>
+            <Chip key={x.project} active={projectFilter === x.project} onClick={() => setProjectFilter(projectFilter === x.project ? null : x.project)}>{x.project} · {x.total - x.done}</Chip>
           ))}
         </div>
       )}
@@ -636,58 +659,61 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
           {([
             ['all', '全部'], ['today', '今天'], ['week', '本周'], ['noDue', '未排期'], ['high', '高优先'], ['tagged', '有标签']
-          ] as const).map(([key, label]) => <span key={key} className="hv" onClick={() => setQuickFilter(key)} style={chipS(quickFilter === key)}>{label}</span>)}
+          ] as const).map(([key, label]) => <Chip key={key} active={quickFilter === key} onClick={() => setQuickFilter(key)}>{label}</Chip>)}
           <span style={{ flex: 1 }} />
-          {overdue > 0 && <span className="hv" onClick={deferOverdue} title="顺延全部逾期任务到明早 9 点" style={{ ...chipS(false), color: 'oklch(0.82 0.12 40)' }}>顺延逾期 {overdue}</span>}
-          <span className="hv" onClick={() => selecting ? exitSelect() : setSelecting(true)} style={chipS(selecting)}>{selecting ? '退出批量' : '批量'}</span>
+          {overdue > 0 && <Chip icon={Ico.alarm} color={sem.warn} onClick={deferOverdue} title="顺延全部逾期任务到明早 9 点">顺延逾期 {overdue}</Chip>}
+          <Chip active={selecting} onClick={() => selecting ? exitSelect() : setSelecting(true)}>{selecting ? '退出批量' : '批量'}</Chip>
         </div>
       )}
 
       {view === 'active' && selecting && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px', borderRadius: 8, background: 'oklch(0.28 0.04 var(--th) / .3)', border: '1px solid oklch(0.62 0.1 var(--th) / .25)' }}>
-          <span style={{ color: 'oklch(0.82 0.04 var(--th))', fontSize: 10.5, fontWeight: 700 }}>已选 {selected.size}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px', borderRadius: R.md, background: semBg(accent(), 0.1), border: `0.5px solid ${accent(0.62, 0.3)}` }}>
+          <span style={{ color: accent(0.88), fontSize: 10.5, fontWeight: 700 }}>已选 {selected.size}</span>
           <span style={{ flex: 1 }} />
           <button type="button" className="hv" disabled={!selected.size} onClick={bulkDone} style={bulkBtn}>完成</button>
           <button type="button" className="hv" disabled={!selected.size} onClick={bulkTomorrow} style={bulkBtn}>明天</button>
           <button type="button" className="hv" disabled={!selected.size} onClick={bulkArchive} style={bulkBtn}>归档</button>
-          <button type="button" className="hv" disabled={!selected.size} onClick={bulkDelete} style={{ ...bulkBtn, color: 'oklch(0.8 0.12 30)' }}>删除</button>
+          <button type="button" className="hv" disabled={!selected.size} onClick={bulkDelete} style={{ ...bulkBtn, color: sem.danger }}>删除</button>
         </div>
       )}
 
       {/* 今日执行驾驶舱：容量、优先队列、项目负载、阻塞项 */}
       {view === 'plan' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-          <div style={{ padding: '10px 12px', borderRadius: 8, background: 'rgba(255,255,255,.035)', border: '1px solid rgba(255,255,255,.07)' }}>
+          <div style={{ padding: '10px 12px', ...surface.card() }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                  <span style={{ color: 'oklch(0.92 0.03 var(--th))', fontSize: 12, fontWeight: 750 }}>今日容量</span>
-                  <span style={{ color: executionPlan.plannedMinutes > capacityMinutes ? 'oklch(0.82 0.13 40)' : 'oklch(0.72 0.02 var(--th) / .7)', fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>{executionPlan.plannedMinutes} / {capacityMinutes} 分钟</span>
+                  <span style={{ ...txt.subtitle(), fontSize: FS.body }}>今日容量</span>
+                  <span style={{ color: executionPlan.plannedMinutes > capacityMinutes ? sem.warn : ink(2), fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>{executionPlan.plannedMinutes} / {capacityMinutes} 分钟</span>
                 </div>
-                <div style={{ marginTop: 7, height: 5, borderRadius: 999, background: 'rgba(255,255,255,.07)', overflow: 'hidden' }}>
-                  <div style={{ width: `${Math.min(100, executionPlan.plannedMinutes / capacityMinutes * 100)}%`, height: '100%', borderRadius: 999, background: executionPlan.plannedMinutes > capacityMinutes ? 'oklch(0.75 0.14 40)' : 'linear-gradient(90deg, oklch(0.72 0.13 150), oklch(0.78 0.13 75))', transition: 'width .3s ease' }} />
+                <div style={{ marginTop: 7, height: 5, borderRadius: R.pill, background: fill(3), overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.min(100, executionPlan.plannedMinutes / capacityMinutes * 100)}%`, height: '100%', borderRadius: R.pill, background: executionPlan.plannedMinutes > capacityMinutes ? sem.warn : `linear-gradient(90deg, ${sem.calm}, ${accent()})`, transition: 'width .3s ease' }} />
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 8, background: 'rgba(0,0,0,.24)' }}>
-                {[240, 360, 480].map((m) => <button key={m} type="button" className="hv" onClick={() => setCapacityMinutes(m)} style={{ width: 34, height: 25, border: 0, borderRadius: 6, background: capacityMinutes === m ? 'oklch(0.72 calc(0.13 * var(--cs, 1)) var(--th))' : 'transparent', color: capacityMinutes === m ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.68 0.02 var(--th) / .7)', cursor: 'pointer', fontSize: 9.5, fontWeight: 700 }}>{m / 60}h</button>)}
-              </div>
+              <Segmented
+                options={([240, 360, 480] as const).map((m) => ({ key: String(m) as '240' | '360' | '480', label: `${m / 60}h` }))}
+                value={String(capacityMinutes) as '240' | '360' | '480'}
+                onChange={(k) => setCapacityMinutes(Number(k))}
+                style={{ flex: 'none' }}
+              />
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ color: 'oklch(0.72 0.02 var(--th) / .72)', fontSize: 9.5, fontWeight: 750, letterSpacing: '.06em' }}>执行队列 · {executionPlan.planned.length}</span>
-            <span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.06)' }} />
-            {executionPlan.overflow.length > 0 && <span style={{ color: 'oklch(0.64 0.02 var(--th) / .6)', fontSize: 9 }}>容量外 {executionPlan.overflow.length}</span>}
+            <span style={txt.overline()}>执行队列 · {executionPlan.planned.length}</span>
+            <span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} />
+            {executionPlan.overflow.length > 0 && <span style={txt.faint()}>容量外 {executionPlan.overflow.length}</span>}
           </div>
           {executionPlan.planned.map((t, i) => {
             const pr = PRIO[(t.priority || 3) as 1 | 2 | 3]
             const isDoing = (t.status || 'todo') === 'doing'
             return (
-              <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr) auto', gap: 8, alignItems: 'center', padding: '9px 10px', borderRadius: 8, background: isDoing ? 'oklch(0.3 0.055 75 / .25)' : 'rgba(255,255,255,.035)', border: `1px solid ${isDoing ? 'oklch(0.72 0.12 75 / .35)' : 'rgba(255,255,255,.06)'}`, borderLeft: `3px solid ${pr.ring}` }}>
-                <span style={{ color: isDoing ? 'oklch(0.86 0.12 75)' : 'oklch(0.58 0.03 var(--th) / .7)', fontSize: 11, fontWeight: 850, fontVariantNumeric: 'tabular-nums' }}>{String(i + 1).padStart(2, '0')}</span>
+              <div key={t.id} className="ai-card" style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr) auto', gap: 8, alignItems: 'center', padding: '9px 10px', borderRadius: R.md, background: isDoing ? semBg(sem.warn, 0.13) : fill(1), border: `0.5px solid ${isDoing ? semBg(sem.warn, 0.45) : hairline(0.06)}`, borderLeft: `3px solid ${pr.ring}` }}>
+                <span style={{ ...txt.num(11), color: isDoing ? sem.warn : ink(3) }}>{String(i + 1).padStart(2, '0')}</span>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ color: 'oklch(0.92 0.02 var(--th))', fontSize: 11.5, fontWeight: 650, lineHeight: 1.4 }}>{t.text}</div>
-                  <div style={{ marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap', color: 'oklch(0.62 0.02 var(--th) / .65)', fontSize: 9 }}>
+                  <div style={{ color: ink(1), fontSize: FS.small, fontWeight: 650, lineHeight: 1.4 }}>{t.text}</div>
+                  <div style={{ marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap', ...txt.faint(), fontSize: 9 }}>
                     <span>{t.estimate || 30}m</span>
                     <span>{t.energy === 'deep' ? '深度工作' : t.energy === 'light' ? '轻量任务' : '常规任务'}</span>
                     {t.project && <span>{t.project}</span>}
@@ -695,34 +721,34 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 5 }}>
-                  {!isDoing && <button type="button" className="hv" onClick={() => p.onSetStatus(t.id, 'doing')} title="开始执行" style={{ width: 27, height: 27, borderRadius: 7, border: '1px solid rgba(255,255,255,.08)', background: 'rgba(255,255,255,.05)', color: 'oklch(0.82 0.12 75)', cursor: 'pointer' }}>▶</button>}
-                  <button type="button" className="hv" onClick={() => p.onFocus(t)} title="专注 25 分钟" style={{ width: 27, height: 27, borderRadius: 7, border: '1px solid rgba(255,255,255,.08)', background: 'rgba(255,255,255,.05)', color: 'oklch(0.78 0.1 260)', cursor: 'pointer' }}>◐</button>
-                  <button type="button" className="hv" onClick={() => p.onToggle(t.id)} title="完成" style={{ width: 27, height: 27, borderRadius: 7, border: '1px solid rgba(255,255,255,.08)', background: 'rgba(255,255,255,.05)', color: 'oklch(0.8 0.12 150)', cursor: 'pointer' }}>✓</button>
+                  {!isDoing && <IconButton icon={Ico.play} size={27} color={sem.warn} onClick={() => p.onSetStatus(t.id, 'doing')} title="开始执行" />}
+                  <IconButton icon={Ico.focus} size={27} color={sem.focus} onClick={() => p.onFocus(t)} title="专注 25 分钟" />
+                  <IconButton icon={Check} size={27} color={sem.calm} onClick={() => p.onToggle(t.id)} title="完成" />
                 </div>
               </div>
             )
           })}
-          {executionPlan.planned.length === 0 && <div style={{ padding: 18, textAlign: 'center', color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 10.5 }}>没有可执行任务；新增任务或解除阻塞后会自动进入队列。</div>}
+          {executionPlan.planned.length === 0 && <div style={{ padding: 18, textAlign: 'center', ...txt.faint(), fontSize: 10.5 }}>没有可执行任务；新增任务或解除阻塞后会自动进入队列。</div>}
 
           {projectStats.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
               {projectStats.slice(0, 6).map((x) => (
-                <div key={x.project} className="hv" onClick={() => setProjectFilter(projectFilter === x.project ? null : x.project)} style={{ padding: '9px 10px', borderRadius: 8, cursor: 'pointer', background: projectFilter === x.project ? 'oklch(0.3 0.05 var(--th) / .38)' : 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.06)' }}>
+                <div key={x.project} className="hv" onClick={() => setProjectFilter(projectFilter === x.project ? null : x.project)} style={{ padding: '9px 10px', borderRadius: R.md, cursor: 'pointer', background: projectFilter === x.project ? semBg(accent(), 0.14) : fill(1), border: `0.5px solid ${projectFilter === x.project ? accent(0.6, 0.35) : hairline(0.06)}` }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'oklch(0.88 0.02 var(--th))', fontSize: 10.5, fontWeight: 700 }}>{x.project}</span>
-                    <span style={{ color: 'oklch(0.64 0.02 var(--th) / .65)', fontSize: 9 }}>{x.pct}%</span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: ink(1), fontSize: 10.5, fontWeight: 700 }}>{x.project}</span>
+                    <span style={{ ...txt.faint(), fontSize: 9 }}>{x.pct}%</span>
                   </div>
-                  <div style={{ marginTop: 6, height: 3, borderRadius: 999, background: 'rgba(255,255,255,.07)', overflow: 'hidden' }}><div style={{ width: `${x.pct}%`, height: '100%', background: 'oklch(0.72 0.12 150)' }} /></div>
-                  <div style={{ marginTop: 5, display: 'flex', gap: 7, color: 'oklch(0.58 0.02 var(--th) / .6)', fontSize: 8.5 }}><span>进行 {x.doing}</span><span>剩余 {x.remainingMinutes}m</span>{x.blocked > 0 && <span style={{ color: 'oklch(0.82 0.12 40)' }}>阻塞 {x.blocked}</span>}</div>
+                  <div style={{ marginTop: 6, height: 3, borderRadius: R.pill, background: fill(3), overflow: 'hidden' }}><div style={{ width: `${x.pct}%`, height: '100%', background: sem.calm }} /></div>
+                  <div style={{ marginTop: 5, display: 'flex', gap: 7, ...txt.faint(), fontSize: 8.5 }}><span>进行 {x.doing}</span><span>剩余 {x.remainingMinutes}m</span>{x.blocked > 0 && <span style={{ color: sem.warn }}>阻塞 {x.blocked}</span>}</div>
                 </div>
               ))}
             </div>
           )}
 
           {executionPlan.blocked.length > 0 && (
-            <div style={{ padding: '9px 10px', borderRadius: 8, background: 'oklch(0.28 0.055 35 / .18)', border: '1px solid oklch(0.65 0.1 35 / .25)' }}>
-              <div style={{ color: 'oklch(0.82 0.12 40)', fontSize: 9.5, fontWeight: 750, marginBottom: 6 }}>阻塞项 · {executionPlan.blocked.length}</div>
-              {executionPlan.blocked.slice(0, 5).map((t) => <div key={t.id} style={{ display: 'flex', gap: 7, padding: '3px 0', fontSize: 9.5 }}><span style={{ color: 'oklch(0.75 0.04 var(--th))' }}>{t.text}</span><span style={{ flex: 1, color: 'oklch(0.6 0.02 var(--th) / .6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.blockedBy}</span><button type="button" className="hv" onClick={() => p.onPatch(t.id, { blockedBy: undefined })} style={{ border: 0, background: 'transparent', color: 'oklch(0.72 0.08 150)', cursor: 'pointer', fontSize: 9 }}>解除</button></div>)}
+            <div style={{ padding: '9px 10px', borderRadius: R.md, background: semBg(sem.danger, 0.08), border: `0.5px solid ${semBg(sem.danger, 0.3)}` }}>
+              <div style={{ color: sem.danger, fontSize: 9.5, fontWeight: 750, marginBottom: 6 }}>阻塞项 · {executionPlan.blocked.length}</div>
+              {executionPlan.blocked.slice(0, 5).map((t) => <div key={t.id} style={{ display: 'flex', gap: 7, padding: '3px 0', fontSize: 9.5 }}><span style={{ color: ink(1) }}>{t.text}</span><span style={{ flex: 1, color: ink(3), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.blockedBy}</span><button type="button" className="hv" onClick={() => p.onPatch(t.id, { blockedBy: undefined })} style={{ border: 0, background: 'transparent', color: sem.calm, cursor: 'pointer', fontSize: 9 }}>解除</button></div>)}
             </div>
           )}
         </div>
@@ -740,24 +766,24 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
         const doing = p.todos.filter((t) => (t.status || (t.done ? 'done' : 'todo')) === 'doing').length
         if (totalN === 0) return null
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 13px', borderRadius: 13, background: 'linear-gradient(160deg, rgba(255,255,255,.045), rgba(255,255,255,.02))', border: '1px solid rgba(255,255,255,.06)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `9px ${SP.md + 1}px`, ...surface.card() }}>
             {/* 完成率环 */}
             <div style={{ position: 'relative', width: 42, height: 42, flex: 'none' }}>
               <svg viewBox="0 0 42 42" style={{ width: 42, height: 42, transform: 'rotate(-90deg)' }}>
-                <circle cx="21" cy="21" r="17" fill="none" style={{ stroke: 'rgba(255,255,255,.08)' }} strokeWidth="4" />
-                <circle cx="21" cy="21" r="17" fill="none" style={{ stroke: 'oklch(0.78 calc(0.14 * var(--cs, 1)) var(--th))', strokeDasharray: `${(rate / 100) * 107} 107`, transition: 'stroke-dasharray .4s' }} strokeWidth="4" strokeLinecap="round" />
+                <circle cx="21" cy="21" r="17" fill="none" style={{ stroke: fill(3) }} strokeWidth="4" />
+                <circle cx="21" cy="21" r="17" fill="none" style={{ stroke: accent(0.78), strokeDasharray: `${(rate / 100) * 107} 107`, transition: 'stroke-dasharray .4s' }} strokeWidth="4" strokeLinecap="round" />
               </svg>
-              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'oklch(0.92 0.05 var(--th))', fontSize: 11, fontWeight: 800 }}>{rate}%</span>
+              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', ...txt.num(11) }}>{rate}%</span>
             </div>
             {[
-              { n: openN, l: '未完成', c: 'oklch(0.85 0.02 var(--th))' },
-              { n: doing, l: '进行中', c: 'oklch(0.82 0.13 65)' },
-              { n: todayDone, l: '今日完成', c: 'oklch(0.8 0.13 150)' },
-              { n: overdue, l: '已逾期', c: overdue ? 'oklch(0.78 0.14 30)' : 'oklch(0.6 0.02 var(--th) / .5)' }
+              { n: openN, l: '未完成', c: ink(1) },
+              { n: doing, l: '进行中', c: sem.run },
+              { n: todayDone, l: '今日完成', c: sem.calm },
+              { n: overdue, l: '已逾期', c: overdue ? sem.danger : ink(4) }
             ].map((s, i) => (
               <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <span style={{ color: s.c, fontSize: 16, fontWeight: 800, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{s.n}</span>
-                <span style={{ color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 9 }}>{s.l}</span>
+                <span style={{ ...txt.faint(), fontSize: 9 }}>{s.l}</span>
               </div>
             ))}
           </div>
@@ -767,12 +793,12 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
       {/* 看板：三栏拖拽（精致玻璃卡片） */}
       {view === 'board' && (() => {
         const colOf = (t: TodoItem): 'todo' | 'doing' | 'done' => t.status || (t.done ? 'done' : 'todo')
-        const COLS: [('todo' | 'doing' | 'done'), string, string, string][] = [
-          ['todo', '待办', '250', '📋'], ['doing', '进行中', '65', '⚡'], ['done', '已完成', '150', '✓']
+        const COLS: [('todo' | 'doing' | 'done'), string, string, typeof Ico.inbox][] = [
+          ['todo', '待办', sem.run, Ico.inbox], ['doing', '进行中', sem.warn, Ico.shortcuts], ['done', '已完成', sem.calm, Ico.done]
         ]
         return (
           <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
-            {COLS.map(([key, label, hue, icon]) => {
+            {COLS.map(([key, label, col, ColIcon]) => {
               const items = p.todos.filter((t) => colOf(t) === key).sort((a, b) => (a.priority || 3) - (b.priority || 3))
               const active = dropCol === key
               return (
@@ -782,21 +808,21 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                   onDragLeave={() => setDropCol((c) => (c === key ? null : c))}
                   onDrop={() => { if (dragId != null) p.onSetStatus(dragId, key); setDragId(null); setDropCol(null) }}
                   style={{
-                    flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7, padding: 8, borderRadius: 14, minHeight: 180,
-                    background: `linear-gradient(180deg, oklch(0.3 0.05 ${hue} / ${active ? '.3' : '.14'}), oklch(0.19 0.03 ${hue} / .06))`,
-                    border: active ? `1.5px dashed oklch(0.75 0.13 ${hue} / .7)` : `1px solid oklch(0.6 0.08 ${hue} / .18)`,
-                    boxShadow: active ? `inset 0 0 24px oklch(0.6 0.14 ${hue} / .18)` : 'none', transition: 'all .18s'
+                    flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7, padding: 8, borderRadius: R.lg, minHeight: 180,
+                    background: `linear-gradient(180deg, ${semBg(col, active ? 0.2 : 0.09)}, ${semBg(col, 0.03)})`,
+                    border: active ? `1.5px dashed ${semBg(col, 0.7)}` : `0.5px solid ${semBg(col, 0.2)}`,
+                    boxShadow: active ? `inset 0 0 24px ${semBg(col, 0.16)}` : 'none', transition: 'all .18s'
                   }}
                 >
                   {/* 栏头：图标 · 标题 · WIP 徽章 · 快速添加 · 折叠 */}
-                  {(() => { const wip = key === 'doing' && items.length > 5; const col = colCollapse[key]; return (
+                  {(() => { const wip = key === 'doing' && items.length > 5; const ccol = colCollapse[key]; return (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px' }}>
-                    <span style={{ width: 20, height: 20, flex: 'none', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, background: `oklch(0.4 0.1 ${hue} / .4)`, color: `oklch(0.88 0.13 ${hue})` }}>{icon}</span>
-                    <span style={{ flex: 1, color: `oklch(0.9 0.06 ${hue})`, fontSize: 11.5, fontWeight: 800 }}>{label}</span>
-                    {wip && <span title="进行中过多,注意 WIP" style={{ color: 'oklch(0.82 0.14 40)', fontSize: 9 }}>⚠ WIP</span>}
-                    <span style={{ flex: 'none', minWidth: 18, textAlign: 'center', padding: '1px 7px', borderRadius: 999, background: wip ? 'oklch(0.5 0.12 40 / .5)' : `oklch(0.4 0.09 ${hue} / .4)`, color: wip ? 'oklch(0.88 0.14 40)' : `oklch(0.9 0.1 ${hue})`, fontSize: 9.5, fontWeight: 700 }}>{items.length}</span>
-                    <span className="hv" onClick={() => { setAddingCol(addingCol === key ? null : key); setAddText('') }} title="添加到此栏" style={{ cursor: 'pointer', color: `oklch(0.8 0.1 ${hue})`, fontSize: 13, lineHeight: 1 }}>＋</span>
-                    <span className="hv" onClick={() => setColCollapse((c) => ({ ...c, [key]: !c[key] }))} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 9, transform: col ? 'rotate(-90deg)' : 'none' }}>▾</span>
+                    <span style={{ width: 20, height: 20, flex: 'none', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', background: semBg(col, 0.2), color: col }}><ColIcon size={11} strokeWidth={2} /></span>
+                    <span style={{ flex: 1, color: col, fontSize: FS.small, fontWeight: 800 }}>{label}</span>
+                    {wip && <span title="进行中过多,注意 WIP" style={{ color: sem.warn, fontSize: 9, display: 'inline-flex', alignItems: 'center', gap: 2 }}><Ico.approval size={9} strokeWidth={2} />WIP</span>}
+                    <span style={{ flex: 'none', minWidth: 18, textAlign: 'center', padding: '1px 7px', borderRadius: R.pill, background: wip ? semBg(sem.warn, 0.3) : semBg(col, 0.2), color: wip ? sem.warn : col, fontSize: 9.5, fontWeight: 700 }}>{items.length}</span>
+                    <span className="hv" onClick={() => { setAddingCol(addingCol === key ? null : key); setAddText('') }} title="添加到此栏" style={{ cursor: 'pointer', color: col, display: 'flex' }}><Ico.add size={13} strokeWidth={2.25} /></span>
+                    <span className="hv" onClick={() => setColCollapse((c) => ({ ...c, [key]: !c[key] }))} style={{ cursor: 'pointer', color: ink(3), display: 'flex', transform: ccol ? 'rotate(-90deg)' : 'none', transition: 'transform .18s' }}><Ico.expand size={10} strokeWidth={2} /></span>
                   </div>
                   ) })()}
                   {/* 列内快速添加输入 */}
@@ -806,7 +832,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                       onKeyDown={(e) => { if (e.key === 'Enter' && addText.trim()) { p.onQuickAdd(addText.trim(), key); setAddText('') } else if (e.key === 'Escape') setAddingCol(null) }}
                       onBlur={() => { if (!addText.trim()) setAddingCol(null) }}
                       placeholder="回车添加 · Esc 取消"
-                      style={{ background: 'rgba(0,0,0,.3)', border: `1px solid oklch(0.6 0.1 ${hue} / .4)`, borderRadius: 8, outline: 'none', color: 'oklch(0.93 0.01 var(--th))', fontSize: 10.5, padding: '6px 9px' }}
+                      style={{ background: 'rgba(0,0,0,.3)', border: `0.5px solid ${semBg(col, 0.45)}`, borderRadius: R.sm, outline: 'none', color: ink(1), fontSize: 10.5, padding: '6px 9px' }}
                     />
                   )}
                   {/* 卡片 */}
@@ -826,38 +852,38 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                           onDragStart={() => setDragId(t.id)}
                           onDragEnd={() => { setDragId(null); setDropCol(null) }}
                           style={{
-                            padding: '8px 9px', borderRadius: 10, cursor: 'grab', opacity: dragId === t.id ? 0.4 : 1, transform: dragId === t.id ? 'scale(.97)' : 'none',
-                            background: dl?.hot && key !== 'done' ? 'oklch(0.3 0.06 35 / .4)' : 'oklch(0.26 0.02 var(--th) / .6)', border: '1px solid rgba(255,255,255,.07)', borderLeft: `3px solid ${pr.ring}`,
+                            padding: '8px 9px', borderRadius: R.md, cursor: 'grab', opacity: dragId === t.id ? 0.4 : 1, transform: dragId === t.id ? 'scale(.97)' : 'none',
+                            background: dl?.hot && key !== 'done' ? semBg(sem.danger, 0.13) : fill(2), border: `0.5px solid ${hairline(0.06)}`, borderLeft: `3px solid ${pr.ring}`,
                             boxShadow: '0 2px 8px -3px rgba(0,0,0,.4)', display: 'flex', flexDirection: 'column', gap: 5, transition: 'transform .12s, opacity .12s'
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5 }}>
-                            {t.pinned && <span style={{ flex: 'none', fontSize: 9 }}>📌</span>}
-                            <span style={{ flex: 1, color: 'oklch(0.92 0.02 var(--th) / .93)', fontSize: 11, lineHeight: 1.45, textDecoration: key === 'done' ? 'line-through' : undefined, opacity: key === 'done' ? 0.55 : 1, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}>{t.text}</span>
+                            {t.pinned && <Ico.pin size={9} strokeWidth={2} style={{ flex: 'none', color: accent(), marginTop: 2 }} />}
+                            <span style={{ flex: 1, color: ink(1), fontSize: FS.small, lineHeight: 1.45, textDecoration: key === 'done' ? 'line-through' : undefined, opacity: key === 'done' ? 0.55 : 1, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}>{t.text}</span>
                             {/* 悬停快速推进 */}
-                            <div className="row-acts" style={{ flex: 'none', display: 'flex', gap: 4 }}>
-                              <span className="hv" title="优先级" onClick={() => p.onCyclePriority(t.id)} style={{ cursor: 'pointer', fontSize: 9, color: pr.color }}>●</span>
-                              {key !== 'done' && <span className="hv" title="标记完成" onClick={() => p.onSetStatus(t.id, 'done')} style={{ cursor: 'pointer', fontSize: 10, color: 'oklch(0.8 0.12 145)' }}>✓</span>}
-                              {key !== 'todo' && <span className="hv" title="退回待办" onClick={() => p.onSetStatus(t.id, 'todo')} style={{ cursor: 'pointer', fontSize: 10, color: 'oklch(0.6 0.02 var(--th) / .6)' }}>↩</span>}
+                            <div className="row-acts" style={{ flex: 'none', display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <span className="hv" title="优先级" onClick={() => p.onCyclePriority(t.id)} style={{ cursor: 'pointer', color: pr.color, display: 'flex' }}><Ico.flag size={10} strokeWidth={2} /></span>
+                              {key !== 'done' && <span className="hv" title="标记完成" onClick={() => p.onSetStatus(t.id, 'done')} style={{ cursor: 'pointer', color: sem.calm, display: 'flex' }}><Check size={11} strokeWidth={2.5} /></span>}
+                              {key !== 'todo' && <span className="hv" title="退回待办" onClick={() => p.onSetStatus(t.id, 'todo')} style={{ cursor: 'pointer', color: ink(3), display: 'flex' }}><Undo2 size={10} strokeWidth={2} /></span>}
                             </div>
                           </div>
                           {subs.length > 0 && (
-                            <div style={{ height: 4, borderRadius: 999, background: 'rgba(255,255,255,.08)', overflow: 'hidden' }}>
-                              <div style={{ width: `${subPct}%`, height: '100%', borderRadius: 999, background: `oklch(0.72 0.12 ${hue})` }} />
+                            <div style={{ height: 4, borderRadius: R.pill, background: fill(3), overflow: 'hidden' }}>
+                              <div style={{ width: `${subPct}%`, height: '100%', borderRadius: R.pill, background: col }} />
                             </div>
                           )}
                           {(dl || (t.priority || 3) < 3 || subs.length > 0) && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                              {(t.priority || 3) < 3 && <span style={{ padding: '1px 6px', borderRadius: 999, fontSize: 8, fontWeight: 700, background: 'rgba(255,255,255,.06)', color: pr.color }}>{pr.label}</span>}
-                              {dl && <span style={{ padding: '1px 6px', borderRadius: 999, fontSize: 8, fontWeight: 600, background: dl.hot ? 'oklch(0.5 0.12 30 / .35)' : 'rgba(255,255,255,.05)', color: dl.hot ? 'oklch(0.85 0.13 40)' : 'oklch(0.66 0.02 var(--th) / .7)' }}>⏰ {dl.text}</span>}
-                              {subs.length > 0 && <span style={{ color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 8 }}>☑ {sd}/{subs.length}</span>}
+                              {(t.priority || 3) < 3 && <span style={{ padding: '1px 6px', borderRadius: R.pill, fontSize: 8, fontWeight: 700, background: fill(2), color: pr.color }}>{pr.label}</span>}
+                              {dl && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: R.pill, fontSize: 8, fontWeight: 600, background: dl.hot ? semBg(sem.warn, 0.2) : fill(2), color: dl.hot ? sem.warn : ink(2) }}><Ico.alarm size={8} strokeWidth={2} />{dl.text}</span>}
+                              {subs.length > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, ...txt.faint(), fontSize: 8 }}><Ico.todos size={8} strokeWidth={2} />{sd}/{subs.length}</span>}
                             </div>
                           )}
                         </div>
                       )
                     })}
                     {items.length === 0 && (
-                      <div className="hv" onClick={() => { setAddingCol(key); setAddText('') }} style={{ flex: 1, minHeight: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 9, border: `1px dashed oklch(0.6 0.06 ${hue} / .2)`, color: `oklch(0.6 0.04 ${hue} / .45)`, fontSize: 9.5, cursor: 'pointer' }}>＋ 拖到这里或点击添加</div>
+                      <div className="hv" onClick={() => { setAddingCol(key); setAddText('') }} style={{ flex: 1, minHeight: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, borderRadius: R.md, border: `1px dashed ${semBg(col, 0.25)}`, color: semBg(col, 0.55), fontSize: 9.5, cursor: 'pointer' }}><Ico.add size={10} strokeWidth={2} />拖到这里或点击添加</div>
                     )}
                   </div>
                   )}
@@ -870,44 +896,46 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
 
       {/* 空态 */}
       {view !== 'board' && view !== 'plan' && groups.length === 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, padding: '26px 14px', borderRadius: 16, background: 'rgba(255,255,255,.025)', border: '1px dashed rgba(255,255,255,.08)' }}>
-          <span style={{ fontSize: 22, opacity: 0.6 }}>{query ? '🔍' : view === 'done' ? '🌱' : '🎉'}</span>
-          <span style={{ color: 'oklch(0.75 0.02 var(--th) / .75)', fontSize: 11.5 }}>{query ? '没有匹配的任务' : view === 'done' ? '还没有完成的任务' : '全部清空了，享受当下'}</span>
-        </div>
+        <EmptyState
+          icon={query ? Ico.search : view === 'done' ? Ico.notes : Ico.star}
+          title={query ? '没有匹配的任务' : view === 'done' ? '还没有完成的任务' : '全部清空了，享受当下'}
+        />
       )}
 
       {/* ④ 分组任务时间线 */}
       {view !== 'board' && view !== 'plan' && groups.map((g) => (
         <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div className="hv" onClick={() => setCollapsed((c) => ({ ...c, [g.key]: !c[g.key] }))} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', padding: '0 3px' }}>
-            <span style={{ color: g.key === 'over' ? 'oklch(0.86 0.11 75)' : 'oklch(0.68 0.02 var(--th) / .65)', fontSize: 10, fontWeight: 700, letterSpacing: '.08em' }}>
+            <span style={{ ...txt.overline(), color: g.key === 'over' ? sem.warn : ink(3) }}>
               {g.label} <span style={{ opacity: 0.65 }}>{g.items.length}</span>
             </span>
-            {g.key === 'over' && <span style={{ width: 5, height: 5, borderRadius: 999, background: 'oklch(0.8 0.13 75)', animation: 'ai-dotpulse 1.6s ease-in-out infinite' }} />}
-            <span style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.05)' }} />
-            <span style={{ color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 9, transform: collapsed[g.key] ? 'rotate(-90deg)' : 'none', transition: 'transform .18s' }}>▾</span>
+            {g.key === 'over' && <span style={{ width: 5, height: 5, borderRadius: R.pill, background: sem.warn, animation: 'ai-dotpulse 1.6s ease-in-out infinite' }} />}
+            <span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} />
+            <span style={{ color: ink(3), display: 'flex', transform: collapsed[g.key] ? 'rotate(-90deg)' : 'none', transition: 'transform .18s' }}><Ico.expand size={10} strokeWidth={2} /></span>
           </div>
-          {!collapsed[g.key] && g.items.map((t) => {
+          {!collapsed[g.key] && (
+          <Group>
+          {g.items.map((t) => {
             const pr = PRIO[(t.priority || 3) as 1 | 2 | 3]
             const isOpen = openId === t.id
             const subs = t.subs || []
             const subsDone = subs.filter((s) => s.done).length
             const dl = t.due ? dueLabel(t.due, now) : null
             return (
-              <div key={t.id} className={isOpen ? undefined : 'ai-card'} style={{ borderRadius: 13, background: isOpen ? 'oklch(0.26 calc(0.03 * var(--cs, 1)) var(--th) / .35)' : 'rgba(255,255,255,.035)', border: `1px solid ${isOpen ? 'oklch(0.65 calc(0.12 * var(--cs, 1)) var(--th) / .4)' : 'rgba(255,255,255,.05)'}`, transition: 'all .2s', animation: 'ai-fadein .22s ease', overflow: 'hidden' }}>
+              <div key={t.id} className={isOpen ? undefined : 'ai-card'} style={{ background: isOpen ? semBg(accent(), 0.1) : 'transparent', transition: 'background .2s', animation: 'ai-fadein .22s ease' }}>
                 {/* 主行 */}
-                <div className="msg" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9.5px 11px' }}>
+                <div className="msg" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8.5px 11px' }}>
                   {selecting && !t.done && (
-                    <button type="button" className="hv" onClick={() => toggleSelect(t.id)} title="选择任务" style={{ flex: 'none', width: 18, height: 18, marginTop: 1, borderRadius: 5, border: `1.5px solid ${selected.has(t.id) ? 'oklch(0.72 0.13 var(--th))' : 'rgba(255,255,255,.22)'}`, background: selected.has(t.id) ? 'oklch(0.72 0.13 var(--th))' : 'transparent', color: 'oklch(0.14 0.02 var(--th))', cursor: 'pointer', fontSize: 10, fontWeight: 900 }}>{selected.has(t.id) ? '✓' : ''}</button>
+                    <button type="button" className="hv" onClick={() => toggleSelect(t.id)} title="选择任务" style={{ flex: 'none', width: 18, height: 18, marginTop: 1, borderRadius: 5, border: `1.5px solid ${selected.has(t.id) ? accent(0.72) : hairline(0.28)}`, background: selected.has(t.id) ? accent(0.72) : 'transparent', color: gradient.onPrimary(), cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{selected.has(t.id) && <Check size={11} strokeWidth={3} />}</button>
                   )}
                   {/* 优先级色环勾选框 */}
                   <div
                     className="hv"
                     onClick={() => p.onToggle(t.id)}
                     title={t.done ? '标记未完成' : '完成'}
-                    style={{ flex: 'none', width: 19, height: 19, borderRadius: 999, marginTop: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${t.done ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th))' : pr.ring}`, background: t.done ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th))' : 'transparent', transition: 'all .18s', animation: t.done ? 'ai-pop .3s ease' : undefined }}
+                    style={{ flex: 'none', width: 19, height: 19, borderRadius: R.pill, marginTop: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${t.done ? accent(0.7) : pr.ring}`, background: t.done ? accent(0.7) : 'transparent', transition: 'all .18s', animation: t.done ? 'ai-pop .3s ease' : undefined }}
                   >
-                    {t.done && <span style={{ color: 'oklch(0.14 0.02 var(--th))', fontSize: 11, fontWeight: 900 }}>✓</span>}
+                    {t.done && <Check size={11} strokeWidth={3} style={{ color: gradient.onPrimary() }} />}
                   </div>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
                     {edit?.id === t.id ? (
@@ -918,51 +946,51 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                           value={edit.text}
                           onChange={(e) => setEdit((s) => s && { ...s, text: e.target.value })}
                           onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEdit(null) }}
-                          style={{ ...inputBase, fontSize: 12.5, background: 'rgba(0,0,0,.3)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .45)', borderRadius: 8, padding: '5px 8px' }}
+                          style={{ ...inputBase, fontSize: FS.body, background: 'rgba(0,0,0,.3)', border: `0.5px solid ${accent(0.7, 0.5)}`, borderRadius: R.sm, padding: '5px 8px' }}
                         />
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <input type="datetime-local" value={edit.due} onChange={(e) => setEdit((s) => s && { ...s, due: e.target.value })} style={{ background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 7, color: 'oklch(0.9 0.01 var(--th))', colorScheme: 'dark', fontSize: 10, padding: '3.5px 7px', outline: 'none', fontFamily: 'ui-monospace,monospace' }} />
-                          {edit.due && <span className="hv" onClick={() => setEdit((s) => s && { ...s, due: '' })} title="清除时间" style={{ cursor: 'pointer', color: 'oklch(0.65 0.02 var(--th) / .6)', fontSize: 10 }}>清除时间</span>}
+                          <input type="datetime-local" value={edit.due} onChange={(e) => setEdit((s) => s && { ...s, due: e.target.value })} style={{ background: fill(2), border: `0.5px solid ${hairline(0.1)}`, borderRadius: R.sm, color: ink(1), colorScheme: 'dark', fontSize: 10, padding: '3.5px 7px', outline: 'none', fontFamily: 'ui-monospace,monospace' }} />
+                          {edit.due && <span className="hv" onClick={() => setEdit((s) => s && { ...s, due: '' })} title="清除时间" style={{ cursor: 'pointer', color: ink(3), fontSize: 10 }}>清除时间</span>}
                           <span style={{ flex: 1 }} />
-                          <span className="hv" onClick={saveEdit} style={{ padding: '3.5px 12px', borderRadius: 999, cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 10.5, fontWeight: 700 }}>✓ 保存</span>
-                          <span className="hv" onClick={() => setEdit(null)} style={{ padding: '3.5px 10px', borderRadius: 999, cursor: 'pointer', background: 'rgba(255,255,255,.06)', color: 'oklch(0.78 0.02 var(--th) / .8)', fontSize: 10.5 }}>取消</span>
+                          <span className="hv" onClick={saveEdit} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3.5px 12px', borderRadius: R.pill, cursor: 'pointer', background: gradient.primary(), color: gradient.onPrimary(), fontSize: 10.5, fontWeight: 700 }}><Check size={11} strokeWidth={2.5} />保存</span>
+                          <span className="hv" onClick={() => setEdit(null)} style={{ padding: '3.5px 10px', borderRadius: R.pill, cursor: 'pointer', background: fill(3), color: ink(2), fontSize: 10.5 }}>取消</span>
                         </div>
                       </div>
                     ) : (
                     <span
                       onDoubleClick={() => !t.done && startEdit(t)}
                       title="双击编辑"
-                      style={{ color: t.done ? 'oklch(0.62 0.02 var(--th) / .55)' : 'oklch(0.93 0.01 var(--th))', fontSize: 12.5, lineHeight: 1.45, textDecoration: t.done ? 'line-through' : 'none', transition: 'color .3s', wordBreak: 'break-word', cursor: t.done ? undefined : 'text' }}
+                      style={{ color: t.done ? ink(3) : ink(1), fontSize: FS.body, lineHeight: 1.45, textDecoration: t.done ? 'line-through' : 'none', transition: 'color .3s', wordBreak: 'break-word', cursor: t.done ? undefined : 'text' }}
                     >
-                      {t.pinned && <span style={{ marginRight: 4 }}>📌</span>}{t.text}
+                      {t.pinned && <Ico.pin size={10} strokeWidth={2} style={{ color: accent(), marginRight: 4, verticalAlign: -1 }} />}{t.text}
                     </span>
                     )}
                     {/* 元信息 chips */}
                     {(dl || t.repeat !== 'none' && t.repeat || subs.length > 0 || t.note || t.project || t.energy || t.estimate || t.blockedBy || (t.tags || []).length > 0) && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
-                        {t.project && <span style={{ padding: '1px 7px', borderRadius: 999, fontSize: 9, background: 'oklch(0.32 0.06 205 / .3)', color: 'oklch(0.82 0.09 205)' }}>▦ {t.project}</span>}
-                        {t.blockedBy && <span title={t.blockedBy} style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '1px 7px', borderRadius: 999, fontSize: 9, background: 'oklch(0.35 0.08 35 / .3)', color: 'oklch(0.84 0.12 40)' }}>△ {t.blockedBy}</span>}
-                        {dl && <span style={{ padding: '1px 7px', borderRadius: 999, fontSize: 9, fontWeight: 700, background: dl.hot ? 'oklch(0.4 0.1 75 / .4)' : 'rgba(255,255,255,.06)', color: dl.hot ? 'oklch(0.88 0.11 75)' : 'oklch(0.72 0.02 var(--th) / .7)' }}>⏰ {dl.text}</span>}
-                        {t.repeat && t.repeat !== 'none' && <span style={{ padding: '1px 7px', borderRadius: 999, fontSize: 9, background: 'rgba(255,255,255,.06)', color: 'oklch(0.72 0.02 var(--th) / .7)' }}>🔁 {t.repeat === 'daily' ? '每天' : '每周'}</span>}
-                        {subs.length > 0 && <span style={{ padding: '1px 7px', borderRadius: 999, fontSize: 9, background: 'rgba(255,255,255,.06)', color: subsDone === subs.length ? 'oklch(0.8 calc(0.12 * var(--cs, 1)) var(--th))' : 'oklch(0.72 0.02 var(--th) / .7)' }}>☑ {subsDone}/{subs.length}</span>}
-                        {t.note && <span style={{ fontSize: 9, color: 'oklch(0.65 0.02 var(--th) / .6)' }}>📝</span>}
-                        {t.estimate && <span style={{ fontSize: 9, color: 'oklch(0.7 0.06 250)' }}>⏱ {t.estimate}m</span>}
-                        {t.energy && <span style={{ fontSize: 9, color: 'oklch(0.68 0.03 var(--th) / .7)' }}>{t.energy === 'deep' ? '深度' : t.energy === 'light' ? '轻量' : '常规'}</span>}
-                        {(t.tags || []).map((tag) => <span key={tag} className="hv" onClick={() => setTagFilter(tag)} style={{ fontSize: 8.5, color: 'oklch(0.68 0.04 var(--th) / .7)', cursor: 'pointer' }}>#{tag}</span>)}
-                        {(t.priority || 3) < 3 && <span style={{ padding: '1px 7px', borderRadius: 999, fontSize: 9, fontWeight: 700, background: 'rgba(255,255,255,.05)', color: pr.color }}>{pr.label}</span>}
-                        {view === 'done' && t.doneAt && <span style={{ fontSize: 9, color: 'oklch(0.6 0.02 var(--th) / .5)' }}>✓ {fmtHM(t.doneAt)}</span>}
+                        {t.project && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: R.pill, fontSize: 9, background: semBg(sem.run, 0.14), color: sem.run }}><Ico.repos size={8.5} strokeWidth={2} />{t.project}</span>}
+                        {t.blockedBy && <span title={t.blockedBy} style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: R.pill, fontSize: 9, background: semBg(sem.danger, 0.13), color: sem.danger }}><Ico.approval size={8.5} strokeWidth={2} style={{ flex: 'none' }} />{t.blockedBy}</span>}
+                        {dl && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: R.pill, fontSize: 9, fontWeight: 700, background: dl.hot ? semBg(sem.warn, 0.2) : fill(2), color: dl.hot ? sem.warn : ink(2) }}><Ico.alarm size={8.5} strokeWidth={2} />{dl.text}</span>}
+                        {t.repeat && t.repeat !== 'none' && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: R.pill, fontSize: 9, background: fill(2), color: ink(2) }}><Ico.refresh size={8.5} strokeWidth={2} />{t.repeat === 'daily' ? '每天' : '每周'}</span>}
+                        {subs.length > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: R.pill, fontSize: 9, background: fill(2), color: subsDone === subs.length ? accent() : ink(2) }}><Ico.todos size={8.5} strokeWidth={2} />{subsDone}/{subs.length}</span>}
+                        {t.note && <Ico.notes size={10} strokeWidth={2} style={{ color: ink(3) }} />}
+                        {t.estimate && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 9, color: sem.run }}><Ico.timer size={9} strokeWidth={2} />{t.estimate}m</span>}
+                        {t.energy && <span style={{ fontSize: 9, color: ink(3) }}>{t.energy === 'deep' ? '深度' : t.energy === 'light' ? '轻量' : '常规'}</span>}
+                        {(t.tags || []).map((tag) => <span key={tag} className="hv" onClick={() => setTagFilter(tag)} style={{ fontSize: 8.5, color: ink(3), cursor: 'pointer' }}>#{tag}</span>)}
+                        {(t.priority || 3) < 3 && <span style={{ padding: '1px 7px', borderRadius: R.pill, fontSize: 9, fontWeight: 700, background: fill(2), color: pr.color }}>{pr.label}</span>}
+                        {view === 'done' && t.doneAt && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 9, color: ink(4) }}><Check size={9} strokeWidth={2.5} />{fmtHM(t.doneAt)}</span>}
                       </div>
                     )}
                   </div>
                   {/* 悬停操作 */}
-                  <div className="row-acts" style={{ display: 'flex', alignItems: 'center', gap: 7, flex: 'none', marginTop: 2 }}>
-                    {!t.done && <span className="hv" title="编辑（文字/时间）" onClick={() => startEdit(t)} style={{ cursor: 'pointer', fontSize: 10, color: 'oklch(0.75 0.02 var(--th) / .75)' }}>✎</span>}
-                    {!t.done && <span className="hv" title="优先级" onClick={() => p.onCyclePriority(t.id)} style={{ cursor: 'pointer', fontSize: 10, color: pr.color, fontWeight: 800 }}>⚑</span>}
-                    {!t.done && <span className="hv" title="顺延到明天" onClick={() => p.onTomorrow(t.id)} style={{ cursor: 'pointer', fontSize: 10, color: 'oklch(0.72 0.02 var(--th) / .7)' }}>⏭</span>}
-                    {!t.done && <span className="hv" title="置顶" onClick={() => p.onPin(t.id)} style={{ cursor: 'pointer', fontSize: 10, color: t.pinned ? 'oklch(0.85 calc(0.12 * var(--cs, 1)) var(--th))' : 'oklch(0.65 0.02 var(--th) / .6)' }}>📌</span>}
-                    <span className="hv" title="删除" onClick={() => p.onDelete(t.id)} style={{ cursor: 'pointer', fontSize: 10, color: 'oklch(0.62 0.06 25 / .8)' }}>✕</span>
+                  <div className="row-acts" style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 'none', marginTop: 2 }}>
+                    {!t.done && <span className="hv" title="编辑（文字/时间）" onClick={() => startEdit(t)} style={{ cursor: 'pointer', color: ink(2), display: 'flex' }}><Ico.edit size={12} strokeWidth={1.75} /></span>}
+                    {!t.done && <span className="hv" title="优先级" onClick={() => p.onCyclePriority(t.id)} style={{ cursor: 'pointer', color: pr.color, display: 'flex' }}><Ico.flag size={12} strokeWidth={1.75} /></span>}
+                    {!t.done && <span className="hv" title="顺延到明天" onClick={() => p.onTomorrow(t.id)} style={{ cursor: 'pointer', color: ink(2), display: 'flex' }}><SkipForward size={12} strokeWidth={1.75} /></span>}
+                    {!t.done && <span className="hv" title="置顶" onClick={() => p.onPin(t.id)} style={{ cursor: 'pointer', color: t.pinned ? accent() : ink(3), display: 'flex' }}><Ico.pin size={12} strokeWidth={1.75} /></span>}
+                    <span className="hv" title="删除" onClick={() => p.onDelete(t.id)} style={{ cursor: 'pointer', color: sem.danger, display: 'flex' }}><Ico.del size={12} strokeWidth={1.75} /></span>
                   </div>
-                  <span className="hv" onClick={() => { setOpenId(isOpen ? null : t.id); setSubDraft('') }} title="详情（子任务/备注/专注）" style={{ flex: 'none', cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9, marginTop: 4, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>▾</span>
+                  <span className="hv" onClick={() => { setOpenId(isOpen ? null : t.id); setSubDraft('') }} title="详情（子任务/备注/专注）" style={{ flex: 'none', cursor: 'pointer', color: ink(3), display: 'flex', marginTop: 4, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}><Ico.expand size={11} strokeWidth={2} /></span>
                 </div>
 
                 {/* 展开详情 */}
@@ -970,17 +998,17 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                   <div style={{ padding: '2px 12px 11px 40px', display: 'flex', flexDirection: 'column', gap: 8, animation: 'ai-fadein .2s ease' }}>
                     {/* 子任务：进度条 + 列表 + 连续添加 + AI 拆解 */}
                     {subs.length > 0 && (
-                      <div style={{ height: 3.5, borderRadius: 999, background: 'rgba(0,0,0,.3)', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${subs.length ? (subsDone / subs.length) * 100 : 0}%`, borderRadius: 999, background: 'linear-gradient(90deg, oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)))', transition: 'width .35s ease' }} />
+                      <div style={{ height: 3.5, borderRadius: R.pill, background: 'rgba(0,0,0,.3)', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${subs.length ? (subsDone / subs.length) * 100 : 0}%`, borderRadius: R.pill, background: `linear-gradient(90deg, ${accent(0.7)}, ${accent(0.82)})`, transition: 'width .35s ease' }} />
                       </div>
                     )}
                     {subs.map((s) => (
                       <div key={s.id} className="msg" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="hv" onClick={() => p.onToggleSub(t.id, s.id)} style={{ flex: 'none', width: 14, height: 14, borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${s.done ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th))' : 'rgba(255,255,255,.25)'}`, background: s.done ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th))' : 'transparent' }}>
-                          {s.done && <span style={{ color: 'oklch(0.14 0.02 var(--th))', fontSize: 8.5, fontWeight: 900 }}>✓</span>}
+                        <span className="hv" onClick={() => p.onToggleSub(t.id, s.id)} style={{ flex: 'none', width: 14, height: 14, borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${s.done ? accent(0.7) : hairline(0.3)}`, background: s.done ? accent(0.7) : 'transparent' }}>
+                          {s.done && <Check size={9} strokeWidth={3} style={{ color: gradient.onPrimary() }} />}
                         </span>
-                        <span style={{ flex: 1, color: s.done ? 'oklch(0.6 0.02 var(--th) / .5)' : 'oklch(0.85 0.01 var(--th) / .9)', fontSize: 11.5, textDecoration: s.done ? 'line-through' : 'none' }}>{s.text}</span>
-                        <span className="row-acts hv" onClick={() => p.onDeleteSub(t.id, s.id)} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 9.5 }}>✕</span>
+                        <span style={{ flex: 1, color: s.done ? ink(3) : ink(1), fontSize: FS.small, textDecoration: s.done ? 'line-through' : 'none' }}>{s.text}</span>
+                        <span className="row-acts hv" onClick={() => p.onDeleteSub(t.id, s.id)} style={{ cursor: 'pointer', color: ink(3), display: 'flex' }}><Ico.close size={10} strokeWidth={2} /></span>
                       </div>
                     ))}
                     <div style={{ display: 'flex', gap: 6 }}>
@@ -990,10 +1018,10 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                         onChange={(e) => setSubDraft(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') addSub(t.id) }}
                         placeholder="添加子任务，Enter 连续添加…"
-                        style={{ ...inputBase, flex: 1, fontSize: 11, background: 'rgba(0,0,0,.25)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, padding: '5.5px 9px' }}
+                        style={{ ...inputBase, flex: 1, fontSize: FS.small, background: 'rgba(0,0,0,.25)', border: `0.5px solid ${hairline(0.09)}`, borderRadius: R.sm, padding: '5.5px 9px' }}
                       />
-                      <span className="hv" onClick={() => breakdown(t.id)} title="AI 把这个任务拆解成子步骤" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 4, padding: '0 11px', borderRadius: 8, cursor: 'pointer', background: 'oklch(0.32 calc(0.06 * var(--cs, 1)) var(--th) / .5)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .35)', color: 'oklch(0.88 calc(0.08 * var(--cs, 1)) var(--th))', fontSize: 10.5, fontWeight: 700 }}>
-                        {breaking === t.id ? '拆解中…' : '✨ AI 拆解'}
+                      <span className="hv" onClick={() => breakdown(t.id)} title="AI 把这个任务拆解成子步骤" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 4, padding: '0 11px', borderRadius: R.sm, cursor: 'pointer', background: semBg(accent(), 0.18), border: `0.5px solid ${accent(0.7, 0.4)}`, color: accent(0.88), fontSize: 10.5, fontWeight: 700 }}>
+                        <Ico.ai size={11} strokeWidth={2} />{breaking === t.id ? '拆解中…' : 'AI 拆解'}
                       </span>
                     </div>
                     {/* 执行属性：项目、精力、估时、阻塞、验收 */}
@@ -1005,9 +1033,11 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                         placeholder="所属项目 / 工作流"
                         style={{ ...detailInput, minWidth: 0 }}
                       />
-                      <div style={{ display: 'flex', gap: 3, padding: 3, borderRadius: 8, background: 'rgba(0,0,0,.22)' }}>
-                        {(['deep', 'normal', 'light'] as const).map((e) => <button key={e} type="button" className="hv" onClick={() => p.onPatch(t.id, { energy: e })} title={e === 'deep' ? '深度工作' : e === 'light' ? '轻量任务' : '常规任务'} style={{ flex: 1, minWidth: 0, height: 24, border: 0, borderRadius: 6, background: (t.energy || 'normal') === e ? 'oklch(0.68 calc(0.11 * var(--cs, 1)) var(--th) / .65)' : 'transparent', color: (t.energy || 'normal') === e ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.62 0.02 var(--th) / .65)', cursor: 'pointer', fontSize: 8.5, fontWeight: 700 }}>{e === 'deep' ? '深' : e === 'light' ? '轻' : '常'}</button>)}
-                      </div>
+                      <Segmented
+                        options={([['deep', '深'], ['normal', '常'], ['light', '轻']] as const).map(([k, label]) => ({ key: k, label }))}
+                        value={t.energy || 'normal'}
+                        onChange={(e) => p.onPatch(t.id, { energy: e })}
+                      />
                       <input
                         defaultValue={t.blockedBy || ''}
                         onBlur={(e) => p.onPatch(t.id, { blockedBy: e.target.value.trim() || undefined })}
@@ -1016,7 +1046,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                       />
                       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                         <input type="number" min={5} max={600} step={5} value={t.estimate || ''} onChange={(e) => p.onPatch(t.id, { estimate: e.target.value ? Math.max(5, Number(e.target.value)) : undefined })} placeholder="估时" style={{ ...detailInput, minWidth: 0, width: 72 }} />
-                        <span style={{ color: 'oklch(0.58 0.02 var(--th) / .6)', fontSize: 9 }}>分钟</span>
+                        <span style={{ color: ink(3), fontSize: 9 }}>分钟</span>
                       </div>
                     </div>
                     <datalist id="todo-project-list">{projects.map((x) => <option key={x} value={x} />)}</datalist>
@@ -1028,10 +1058,10 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                       style={{ ...detailInput, width: '100%', resize: 'none', lineHeight: 1.45 }}
                     />
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                      <button type="button" className="hv" onClick={() => void aiEstimate(t)} style={microBtn}>{aiEstBusy === t.id ? '估时中…' : 'AI 估时'}</button>
-                      <button type="button" className="hv" onClick={() => void aiSmart(t)} style={microBtn}>{aiSmartBusy === t.id ? '改写中…' : 'SMART 改写'}</button>
-                      <button type="button" className="hv" onClick={() => void aiAutoTag(t)} style={microBtn}>{aiTagBusy === t.id ? '归类中…' : 'AI 归类'}</button>
-                      {(t.tags || []).map((tag) => <button key={tag} type="button" className="hv" onClick={() => toggleTag(t, tag)} title="移除标签" style={{ ...microBtn, color: 'oklch(0.76 0.08 var(--th))' }}>#{tag} ×</button>)}
+                      <button type="button" className="hv" onClick={() => void aiEstimate(t)} style={microBtn}><Ico.timer size={10} strokeWidth={2} />{aiEstBusy === t.id ? '估时中…' : 'AI 估时'}</button>
+                      <button type="button" className="hv" onClick={() => void aiSmart(t)} style={microBtn}><Ico.magic size={10} strokeWidth={2} />{aiSmartBusy === t.id ? '改写中…' : 'SMART 改写'}</button>
+                      <button type="button" className="hv" onClick={() => void aiAutoTag(t)} style={microBtn}><Ico.tag size={10} strokeWidth={2} />{aiTagBusy === t.id ? '归类中…' : 'AI 归类'}</button>
+                      {(t.tags || []).map((tag) => <button key={tag} type="button" className="hv" onClick={() => toggleTag(t, tag)} title="移除标签" style={{ ...microBtn, color: accent(0.76) }}>#{tag} ×</button>)}
                       {tagDraft?.id === t.id
                         ? <input autoFocus value={tagDraft.text} onChange={(e) => setTagDraft({ id: t.id, text: e.target.value })} onBlur={commitTagDraft} onKeyDown={(e) => { if (e.key === 'Enter') commitTagDraft(); if (e.key === 'Escape') setTagDraft(null) }} placeholder="标签" style={{ ...detailInput, width: 80, padding: '4px 7px' }} />
                         : <button type="button" className="hv" onClick={() => setTagDraft({ id: t.id, text: '' })} style={microBtn}>+ 标签</button>}
@@ -1043,25 +1073,27 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                       placeholder="备注（支持 Markdown，失焦保存）…"
                       rows={2}
                       className="ai-scroll"
-                      style={{ ...inputBase, width: '100%', boxSizing: 'border-box', fontSize: 11, lineHeight: 1.5, background: 'rgba(0,0,0,.25)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, padding: '6px 9px', resize: 'none', maxHeight: 80 }}
+                      style={{ ...inputBase, width: '100%', boxSizing: 'border-box', fontSize: FS.small, lineHeight: 1.5, background: 'rgba(0,0,0,.25)', border: `0.5px solid ${hairline(0.09)}`, borderRadius: R.sm, padding: '6px 9px', resize: 'none', maxHeight: 80 }}
                     />
                     {t.note && (
-                      <div style={{ padding: '6px 9px', borderRadius: 8, background: 'rgba(0,0,0,.18)', fontSize: 11 }}>
+                      <div style={{ padding: '6px 9px', borderRadius: R.sm, background: 'rgba(0,0,0,.18)', fontSize: FS.small }}>
                         <Markdown text={t.note} />
                       </div>
                     )}
                     {/* 操作 chips */}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      <span className="hv" style={chipS(false)} onClick={() => p.onFocus(t)}>🌙 专注 25 分钟</span>
+                      <span className="hv" style={chipS(false)} onClick={() => p.onFocus(t)}><Ico.focus size={10} strokeWidth={2} style={{ color: sem.focus }} />专注 25 分钟</span>
                       <span className="hv" style={chipS(false)} onClick={() => p.onSnooze(t.id, 10)}>+10 分钟</span>
                       <span className="hv" style={chipS(false)} onClick={() => p.onSnooze(t.id, 60)}>+1 小时</span>
-                      <span className="hv" style={chipS(false)} onClick={() => navigator.clipboard?.writeText(t.text + (subs.length ? '\n' + subs.map((s) => `- [${s.done ? 'x' : ' '}] ${s.text}`).join('\n') : '')).catch(() => {})}>⧉ 复制</span>
+                      <span className="hv" style={chipS(false)} onClick={() => navigator.clipboard?.writeText(t.text + (subs.length ? '\n' + subs.map((s) => `- [${s.done ? 'x' : ' '}] ${s.text}`).join('\n') : '')).catch(() => {})}><Ico.copy size={10} strokeWidth={2} />复制</span>
                     </div>
                   </div>
                 )}
               </div>
             )
           })}
+          </Group>
+          )}
         </div>
       ))}
     </div>

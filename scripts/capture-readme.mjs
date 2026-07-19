@@ -41,7 +41,7 @@ const demoState = {
   ],
   askThread: [
     { id: 21, role: 'user', text: '请基于当前项目状态给出发布前风险清单。', ts: now - 120_000 },
-    { id: 22, role: 'agent', blocks: [{ t: 'h', text: '发布前检查重点' }, { t: 'ul', items: ['验证 Agent 审批闭环与 fail-open', '检查外部打开时窗口让位', '确认所有配置和密钥仅保存在本机', '生成安装包并执行干净安装验证'] }], ts: now - 110_000 }
+    { id: 22, role: 'agent', blocks: [{ t: 'think', text: ['用户想了解发布前风险。先梳理项目状态：这是一个 Electron 桌面应用，包含主进程、预加载、渲染层三端。', '第一步，检查审批闭环：hooks 转发脚本必须 fail-open，否则岛未启动时会卡住用户 CLI。需要验证 PreToolUse 阻塞审批的 stdout 协议。', '第二步，检查窗口让位：外部打开文件/网页时，透明置顶窗口必须主动降层，否则会遮挡目标应用。ExternalYieldController 需要覆盖全部入口。', '第三步，确认配置与密钥：API Key、CalDAV 密码必须 DPAPI 加密存储在本机 userData，不能落明文，不能外传。', '第四步，安装包验证：NSIS 打包后需要在干净环境安装一次，确认 hooks 安装器幂等、bridge.json 自愈正常。', '最后，综合以上四点给出风险清单，按严重度排序，并给出每项的具体验证方法。'].join('\n\n') }, { t: 'h', text: '发布前检查重点' }, { t: 'ul', items: ['验证 Agent 审批闭环与 fail-open', '检查外部打开时窗口让位', '确认所有配置和密钥仅保存在本机', '生成安装包并执行干净安装验证'] }], ts: now - 110_000 }
   ],
   feedSources: [
     { id: 'openai', name: 'OpenAI', url: 'https://openai.com/news/rss.xml', enabled: true },
@@ -174,13 +174,13 @@ try {
     process.stdout.write(`captured ${filename}\n`)
   }
 
-  await capture('问答', 'ask-v020.png')
-  await capture('快捷', 'shortcuts-v020.png')
-  await capture('待办', 'todos-v020.png')
-  await capture('灵感便签', 'notes-v020.png')
-  await capture('资讯', 'news-v020.png')
-  await capture('复盘', 'review-v020.png')
-  await capture('设置', 'settings-v020.png')
+  await capture('问答', 'ask-v030.png')
+  await capture('快捷', 'shortcuts-v030.png')
+  await capture('待办', 'todos-v030.png')
+  await capture('灵感便签', 'notes-v030.png')
+  await capture('资讯', 'news-v030.png')
+  await capture('复盘', 'review-v030.png')
+  await capture('设置', 'settings-v030.png')
 } finally {
   cdp?.close()
   child.kill()

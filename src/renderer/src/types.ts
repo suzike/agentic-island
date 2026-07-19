@@ -197,6 +197,16 @@ export interface BarConfig {
   customTopics?: { id: number; name: string; hint: string }[]
   /** AI 每 10 分钟自动刷新内容池 */
   aiRefresh?: boolean
+  /** 条体外观；旧数据缺失时回退 glass */
+  appearance?: 'glass' | 'solid' | 'minimal'
+  /** 动效强度；系统“减少动态效果”仍拥有最高优先级 */
+  motion?: 'calm' | 'balanced' | 'lively'
+  /** 内容自动轮播间隔（秒，6–30） */
+  rotationSeconds?: number
+  /** 是否展示左侧实时工作状态舱 */
+  showStatus?: boolean
+  /** 是否展示底部轮播时序轨 */
+  showProgress?: boolean
 }
 
 export const DEFAULT_BAR_CONFIG: BarConfig = {
@@ -205,7 +215,12 @@ export const DEFAULT_BAR_CONFIG: BarConfig = {
   hue: 200,
   petEmoji: '🐈',
   customQuotes: [],
-  width: 330
+  width: 330,
+  appearance: 'glass',
+  motion: 'balanced',
+  rotationSeconds: 12,
+  showStatus: true,
+  showProgress: true
 }
 
 /** 剪贴板历史项（文本或图片；tag 自动识别；fav 收藏可持久化，其余仅内存） */

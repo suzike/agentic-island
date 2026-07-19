@@ -1,6 +1,6 @@
-# Agentic-Island v0.2 架构说明
+# Agentic-Island v0.3 架构说明
 
-本文档描述当前 `0.2.x` 实现。历史设计交付包只用于视觉参考，不代表运行时架构。
+本文档描述当前 `0.3.x` 实现。历史设计交付包只用于视觉参考，不代表运行时架构。
 
 ## 1. 设计目标
 
@@ -39,6 +39,13 @@
 
 `src/renderer/src/App.tsx` 负责编排 11 个主分区和全局浮层。模块内纯计算放在 `logic/*`，可由 raw Node 测试直接加载；涉及 Electron 的能力一律通过 `bridge.ts` 调用 preload。
 
+视觉层统一收敛在 `src/renderer/src/ui/` 设计系统（v0.3 起，Apple 设计语言）：
+
+- `tokens.ts`：填充制层级——`fill(1-4)` 填充阶梯（代替 1px 描边）、`hairline()` 0.5px 发型线分隔、`R` 圆角阶梯（按钮 10/卡片 13/浮层 18/面板 28）、`ink(1-4)` iOS label 四级墨色、`text.*` SF 排版；颜色全部消费 OKLCH 主题变量（`--th/--th2/--ths/--cs/--css/--pl`），主题切换无需改组件。
+- `components.tsx`：共享组件（Button/Card/Chip/Input/Segmented 滑动 thumb/Switch 白钮/Group inset grouped 等）。
+- `motion.ts`：framer-motion 预设。面板内动画只做 opacity（禁 translate/blur），浮层用 overlayPop。
+- `icons.ts`：lucide 语义图标表（用户数据中的 emoji 字段除外）。
+
 ## 3. Agent 接入
 
 ![Agent 通信通道](agent-channel.svg)
@@ -60,11 +67,18 @@
 - discovery 文件每 15 秒检查并自愈，但测试必须使用隔离路径。
 - permission 请求保持连接，直到用户裁决或上游超时。
 
-## 4. 窗口层级与外部让位
+## 4. 窗口层级、多显示器与外部让位
 
 ![外部应用让位](external-yield.svg)
 
 透明主窗口覆盖整个工作区，以便顶部交互和多显示器定位。它在收起时开启点击穿透，展开时只让实际面板热区接收输入。
+
+多显示器与全屏（v0.3 修复）：
+
+- 目标显示器由 `targetDisplay()` 决定：跟随鼠标模式取光标所在屏，固定模式取设置中的显示器索引（设置页展示真实显示器列表，含分辨率与 DPI）。
+- `screen.on('display-added/removed/metrics-changed')` 触发全部岛系窗口（主窗 + 桌面挂件）强制重定位；跨 DPI 屏 `setBounds` 后 60ms 校验重试一次，规避 DIP 换算竞态。
+- 全屏模式把窗口从工作区切到 `display.bounds`（screen-saver 层级，可覆盖任务栏），退出回到 `workArea`；渲染层 100vw/100vh 布局无需感知。
+- 启动时渲染层水合完成后权威同步一次多屏偏好，避免主进程默认值与 UI 不一致。
 
 `ExternalYieldController` 统一处理外部动作：
 

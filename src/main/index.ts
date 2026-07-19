@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, screen, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, screen, shell, Tray } from 'electron'
 import { spawn } from 'child_process'
 import { readFile, writeFile } from 'fs/promises'
 import { basename, join } from 'path'
@@ -134,21 +134,50 @@ function createTray(): void {
 // 多显示器定位：follow=跟随鼠标所在屏；否则用选定显示器索引
 let follow = true
 let monitorIndex = 0
+// 全屏模式：窗口铺满整个物理显示器（display.bounds，含任务栏区域）；否则只铺工作区
+let fullMode = false
 
-function positionWindow(w: BrowserWindow): void {
+/** 岛当前的目标显示器（follow=光标所在屏；否则选定索引，索引失效回退首屏） */
+function targetDisplay(): Electron.Display {
   const displays = screen.getAllDisplays()
-  const display = follow
+  return follow
     ? screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     : displays[monitorIndex] || displays[0]
-  const { x, y, width, height } = display.workArea
+}
+
+function positionWindow(w: BrowserWindow, force = false): void {
+  const display = targetDisplay()
+  const { x, y, width, height } = fullMode ? display.bounds : display.workArea
   // 恒定铺满工作区；边界相同就直接跳过（避免任何多余的 setBounds——透明窗 resize/重设都可能闪/抖）
   const cur = w.getBounds()
-  if (cur.x === x && cur.y === y && cur.width === width && cur.height === height) return
+  if (!force && cur.x === x && cur.y === y && cur.width === width && cur.height === height) return
   // 关键：resizable:false 的窗口在 Windows 上 setBounds 改宽会被忽略 → 先临时放开再收回
   w.setResizable(true)
   w.setBounds({ x, y, width, height })
   w.setResizable(false)
   // 注意：这里不要 webContents.invalidate()——透明窗口上强制全量重绘会产生肉眼可见的闪屏
+  // 混合 DPI 屏间移动时 setBounds 可能落到中间值（DIP 换算竞态）→ 60ms 后校验，不符强制重设一次
+  setTimeout(() => {
+    if (w.isDestroyed()) return
+    const now = w.getBounds()
+    if (now.x !== x || now.y !== y || now.width !== width || now.height !== height) {
+      w.setResizable(true)
+      w.setBounds({ x, y, width, height })
+      w.setResizable(false)
+    }
+  }, 60)
+}
+
+/** 显示器热插拔 / 分辨率 / DPI 缩放变化：重定位全部岛系窗口（否则岛会偏、不再居中/铺满） */
+function onDisplayChange(): void {
+  try {
+    const n = screen.getAllDisplays().length
+    monitorIndex = Math.min(monitorIndex, Math.max(0, n - 1))
+    if (win && !win.isDestroyed()) positionWindow(win, true)
+    if (widgetWin && !widgetWin.isDestroyed()) placeWidget(widgetWin)
+  } catch {
+    /* 显示器枚举竞态期忽略 */
+  }
 }
 
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
@@ -317,29 +346,23 @@ function openScreenshot(): void {
 
 // 屏幕理解：截取主屏（先藏岛避免拍到自己），返回 dataURL 交给视觉模型
 async function captureScreenDataUrl(): Promise<string | null> {
-  const PS =
-    'Add-Type -AssemblyName System.Windows.Forms,System.Drawing; ' +
-    '$b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; ' +
-    '$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height; ' +
-    '$g=[System.Drawing.Graphics]::FromImage($bmp); ' +
-    '$g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); ' +
-    '$ms=New-Object System.IO.MemoryStream; $bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png); ' +
-    '[Convert]::ToBase64String($ms.ToArray())'
   try {
+    const target = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     win?.hide()
     await new Promise((r) => setTimeout(r, 160))
-    const b64 = await new Promise<string>((resolve) => {
-      const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS], { windowsHide: true })
-      let out = ''
-      p.stdout.on('data', (d) => { out += String(d) })
-      p.on('close', () => resolve(out.trim()))
-      p.on('error', () => resolve(''))
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: {
+        width: Math.round(target.size.width * target.scaleFactor),
+        height: Math.round(target.size.height * target.scaleFactor)
+      }
     })
-    win?.show()
-    return b64 ? 'data:image/png;base64,' + b64.replace(/\s/g, '') : null
+    const source = sources.find((item) => item.display_id === String(target.id)) || sources[0]
+    return source && !source.thumbnail.isEmpty() ? source.thumbnail.toDataURL() : null
   } catch {
-    win?.show()
     return null
+  } finally {
+    win?.show()
   }
 }
 
@@ -388,20 +411,26 @@ function openBrain(): void {
 // 可拆分桌面挂件：独立小窗常驻桌面角，展示主渲染层每秒推送的速览数据（番茄/待办/Agent/媒体）
 let widgetWin: BrowserWindow | null = null
 let lastWidgetData: unknown = null
-function openWidget(): void {
-  if (widgetWin && !widgetWin.isDestroyed()) { widgetWin.show(); return }
+
+/** 挂件锚定到岛所在显示器的右下角（跟随 positionWindow 同一目标屏） */
+function placeWidget(w: BrowserWindow): void {
   const W = 268
   const H = 236
+  const { workArea } = targetDisplay()
+  w.setBounds({ x: workArea.x + workArea.width - W - 20, y: workArea.y + workArea.height - H - 20, width: W, height: H })
+}
+
+function openWidget(): void {
+  if (widgetWin && !widgetWin.isDestroyed()) { widgetWin.show(); return }
   widgetWin = new BrowserWindow({
-    width: W, height: H, frame: false, transparent: true, resizable: false, skipTaskbar: true,
+    width: 268, height: 236, frame: false, transparent: true, resizable: false, skipTaskbar: true,
     alwaysOnTop: true, hasShadow: false, fullscreenable: false, maximizable: false, minimizable: false,
     webPreferences: appWebPreferences()
   })
   hardenWindow(widgetWin)
   widgetWin.setAlwaysOnTop(true, 'screen-saver')
   widgetWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  const { workArea } = screen.getPrimaryDisplay()
-  widgetWin.setBounds({ x: workArea.x + workArea.width - W - 20, y: workArea.y + workArea.height - H - 20, width: W, height: H })
+  placeWidget(widgetWin)
   loadRenderer(widgetWin, 'widget')
   widgetWin.webContents.on('did-finish-load', () => { if (lastWidgetData) widgetWin?.webContents.send('widget-data', lastWidgetData) })
   widgetWin.on('closed', () => { widgetWin = null })
@@ -435,7 +464,7 @@ function openSticky(note: StickyNoteData): void {
   hardenWindow(w)
   w.setAlwaysOnTop(true, 'screen-saver')
   w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  const { workArea } = screen.getPrimaryDisplay()
+  const { workArea } = targetDisplay()
   const n = stickyWins.size
   w.setBounds({ x: workArea.x + workArea.width - 268 - (n % 3) * 30, y: workArea.y + 60 + (n % 4) * 30, width: 240, height: 200 })
   loadRenderer(w, 'sticky')
@@ -861,9 +890,26 @@ function wireIpc(): void {
     if (win) positionWindow(win)
   })
 
-  // 窗口恒定铺满工作区：尺寸/全屏切换只是渲染层布局变化，这两个通道保留为空实现（兼容旧调用）
+  // 尺寸切换只是渲染层布局变化，保留为空实现（兼容旧调用）
   ipcMain.on('set-size-mode', () => { /* no-op */ })
-  ipcMain.on('set-full-mode', () => { /* no-op */ })
+  // 全屏模式：窗口铺满整个物理显示器（display.bounds，screen-saver 层级可盖任务栏）；退出回到工作区
+  ipcMain.on('set-full-mode', (_e, full: boolean) => {
+    fullMode = !!full
+    if (win) positionWindow(win, true)
+  })
+  // 真实显示器列表（设置页选择用）
+  ipcMain.handle('get-displays', () => {
+    const primaryId = screen.getPrimaryDisplay().id
+    return screen.getAllDisplays().map((d, i) => ({
+      id: d.id,
+      index: i,
+      label: d.label || `显示器 ${i + 1}`,
+      primary: d.id === primaryId,
+      width: d.size.width,
+      height: d.size.height,
+      scaleFactor: d.scaleFactor
+    }))
+  })
 
   // 界面缩放（字体清晰度/可读性：0.9–1.3）
   ipcMain.on('set-zoom', (_e, z: number) => {
@@ -903,21 +949,51 @@ function wireIpc(): void {
   ipcMain.handle('llm-test', (_e, cfg: LlmRequestConfig) => llmTest(cfg))
   // 截图工坊：渲染层主动触发框选截图（复用 ms-screenclip 流程，事件仍走 screenshot-captured）
   ipcMain.on('trigger-screenshot', () => openScreenshot())
-  // 图片写剪贴板（PNG 无损）
-  ipcMain.on('copy-image', (_e, dataUrl: string) => {
+  const imageDataLimit = 160_000_000
+  const validImageData = (value: string): boolean => /^data:image\/(?:png|jpe?g|webp);base64,/i.test(value) && value.length <= imageDataLimit
+  // 图片写剪贴板。返回结果，避免渲染层在失败时仍提示成功。
+  ipcMain.handle('copy-image', (_e, dataUrl: string) => {
     const url = String(dataUrl || '')
-    if (!/^data:image\/(?:png|jpe?g);base64,/i.test(url) || url.length > 20_000_000) return
-    try { clipboard.writeImage(nativeImage.createFromDataURL(url)) } catch { /* */ }
+    if (!validImageData(url)) return { ok: false, error: '图片数据无效或超过 160MB' }
+    try {
+      const image = nativeImage.createFromDataURL(url)
+      if (image.isEmpty()) return { ok: false, error: '图片解码失败' }
+      clipboard.writeImage(image)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: String(e instanceof Error ? e.message : e) } }
   })
-  // 图片存盘（PNG 无损，弹保存框）
+  // 图片存盘，格式由 data URL 决定。
   ipcMain.handle('save-image', async (_e, dataUrl: string, name: string) => {
     try {
-      if (!/^data:image\/png;base64,/i.test(String(dataUrl)) || String(dataUrl).length > 20_000_000) return { ok: false, error: '图片数据无效或过大' }
-      const r = await showOwnedSaveDialog({ title: '保存截图', defaultPath: `${safeName(name, 'screenshot')}.png`, filters: [{ name: 'PNG 图片', extensions: ['png'] }] })
+      const url = String(dataUrl || '')
+      if (!validImageData(url)) return { ok: false, error: '图片数据无效或超过 160MB' }
+      const mime = /^data:image\/(png|jpe?g|webp);/i.exec(url)?.[1]?.toLowerCase() || 'png'
+      const ext = mime === 'jpeg' || mime === 'jpg' ? 'jpg' : mime
+      const label = ext === 'png' ? 'PNG 图片' : ext === 'jpg' ? 'JPEG 图片' : 'WebP 图片'
+      const r = await showOwnedSaveDialog({ title: '保存截图', defaultPath: `${safeName(name, 'screenshot')}.${ext}`, filters: [{ name: label, extensions: [ext] }] })
       if (r.canceled || !r.filePath) return { ok: false, canceled: true }
-      const b64 = String(dataUrl).replace(/^data:image\/\w+;base64,/, '')
+      const b64 = url.replace(/^data:image\/[\w+.-]+;base64,/, '')
       await writeFile(r.filePath, Buffer.from(b64, 'base64'))
       return { ok: true, path: r.filePath }
+    } catch (e) { return { ok: false, error: String(e instanceof Error ? e.message : e) } }
+  })
+  ipcMain.handle('open-image-file', async () => {
+    try {
+      const r = await showOwnedOpenDialog({ title: '打开图片', properties: ['openFile'], filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] })
+      if (r.canceled || !r.filePaths[0]) return { ok: false }
+      const path = r.filePaths[0]
+      const ext = path.toLowerCase().split('.').pop() || 'png'
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'
+      const raw = await readFile(path)
+      if (raw.length > imageDataLimit * 0.75) return { ok: false, error: '图片文件超过 120MB' }
+      return { ok: true, dataUrl: `data:${mime};base64,${raw.toString('base64')}`, name: basename(path).replace(/\.[^.]+$/, '') }
+    } catch (e) { return { ok: false, error: String(e instanceof Error ? e.message : e) } }
+  })
+  ipcMain.handle('read-clipboard-image', () => {
+    try {
+      const image = clipboard.readImage()
+      if (image.isEmpty()) return { ok: false, error: '剪贴板中没有图片' }
+      return { ok: true, dataUrl: image.toDataURL() }
     } catch (e) { return { ok: false, error: String(e instanceof Error ? e.message : e) } }
   })
   // ===== 快捷指令（M1）：PowerShell 执行 / 万能打开 / 剪贴板读写 =====
@@ -1050,6 +1126,10 @@ app.whenReady().then(async () => {
   createWindow()
   createTray()
   startFollowLoop()
+  // 显示器热插拔 / 分辨率 / DPI 变化 → 全部岛系窗口重定位
+  screen.on('display-added', onDisplayChange)
+  screen.on('display-removed', onDisplayChange)
+  screen.on('display-metrics-changed', onDisplayChange)
   // 全局热键：命令面板 Ctrl+Alt+K · 闪念胶囊 Ctrl+Alt+Space · 智能截图 Ctrl+Alt+S（注册失败不影响其它功能）
   try { globalShortcut.register('CommandOrControl+Alt+K', openPalette) } catch { /* 热键被占用 */ }
   try { globalShortcut.register('CommandOrControl+Alt+F', openBrain) } catch { /* 热键被占用 */ }

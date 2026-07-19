@@ -1,12 +1,22 @@
-// Settings 分区 —— 移植自原型 Agentic-Island.dc.html:229-355 + 相关 renderVals。
-// 通用开关(声音展开选择器 / 多显示器展开选择) + 问答助手模型配置 + 已支持工具网格。
+// Settings 分区 —— 设计系统重做：surface.section 分区卡片 + SectionHeader + 共享 Switch/Slider/Chip/Button/Input。
+// 交互逻辑（hooks 接入 / 声效选择 / 显示器选择 / LLM 配置 / 日历 / 迷你条自定义）全部保持不变。
 
 import { useEffect, useState } from 'react'
-import type { RuntimeInfo } from '../../../shared/protocol'
+import { motion } from 'framer-motion'
+import {
+  Activity, CalendarClock, ChevronDown, GlassWater, MessageSquare, Minus, PanelTop, Palette,
+  Pencil, Play, Plug, Plus, Power, Settings2, Sparkles, Terminal, TimerReset, TriangleAlert,
+  Waves, Wind, Wrench, X, Zap
+} from 'lucide-react'
+import type { DisplayInfo, RuntimeInfo } from '../../../shared/protocol'
 import type { BarConfig } from '../types'
 import { SOUNDS, SOUND_TYPES, type SoundMap } from '../logic/sounds'
 import { PROVIDERS } from '../logic/providers'
 import { THEMES, type ThemeDef } from '../logic/themes'
+import { Badge, Button, Chip, Group, IconButton, Input, SectionHeader, Segmented, Slider, Switch } from '../ui/components'
+import { fadeScaleIn } from '../ui/motion'
+import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, separatorRow, SP, surface, text } from '../ui/tokens'
+import type { LucideIcon } from '../ui/icons'
 
 export interface LlmState {
   open: boolean
@@ -61,6 +71,8 @@ interface SettingsTabProps {
   onSetSound: (type: keyof SoundMap, key: string) => void
   onPreviewSound: (e: React.MouseEvent, k: string) => void
   activeMonitor: number
+  /** 真实显示器列表（主进程 get-displays） */
+  displays: DisplayInfo[]
   monitorPreviewOpen: boolean
   onToggleMonitorPreview: () => void
   onSetMonitor: (n: number) => void
@@ -134,6 +146,16 @@ const BAR_MODES: { key: string; label: string }[] = [
   { key: 'neon', label: '霓虹脉冲' },
   { key: 'pet', label: '小宠物' }
 ]
+const BAR_APPEARANCES = [
+  { key: 'glass', label: '玻璃', icon: GlassWater },
+  { key: 'solid', label: '实体', icon: PanelTop },
+  { key: 'minimal', label: '极简', icon: Minus }
+] as const
+const BAR_MOTIONS = [
+  { key: 'calm', label: '舒缓', icon: Wind },
+  { key: 'balanced', label: '平衡', icon: Waves },
+  { key: 'lively', label: '灵动', icon: Sparkles }
+] as const
 const PETS = ['🐈', '🐕', '🦊', '🐰', '🐢', '🦆']
 
 const GENERAL: { key: keyof SettingsFlags; label: string; desc: string }[] = [
@@ -143,7 +165,7 @@ const GENERAL: { key: keyof SettingsFlags; label: string; desc: string }[] = [
   { key: 'sound', label: '声音提醒', desc: '需要处理时播放提示音' },
   { key: 'silentBg', label: '空闲时完全静默', desc: '无待办时隐藏胶囊' },
   { key: 'clipWatch', label: '剪贴板助手', desc: '记录剪贴板历史（仅内存不落盘），问答区 📋 面板可一键翻译/解释/清洗' },
-  { key: 'ambientBar', label: '常驻迷你条', desc: '岛收起后保留一条小状态条，轮播名人名言与动态光带；关闭则完全收回' },
+  { key: 'ambientBar', label: '常驻迷你条', desc: '岛收起后保留实时状态舱与动态内容条；关闭则完全收回' },
   { key: 'meetingDnd', label: '智能勿扰（会议自动静默）', desc: '检测到麦克风/摄像头被占用（≈正在开会/录屏）时，自动不弹窗、不响铃；会议结束自动恢复' },
   { key: 'desktopWidget', label: '桌面挂件小窗', desc: '在桌面右下角常驻一个可拖动小窗，速览番茄钟 / 到期待办 / Agent / 正在播放；点「展开」回主岛' }
 ]
@@ -163,45 +185,67 @@ const TOOLS: { key: keyof SettingsFlags; label: string }[] = [
   { key: 'codexApp', label: 'Codex 桌面端' }
 ]
 
-const sectionTitle: React.CSSProperties = {
-  font: "600 10.5px 'Segoe UI',sans-serif",
-  letterSpacing: '.06em',
-  textTransform: 'uppercase',
-  color: 'oklch(0.65 0.02 var(--th) / .6)',
-  marginBottom: 9
+/** 分区卡片：surface.section 容器 + fadeScaleIn 入场（无位移） */
+function Section(props: { icon?: LucideIcon; title: React.ReactNode; extra?: React.ReactNode; children?: React.ReactNode }) {
+  return (
+    <motion.section
+      variants={fadeScaleIn}
+      initial="initial"
+      animate="animate"
+      style={{ ...surface.section(), padding: `${SP.md}px ${SP.md + 2}px` }}
+    >
+      <SectionHeader icon={props.icon} title={props.title} extra={props.extra} style={{ marginBottom: SP.md }} />
+      {props.children}
+    </motion.section>
+  )
 }
 
-const track = (on: boolean): React.CSSProperties => ({
-  width: 38,
-  height: 22,
-  borderRadius: 999,
-  position: 'relative',
-  cursor: 'pointer',
-  transition: 'background .2s',
-  background: on ? 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))' : 'rgba(255,255,255,.12)'
-})
-const knob = (on: boolean): React.CSSProperties => ({
-  position: 'absolute',
-  top: 2,
-  left: on ? undefined : 2,
-  right: on ? 2 : undefined,
-  width: 18,
-  height: 18,
-  borderRadius: 999,
-  background: on ? '#fff' : 'rgba(255,255,255,.7)',
-  transition: 'all .2s',
-  boxShadow: '0 2px 5px rgba(0,0,0,.3)'
-})
-const inputStyle: React.CSSProperties = {
+/** 可折叠分区：整行标题可点击（chevron + 右侧摘要） */
+function CollapsibleSection(props: {
+  icon?: LucideIcon
+  title: React.ReactNode
+  summary?: React.ReactNode
+  open: boolean
+  onToggle: () => void
+  children?: React.ReactNode
+}) {
+  return (
+    <motion.section
+      variants={fadeScaleIn}
+      initial="initial"
+      animate="animate"
+      style={{ ...surface.section(), padding: `${SP.md}px ${SP.md + 2}px` }}
+    >
+      <div onClick={props.onToggle} style={{ cursor: 'pointer' }}>
+        <SectionHeader
+          icon={props.icon}
+          title={props.title}
+          style={{ marginBottom: props.open ? SP.md : 0 }}
+          extra={
+            <>
+              {props.summary}
+              <ChevronDown size={12} strokeWidth={2} style={{ color: ink(3), flex: 'none', transition: 'transform .2s', transform: props.open ? 'rotate(180deg)' : undefined }} />
+            </>
+          }
+        />
+      </div>
+      {props.open && props.children}
+    </motion.section>
+  )
+}
+
+/** 组内小标签 */
+const labelSm: React.CSSProperties = { fontSize: FS.tiny, fontWeight: 600, color: ink(2) }
+
+/** 密码类输入框（共享 Input 不支持 type=password）——样式与 surface.inset 对齐 */
+const secretInput: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
-  background: 'rgba(255,255,255,.05)',
-  border: '1px solid rgba(255,255,255,.1)',
-  borderRadius: 9,
-  color: 'oklch(0.95 0.01 var(--th))',
-  fontSize: 12,
-  fontFamily: 'ui-monospace,monospace',
-  padding: '8px 10px',
+  ...surface.inset(),
+  color: ink(1),
+  fontSize: FS.small,
+  fontFamily: "'Cascadia Code', Consolas, ui-monospace, monospace",
+  padding: '7px 10px',
   outline: 'none'
 }
 
@@ -246,36 +290,40 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: SP.lg }}>
       {/* 运行状态：把版本和关键链路从后台实现变成用户可见的健康度。 */}
-      <div style={{ paddingBottom: 14, borderBottom: '1px solid rgba(255,255,255,.08)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-          <div style={sectionTitle}>运行状态</div>
-          <span style={{ marginLeft: 'auto', color: 'oklch(0.72 0.02 var(--th) / .7)', fontSize: 10.5, fontFamily: 'ui-monospace,monospace' }}>
+      <Section
+        icon={Activity}
+        title="运行状态"
+        extra={
+          <span style={{ ...text.mono(FS.tiny), color: ink(3) }}>
             v{p.runtimeInfo?.version || '…'} · {p.runtimeInfo?.packaged ? '安装版' : '开发版'}
           </span>
-        </div>
+        }
+      >
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 18px' }}>
-          {statusItems.map((item) => (
-            <div key={item.label} style={{ display: 'grid', gridTemplateColumns: '8px minmax(0, 1fr)', columnGap: 8, alignItems: 'start', minWidth: 0 }}>
-              <span style={{ width: 7, height: 7, marginTop: 4, borderRadius: 999, background: item.ok ? 'oklch(0.78 0.14 150)' : 'oklch(0.75 0.13 75)', boxShadow: item.ok ? '0 0 8px oklch(0.72 0.14 150 / .45)' : '0 0 8px oklch(0.75 0.13 75 / .35)' }} />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ color: 'oklch(0.9 0.02 var(--th))', fontSize: 11.5, fontWeight: 650 }}>{item.label}</div>
-                <div title={item.detail} style={{ marginTop: 2, color: 'oklch(0.62 0.02 var(--th) / .65)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.detail}</div>
+          {statusItems.map((item) => {
+            const c = item.ok ? sem.calm : sem.warn
+            return (
+              <div key={item.label} style={{ display: 'grid', gridTemplateColumns: '8px minmax(0, 1fr)', columnGap: 8, alignItems: 'start', minWidth: 0 }}>
+                <span style={{ width: 7, height: 7, marginTop: 5, borderRadius: 999, background: c, boxShadow: `0 0 8px ${semBg(c, 0.45)}` }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ ...text.body(), fontSize: FS.small, fontWeight: 650 }}>{item.label}</div>
+                  <div title={item.detail} style={{ ...text.faint(), fontSize: 10, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.detail}</div>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
-      </div>
+      </Section>
 
       {/* 主题 */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={sectionTitle}>灵动岛主题</div>
-          <span style={{ flex: 1 }} />
-          <div className="hv" onClick={p.onOpenThemeDesigner} style={{ padding: '4px 11px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 600, background: 'oklch(0.35 0.07 var(--th) / .5)', color: 'oklch(0.85 calc(0.1 * var(--cs, 1)) var(--th))' }}>🎨 自定义主题</div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+      <Section
+        icon={Palette}
+        title="灵动岛主题"
+        extra={<Button sm variant="ghost" icon={Sparkles} onClick={p.onOpenThemeDesigner}>自定义主题</Button>}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: SP.sm }}>
           {[...p.customThemes, ...THEMES].map((t) => {
             const sel = p.theme === t.key
             const custom = t.key.startsWith('custom-')
@@ -285,107 +333,110 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                 className="hv"
                 onClick={() => p.onSetTheme(t.key)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 11, cursor: 'pointer', position: 'relative',
-                  background: sel ? 'oklch(0.3 0.05 var(--th) / .35)' : 'rgba(255,255,255,.04)',
-                  border: `1px solid ${sel ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.07)'}`
+                  display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: R.lg, cursor: 'pointer', position: 'relative',
+                  transition: 'background .18s, box-shadow .18s',
+                  background: sel ? semBg(accent(), 0.13) : fill(2),
+                  boxShadow: sel ? `0 4px 14px -8px ${accent(0.7, 0.4)}` : 'none'
                 }}
               >
-                <div style={{ width: 16, height: 16, flex: 'none', borderRadius: 999, background: t.dot, boxShadow: `0 0 8px ${t.dot}`, border: '1px solid rgba(255,255,255,.25)' }} />
+                <div style={{ width: 16, height: 16, flex: 'none', borderRadius: 999, background: t.dot, boxShadow: `0 0 8px ${t.dot}` }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
-                  <span style={{ color: sel ? 'oklch(0.95 0.01 var(--th))' : 'oklch(0.85 0.02 var(--th) / .85)', fontSize: 12, fontWeight: sel ? 700 : 500 }}>
-                    {custom ? '✨ ' : ''}{t.label}
-                    {sel && <span style={{ marginLeft: 6, fontSize: 9.5, color: 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))' }}>使用中</span>}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: sel ? ink(1) : ink(2), fontSize: FS.body, fontWeight: sel ? 700 : 500 }}>
+                    {custom && <Sparkles size={10} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />}
+                    {t.label}
+                    {sel && <span style={{ marginLeft: 2, fontSize: 9.5, fontWeight: 700, color: accent() }}>使用中</span>}
                   </span>
-                  <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.desc}</span>
+                  <span style={{ color: ink(3), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.desc}</span>
                 </div>
                 {custom && (
-                  <span style={{ flex: 'none', display: 'flex', gap: 2 }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-                    <span className="hv" title="编辑该主题（带入令牌到设计器）" onClick={() => p.onEditTheme(t.key)} style={{ padding: '4px 7px', borderRadius: 7, color: 'oklch(0.78 0.02 var(--th) / .8)', fontSize: 11.5, cursor: 'pointer' }}>✎</span>
-                    <span className="hv" title="删除自定义主题" onClick={() => p.onDeleteCustomTheme(t.key)} style={{ padding: '4px 7px', borderRadius: 7, color: 'oklch(0.65 0.08 25 / .9)', fontSize: 11.5, cursor: 'pointer', background: 'rgba(255,255,255,.04)' }}>✕</span>
+                  <span style={{ flex: 'none', display: 'flex', gap: 3 }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                    <IconButton icon={Pencil} size={22} title="编辑该主题（带入令牌到设计器）" onClick={() => p.onEditTheme(t.key)} />
+                    <IconButton icon={X} size={22} color={sem.danger} title="删除自定义主题" onClick={() => p.onDeleteCustomTheme(t.key)} />
                   </span>
                 )}
               </div>
             )
           })}
         </div>
-      </div>
+      </Section>
 
       {/* 通用 */}
-      <div>
-        <div style={sectionTitle}>通用</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+      <Section icon={Settings2} title="通用">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* 灵动岛宽度：标准模式面板宽（大尺寸模式固定 880）；迷你条宽度自动同步 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ color: 'oklch(0.88 0.02 var(--th) / .9)', fontSize: 12.5, flex: 'none', whiteSpace: 'nowrap' }}>灵动岛宽度</span>
-              <span style={{ marginLeft: 'auto', color: 'oklch(0.75 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{p.islandWidth}px</span>
+              <span style={text.body()}>灵动岛宽度</span>
+              <span style={{ marginLeft: 'auto', ...text.num(FS.small), color: accent(0.78) }}>{p.islandWidth}px</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9.5, flex: 'none' }}>380</span>
-              <input type="range" min={380} max={880} step={10} value={p.islandWidth} onChange={(e) => p.onSetIslandWidth(Number(e.target.value))} style={{ flex: 1, accentColor: 'oklch(0.75 calc(0.14 * var(--cs, 1)) var(--th))' }} />
-              <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9.5, flex: 'none' }}>880</span>
+              <span style={{ ...text.faint(), fontSize: 9.5, flex: 'none' }}>380</span>
+              <Slider min={380} max={880} step={10} value={p.islandWidth} onChange={(v) => p.onSetIslandWidth(v)} style={{ flex: 1 }} />
+              <span style={{ ...text.faint(), fontSize: 9.5, flex: 'none' }}>880</span>
             </div>
-            <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 10.5 }}>标准模式生效（大尺寸固定 880）</span>
+            <span style={text.faint()}>标准模式生效（大尺寸固定 880）</span>
           </div>
           {/* 界面字体与缩放（清晰度） */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ color: 'oklch(0.88 0.02 var(--th) / .9)', fontSize: 12.5 }}>界面字体</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <span style={text.body()}>界面字体</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {FONT_OPTIONS.map((f) => (
-                <div key={f.key} className="hv" onClick={() => p.onSetFontChoice(f.key)} style={{ padding: '5px 12px', borderRadius: 999, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: p.fontChoice === f.key ? 'oklch(0.3 0.05 var(--th) / .5)' : 'rgba(255,255,255,.05)', border: `1px solid ${p.fontChoice === f.key ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.08)'}`, color: 'oklch(0.86 0.02 var(--th) / .9)' }}>
+                <Chip key={f.key} active={p.fontChoice === f.key} onClick={() => p.onSetFontChoice(f.key)}>
                   {f.label}
-                </div>
+                </Chip>
               ))}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: 'oklch(0.88 0.02 var(--th) / .9)', fontSize: 12.5, flex: 'none' }}>界面缩放</span>
-              <input type="range" min={0.9} max={1.3} step={0.05} value={p.uiZoom} onChange={(e) => p.onSetUiZoom(Number(e.target.value))} style={{ flex: 1, accentColor: 'oklch(0.75 calc(0.14 * var(--cs, 1)) var(--th))' }} />
-              <span style={{ color: 'oklch(0.75 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 11, fontVariantNumeric: 'tabular-nums', flex: 'none' }}>{Math.round(p.uiZoom * 100)}%</span>
+              <span style={{ ...text.body(), flex: 'none' }}>界面缩放</span>
+              <Slider min={0.9} max={1.3} step={0.05} value={p.uiZoom} onChange={(v) => p.onSetUiZoom(v)} style={{ flex: 1 }} />
+              <span style={{ ...text.num(FS.small), color: accent(0.78), flex: 'none' }}>{Math.round(p.uiZoom * 100)}%</span>
             </div>
-            <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 10.5 }}>透明窗口没有亚像素渲染，小字发虚是系统限制——调大缩放 / 换微软雅黑 UI 可明显改善</span>
+            <span style={text.faint()}>透明窗口没有亚像素渲染，小字发虚是系统限制——调大缩放 / 换微软雅黑 UI 可明显改善</span>
           </div>
+          {/* 开关设置行：iOS inset grouped 分组列表（行间 hairline 分隔） */}
+          <Group>
           {GENERAL.map((g) => {
             const isSound = g.key === 'sound'
             const isMonitor = g.key === 'multiMonitor'
             const canExpand = (isSound && p.settings.sound) || isMonitor
             const expanded = (isSound && p.soundPickerOpen) || (isMonitor && p.monitorPreviewOpen)
             return (
-              <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 9, padding: '10px 12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                   <div
-                    style={{ display: 'flex', flexDirection: 'column', gap: 1, cursor: canExpand ? 'pointer' : undefined }}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, cursor: canExpand ? 'pointer' : undefined }}
                     onClick={() => (isSound ? p.onToggleSoundPicker() : isMonitor ? p.onToggleMonitorPreview() : undefined)}
                   >
-                    <span style={{ color: 'oklch(0.88 0.02 var(--th) / .9)', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ ...text.body(), display: 'flex', alignItems: 'center', gap: 6 }}>
                       {g.label}
-                      {(isSound || isMonitor) && <span style={{ color: 'oklch(0.7 0.02 var(--th) / .6)', fontSize: 10, transition: 'transform .2s', transform: expanded ? 'rotate(180deg)' : undefined }}>▾</span>}
+                      {(isSound || isMonitor) && <ChevronDown size={11} strokeWidth={2} style={{ color: ink(3), transition: 'transform .2s', transform: expanded ? 'rotate(180deg)' : undefined }} />}
                     </span>
-                    <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 10.5 }}>{g.desc}</span>
+                    <span style={text.faint()}>{g.desc}</span>
                   </div>
-                  <div style={track(p.settings[g.key])} onClick={() => p.onToggle(g.key)}>
-                    <div style={knob(p.settings[g.key])} />
-                  </div>
+                  <Switch on={p.settings[g.key]} onChange={() => p.onToggle(g.key)} />
                 </div>
 
                 {isSound && p.soundPickerOpen && p.settings.sound && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 11, borderRadius: 13, background: 'rgba(0,0,0,.22)' }}>
-                    <div style={{ color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 10, lineHeight: 1.5 }}>不同类型的通知用不同声效，听声辨事。点音色即选中并试听，▶ 单独试听。</div>
+                  <div style={{ ...surface.inset(), display: 'flex', flexDirection: 'column', gap: 12, padding: SP.md }}>
+                    <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.5 }}>不同类型的通知用不同声效，听声辨事。点音色即选中并试听，▶ 单独试听。</div>
                     {SOUND_TYPES.map((st2) => (
                       <div key={st2.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
-                          <span style={{ color: st2.key === 'danger' ? 'oklch(0.82 0.14 30)' : 'oklch(0.9 0.01 var(--th))', fontSize: 11.5, fontWeight: 700, flex: 'none' }}>
-                            {st2.key === 'danger' ? '⚠ ' : ''}{st2.label}
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: st2.key === 'danger' ? sem.danger : ink(1), fontSize: FS.small, fontWeight: 700, flex: 'none' }}>
+                            {st2.key === 'danger' && <TriangleAlert size={11} strokeWidth={2} />}{st2.label}
                           </span>
-                          <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{st2.desc}</span>
+                          <span style={{ ...text.faint(), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{st2.desc}</span>
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                           {SOUNDS.map((snd) => {
                             const sel = p.soundMap[st2.key] === snd.key
                             return (
-                              <div key={snd.key} className="hv" onClick={() => p.onSetSound(st2.key, snd.key)} title={snd.desc} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3.5px 9px', borderRadius: 999, cursor: 'pointer', background: sel ? 'oklch(0.32 calc(0.06 * var(--cs, 1)) var(--th) / .55)' : 'rgba(255,255,255,.04)', border: `1px solid ${sel ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.07)'}` }}>
-                                <span style={{ color: sel ? 'oklch(0.94 0.01 var(--th))' : 'oklch(0.75 0.02 var(--th) / .75)', fontSize: 10.5, fontWeight: sel ? 700 : 500 }}>{snd.label}</span>
-                                <span className="hv" onClick={(e) => p.onPreviewSound(e, snd.key)} title="试听" style={{ color: 'oklch(0.8 calc(0.1 * var(--cs, 1)) var(--th) / .8)', fontSize: 8.5, cursor: 'pointer' }}>▶</span>
-                              </div>
+                              <Chip key={snd.key} active={sel} title={snd.desc} onClick={() => p.onSetSound(st2.key, snd.key)} style={{ fontSize: FS.tiny }}>
+                                {snd.label}
+                                <span className="hv" onClick={(e) => p.onPreviewSound(e, snd.key)} title="试听" style={{ display: 'inline-flex', color: accent(0.8, 0.85), cursor: 'pointer' }}>
+                                  <Play size={8} strokeWidth={2} fill="currentColor" />
+                                </span>
+                              </Chip>
                             )
                           })}
                         </div>
@@ -395,17 +446,22 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                 )}
 
                 {isMonitor && p.monitorPreviewOpen && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 11, borderRadius: 13, background: 'rgba(0,0,0,.22)' }}>
-                    <div style={{ color: 'oklch(0.68 0.02 var(--th) / .7)', fontSize: 10.5 }}>面板会出现在下面选中的显示器顶部中央：</div>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      {[1, 2].map((n) => {
+                  <div style={{ ...surface.inset(), display: 'flex', flexDirection: 'column', gap: 8, padding: SP.md }}>
+                    <div style={{ ...text.faint(), color: ink(2) }}>面板会出现在下面选中的显示器顶部中央：</div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {(p.displays.length ? p.displays : [{ id: 0, index: 0, label: '主显示器', primary: true, width: 0, height: 0, scaleFactor: 1 }]).map((d) => {
+                        const n = d.index + 1
                         const active = p.activeMonitor === n
+                        const ar = d.width && d.height ? d.width / d.height : 16 / 10
                         return (
-                          <div key={n} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'center', cursor: 'pointer' }} onClick={() => p.onSetMonitor(n)}>
-                            <div style={{ width: '100%', aspectRatio: '16/10', borderRadius: 7, background: active ? 'oklch(0.28 0.05 var(--th) / .5)' : 'rgba(255,255,255,.04)', border: `1.5px solid ${active ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .55)' : 'rgba(255,255,255,.08)'}`, position: 'relative', transition: 'all .18s' }}>
-                              {active && <div style={{ position: 'absolute', top: 5, left: '50%', transform: 'translateX(-50%)', width: '38%', height: 7, borderRadius: '0 0 6px 6px', background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.6 calc(0.15 * var(--cs, 1)) var(--th)))', boxShadow: '0 0 10px oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .6)' }} />}
+                          <div key={d.id} style={{ flex: '1 1 120px', maxWidth: 220, display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'center', cursor: 'pointer' }} onClick={() => p.onSetMonitor(n)}>
+                            <div style={{ width: '100%', aspectRatio: String(ar), borderRadius: R.sm, background: active ? semBg(accent(), 0.14) : fill(2), border: `0.5px solid ${active ? accent(0.7, 0.55) : hairline(0.06)}`, position: 'relative', transition: 'all .18s' }}>
+                              {active && <div style={{ position: 'absolute', top: 5, left: '50%', transform: 'translateX(-50%)', width: '38%', height: 7, borderRadius: '0 0 6px 6px', background: gradient.primary(), boxShadow: `0 0 10px ${accent(0.78, 0.6)}` }} />}
                             </div>
-                            <span style={{ color: active ? 'oklch(0.88 0.02 var(--th))' : 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 11, fontWeight: 500 }}>{n === 1 ? '主显示器' : '副显示器'}</span>
+                            <span style={{ color: active ? ink(1) : ink(3), fontSize: 11, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 5 }}>
+                              {d.primary ? '主显示器' : `显示器 ${n}`}
+                              {d.width > 0 && <span style={{ ...text.faint(), fontSize: 9 }}>{d.width}×{d.height}{d.scaleFactor !== 1 ? ` · ${Math.round(d.scaleFactor * 100)}%` : ''}</span>}
+                            </span>
                           </div>
                         )
                       })}
@@ -415,298 +471,326 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
               </div>
             )
           })}
-          {/* 自动化规则：当 X 则 Y */}
-          <div style={{ marginTop: 4, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.06)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ color: 'oklch(0.7 calc(0.08 * var(--cs, 1)) var(--th) / .8)', fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em' }}>⚙ 自动化 · 当 X 则 Y</div>
-            {AUTOMATION.map((r) => (
-              <div key={r.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  <span style={{ color: 'oklch(0.88 0.02 var(--th) / .9)', fontSize: 12.5 }}>{r.label}</span>
-                  <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 10.5 }}>{r.desc}</span>
+          </Group>
+          {/* 自动化规则：当 X 则 Y（inset grouped 行列表） */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: accent(0.75, 0.85), fontSize: FS.tiny, fontWeight: 700, letterSpacing: '.04em' }}>
+              <Wrench size={11} strokeWidth={2} />自动化 · 当 X 则 Y
+            </div>
+            <Group>
+              {AUTOMATION.map((r) => (
+                <div key={r.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                    <span style={text.body()}>{r.label}</span>
+                    <span style={text.faint()}>{r.desc}</span>
+                  </div>
+                  <Switch on={p.settings[r.key]} onChange={() => p.onToggle(r.key)} />
                 </div>
-                <div style={track(p.settings[r.key])} onClick={() => p.onToggle(r.key)}>
-                  <div style={knob(p.settings[r.key])} />
-                </div>
-              </div>
-            ))}
+              ))}
+            </Group>
           </div>
         </div>
-      </div>
+      </Section>
 
       {/* 问答助手模型 */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: 9 }} onClick={p.onToggleLlm}>
-          <div style={{ font: "600 10.5px 'Segoe UI',sans-serif", letterSpacing: '.06em', textTransform: 'uppercase', color: 'oklch(0.65 0.02 var(--th) / .6)' }}>问答助手模型</div>
-          <span style={{ color: 'oklch(0.7 0.02 var(--th) / .6)', fontSize: 10, transition: 'transform .2s', transform: p.llm.open ? 'rotate(180deg)' : undefined }}>▾</span>
-          <span style={{ marginLeft: 'auto', color: 'oklch(0.72 calc(0.08 * var(--cs, 1)) var(--th) / .8)', fontSize: 10.5 }}>{llmSummary}</span>
-        </div>
-        {p.llm.open && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 12, borderRadius: 14, background: 'rgba(0,0,0,.22)' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={labelSm}>供应商</div>
+      <CollapsibleSection
+        icon={MessageSquare}
+        title="问答助手模型"
+        open={p.llm.open}
+        onToggle={p.onToggleLlm}
+        summary={<span style={{ ...text.faint(), color: accent(0.75, 0.85) }}>{llmSummary}</span>}
+      >
+        <div style={{ ...surface.inset(), borderRadius: R.lg, display: 'flex', flexDirection: 'column', gap: 12, padding: SP.md }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={labelSm}>供应商</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {PROVIDERS.map((pr) => (
+                <Chip key={pr.key} active={pr.key === p.llm.provider} onClick={() => p.onSetProvider(pr.key)}>
+                  {pr.label}
+                </Chip>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={labelSm}>型号（每家可添加多个 · 点选使用 · 问答界面可随时切换）</div>
+            {(p.llm.modelLists[p.llm.provider] || []).length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {PROVIDERS.map((pr) => {
-                  const sel = pr.key === p.llm.provider
+                {(p.llm.modelLists[p.llm.provider] || []).map((m) => {
+                  const sel = m === p.llm.model
                   return (
-                    <div key={pr.key} onClick={() => p.onSetProvider(pr.key)} style={{ padding: '6px 11px', borderRadius: 9, background: sel ? 'oklch(0.3 0.05 var(--th) / .4)' : 'rgba(255,255,255,.04)', border: `1px solid ${sel ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.08)'}`, color: sel ? 'oklch(0.94 0.01 var(--th))' : 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 11.5, fontWeight: 500, cursor: 'pointer', transition: 'all .15s' }}>
-                      {pr.label}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={labelSm}>型号（每家可添加多个 · 点选使用 · 问答界面可随时切换）</div>
-              {(p.llm.modelLists[p.llm.provider] || []).length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {(p.llm.modelLists[p.llm.provider] || []).map((m) => {
-                    const sel = m === p.llm.model
-                    return (
-                      <div key={m} onClick={() => p.onPickModel(m)} className="hv" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: 8, background: sel ? 'oklch(0.3 0.05 var(--th) / .4)' : 'rgba(255,255,255,.04)', border: `1px solid ${sel ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.08)'}`, cursor: 'pointer' }}>
-                        <span style={{ color: sel ? 'oklch(0.94 0.01 var(--th))' : 'oklch(0.75 0.02 var(--th) / .75)', fontSize: 11, fontFamily: 'ui-monospace,monospace' }}>{m}</span>
-                        {sel && <span style={{ color: 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))', fontSize: 9, fontWeight: 700 }}>使用中</span>}
-                        <span onClick={(e) => { e.stopPropagation(); p.onRemoveModel(m) }} title="删除此型号" style={{ color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 11, cursor: 'pointer' }}>✕</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input
-                  value={modelDraft}
-                  onChange={(e) => setModelDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && modelDraft.trim()) { p.onAddModel(modelDraft.trim()); setModelDraft('') } }}
-                  placeholder="输入 model id 添加，如 deepseek-v4-pro"
-                  style={{ ...inputStyle, flex: 1 }}
-                />
-                <div
-                  className="hv"
-                  onClick={() => { if (modelDraft.trim()) { p.onAddModel(modelDraft.trim()); setModelDraft('') } }}
-                  style={{ padding: '8px 14px', borderRadius: 9, background: modelDraft.trim() ? 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))' : 'rgba(255,255,255,.06)', color: modelDraft.trim() ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 12, fontWeight: 700, cursor: modelDraft.trim() ? 'pointer' : 'default', whiteSpace: 'nowrap' }}
-                >
-                  ＋ 添加
-                </div>
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={labelSm}>Base URL</div>
-              <input value={p.llm.baseUrl} onChange={(e) => p.onSetLlmField('baseUrl', e.target.value)} placeholder="https://api.example.com/v1" style={inputStyle} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={labelSm}>API Key</div>
-              <input value={p.llm.apiKey} onChange={(e) => p.onSetLlmField('apiKey', e.target.value)} type="password" placeholder="sk-••••••••••••" style={inputStyle} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div onClick={p.onTestLlm} style={{ padding: '7px 14px', borderRadius: 999, background: p.llm.testStatus === 'testing' ? 'oklch(0.7 calc(0.06 * var(--cs, 1)) var(--th))' : 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-                {p.llm.testStatus === 'testing' && <span style={{ display: 'inline-block', width: 11, height: 11, border: '2px solid oklch(0.14 0.02 var(--th) / .3)', borderTopColor: 'oklch(0.14 0.02 var(--th))', borderRadius: 999, animation: 'ai-ring .7s linear infinite' }} />}
-                测试连通性
-              </div>
-              {p.llm.testMsg && <span style={{ color: p.llm.testStatus === 'ok' ? 'oklch(0.8 calc(0.14 * var(--cs, 1)) var(--th))' : p.llm.testStatus === 'fail' ? 'oklch(0.72 0.15 30)' : 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 11, flex: 1 }}>{p.llm.testMsg}</span>}
-            </div>
-            <div style={{ height: 1, background: 'rgba(255,255,255,.07)' }} />
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={labelSm}>已保存的配置</div>
-              <div onClick={p.onSaveLlm} style={{ padding: '5px 11px', borderRadius: 999, background: 'rgba(255,255,255,.06)', color: 'oklch(0.85 calc(0.06 * var(--cs, 1)) var(--th))', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>＋ 保存当前</div>
-            </div>
-            {p.llm.saved.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {p.llm.saved.map((c) => {
-                  const active = c.provider === p.llm.provider && c.model === p.llm.model && c.baseUrl === p.llm.baseUrl
-                  return (
-                    <div key={c.id} onClick={() => p.onLoadLlm(c.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 10, background: active ? 'oklch(0.3 0.05 var(--th) / .3)' : 'rgba(255,255,255,.03)', border: `1px solid ${active ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .4)' : 'rgba(255,255,255,.06)'}`, cursor: 'pointer' }}>
-                      <div style={{ width: 6, height: 6, borderRadius: 999, background: active ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))' : 'oklch(0.5 0.02 var(--th) / .5)' }} />
-                      <span style={{ color: 'oklch(0.88 0.02 var(--th) / .9)', fontSize: 11.5, fontFamily: "ui-monospace,'Cascadia Code',monospace", flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                      {active && <span style={{ color: 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))', fontSize: 10, fontWeight: 700 }}>使用中</span>}
-                      <span onClick={(e) => { e.stopPropagation(); p.onDeleteLlm(c.id) }} style={{ color: 'oklch(0.65 0.02 var(--th) / .55)', fontSize: 12, cursor: 'pointer' }}>✕</span>
+                    <div key={m} onClick={() => p.onPickModel(m)} className="hv" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: R.sm, background: sel ? semBg(accent(), 0.14) : fill(2), border: sel ? `0.5px solid ${accent(0.7, 0.5)}` : 'none', cursor: 'pointer' }}>
+                      <span style={{ ...text.mono(11), color: sel ? ink(1) : ink(2) }}>{m}</span>
+                      {sel && <span style={{ color: accent(), fontSize: 9, fontWeight: 700 }}>使用中</span>}
+                      <span onClick={(e) => { e.stopPropagation(); p.onRemoveModel(m) }} title="删除此型号" style={{ display: 'inline-flex', color: ink(3), cursor: 'pointer' }}>
+                        <X size={11} strokeWidth={2} />
+                      </span>
                     </div>
                   )
                 })}
               </div>
             )}
-            <div style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 10, lineHeight: 1.5 }}>仅用于「问答助手」。Agent（Claude Code / Codex）的模型在各自 CLI 中已配置，此处不涉及。兼容 OpenAI Chat Completions 协议的服务均可接入，密钥仅保存在本机。</div>
-          </div>
-        )}
-      </div>
-
-      {/* 飞书日历（CalDAV 主通道 / ICS 备选）—— 可折叠；标题固定横排不换行 */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: calOpen ? 9 : 0, minWidth: 0 }} onClick={() => setCalOpen((v) => !v)}>
-          <div style={{ flex: 'none', whiteSpace: 'nowrap', font: "600 10.5px 'Segoe UI',sans-serif", letterSpacing: '.06em', textTransform: 'uppercase', color: 'oklch(0.65 0.02 var(--th) / .6)' }}>飞书日历</div>
-          <span style={{ flex: 'none', color: 'oklch(0.7 0.02 var(--th) / .6)', fontSize: 10, transition: 'transform .2s', transform: calOpen ? 'rotate(180deg)' : undefined }}>▾</span>
-          <span style={{ marginLeft: 'auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: p.calMsg.startsWith('同步失败') ? 'oklch(0.72 0.15 30)' : 'oklch(0.72 calc(0.08 * var(--cs, 1)) var(--th) / .8)', fontSize: 10.5 }}>
-            {p.caldav.server || p.icsUrl ? (p.calMsg || '已配置') : '未配置'}
-          </span>
-        </div>
-        {calOpen && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={labelSm}>CalDAV 同步（推荐 · 飞书官方支持）</div>
-          <input value={cdDraft.server} onChange={(e) => setCdDraft((d) => ({ ...d, server: e.target.value }))} placeholder="服务器地址，如 https://caldav.feishu.cn" style={inputStyle} />
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input value={cdDraft.username} onChange={(e) => setCdDraft((d) => ({ ...d, username: e.target.value }))} placeholder="用户名" style={{ ...inputStyle, flex: 1 }} />
-            <input value={cdDraft.password} onChange={(e) => setCdDraft((d) => ({ ...d, password: e.target.value }))} type="password" placeholder="密码" style={{ ...inputStyle, flex: 1 }} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div
-              className="hv"
-              onClick={() => p.onSetCaldav({ server: cdDraft.server.trim(), username: cdDraft.username.trim(), password: cdDraft.password })}
-              style={{ padding: '7px 16px', borderRadius: 999, background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              保存并同步
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Input
+                value={modelDraft}
+                onChange={setModelDraft}
+                onKeyDown={(e) => { if (e.key === 'Enter' && modelDraft.trim()) { p.onAddModel(modelDraft.trim()); setModelDraft('') } }}
+                placeholder="输入 model id 添加，如 deepseek-v4-pro"
+                style={{ flex: 1, minWidth: 0 }}
+              />
+              <Button
+                variant="primary"
+                icon={Plus}
+                disabled={!modelDraft.trim()}
+                onClick={() => { if (modelDraft.trim()) { p.onAddModel(modelDraft.trim()); setModelDraft('') } }}
+              >
+                添加
+              </Button>
             </div>
-            {p.calMsg && <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: p.calMsg.startsWith('同步失败') ? 'oklch(0.72 0.15 30)' : 'oklch(0.78 calc(0.14 * var(--cs, 1)) var(--th))', fontSize: 10.5 }}>{p.calMsg}</span>}
           </div>
-          <div style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 10, lineHeight: 1.6 }}>
-            获取方式：飞书 PC 端 → 右上角<b style={{ color: 'oklch(0.75 0.02 var(--th) / .8)' }}>个人头像 → 设置 → 日历 → CalDAV 同步</b> → 选设备类型（Windows/其他）→ 点「生成」，把 服务器地址/用户名/密码 填到上面。今日会议显示在「待办」页顶部（含一键入会），会前 5 分钟弹岛提醒，每 10 分钟刷新。密码仅加密存本机。
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={labelSm}>Base URL</div>
+            <Input value={p.llm.baseUrl} onChange={(v) => p.onSetLlmField('baseUrl', v)} placeholder="https://api.example.com/v1" />
           </div>
-          <div style={{ height: 1, background: 'rgba(255,255,255,.06)' }} />
-          <div style={labelSm}>ICS 订阅链接（备选 · 部分企业不开放）</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input value={icsDraft} onChange={(e) => setIcsDraft(e.target.value)} placeholder="webcal:// 或 https://…/xxx.ics" style={{ ...inputStyle, flex: 1 }} />
-            <div className="hv" onClick={() => p.onSetIcsUrl(icsDraft.trim())} style={{ padding: '8px 12px', borderRadius: 9, background: 'rgba(255,255,255,.06)', color: 'oklch(0.8 0.02 var(--th) / .85)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>保存</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={labelSm}>API Key</div>
+            <input value={p.llm.apiKey} onChange={(e) => p.onSetLlmField('apiKey', e.target.value)} type="password" placeholder="sk-••••••••••••" style={secretInput} />
           </div>
-        </div>
-        )}
-      </div>
-
-      {/* 常驻迷你条自定义 —— 可折叠；标题固定横排 */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: barOpen ? 9 : 0, minWidth: 0 }} onClick={() => setBarOpen((v) => !v)}>
-          <div style={{ flex: 'none', whiteSpace: 'nowrap', font: "600 10.5px 'Segoe UI',sans-serif", letterSpacing: '.06em', textTransform: 'uppercase', color: 'oklch(0.65 0.02 var(--th) / .6)' }}>常驻迷你条</div>
-          <span style={{ flex: 'none', color: 'oklch(0.7 0.02 var(--th) / .6)', fontSize: 10, transition: 'transform .2s', transform: barOpen ? 'rotate(180deg)' : undefined }}>▾</span>
-          <span style={{ marginLeft: 'auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'oklch(0.72 calc(0.08 * var(--cs, 1)) var(--th) / .8)', fontSize: 10.5 }}>
-            {p.settings.ambientBar ? `已开启 · ${p.barCfg.modes.length} 种内容` : '未开启（在上方通用里开启）'}
-          </span>
-        </div>
-        {barOpen && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 14, background: 'rgba(0,0,0,.22)' }}>
-            <div style={labelSm}>轮播内容（多选，每 11 秒切换）</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {BAR_MODES.map((m) => {
-                const on = p.barCfg.modes.includes(m.key)
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Button variant="primary" onClick={p.onTestLlm}>
+              {p.llm.testStatus === 'testing' && <span style={{ display: 'inline-block', width: 11, height: 11, border: '2px solid rgba(0,0,0,.25)', borderTopColor: gradient.onPrimary(), borderRadius: 999, animation: 'ai-ring .7s linear infinite' }} />}
+              测试连通性
+            </Button>
+            {p.llm.testMsg && <span style={{ color: p.llm.testStatus === 'ok' ? accent(0.8) : p.llm.testStatus === 'fail' ? sem.danger : ink(2), fontSize: 11, flex: 1 }}>{p.llm.testMsg}</span>}
+          </div>
+          <div style={separatorRow()} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={labelSm}>已保存的配置</div>
+            <Button sm variant="ghost" icon={Plus} onClick={p.onSaveLlm}>保存当前</Button>
+          </div>
+          {p.llm.saved.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {p.llm.saved.map((c) => {
+                const active = c.provider === p.llm.provider && c.model === p.llm.model && c.baseUrl === p.llm.baseUrl
                 return (
-                  <div
-                    key={m.key}
-                    className="hv"
-                    onClick={() => p.onSetBarCfg({ ...p.barCfg, modes: on ? p.barCfg.modes.filter((x) => x !== m.key) : [...p.barCfg.modes, m.key] })}
-                    style={{ padding: '5px 11px', borderRadius: 999, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: on ? 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))' : 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.08)', color: on ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.75 0.02 var(--th) / .75)' }}
-                  >
-                    {m.label}
+                  <div key={c.id} onClick={() => p.onLoadLlm(c.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: R.sm, background: active ? semBg(accent(), 0.1) : fill(1), border: active ? `0.5px solid ${accent(0.7, 0.4)}` : 'none', cursor: 'pointer' }}>
+                    <div style={{ width: 6, height: 6, borderRadius: 999, background: active ? accent() : ink(4), boxShadow: active ? `0 0 6px ${accent()}` : 'none' }} />
+                    <span style={{ ...text.mono(FS.small), color: ink(1), flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    {active && <span style={{ color: accent(), fontSize: 10, fontWeight: 700 }}>使用中</span>}
+                    <span onClick={(e) => { e.stopPropagation(); p.onDeleteLlm(c.id) }} style={{ display: 'inline-flex', color: ink(3), cursor: 'pointer' }}>
+                      <X size={12} strokeWidth={2} />
+                    </span>
                   </div>
                 )
               })}
             </div>
-            <div style={labelSm}>迷你条宽度 · {p.barCfg.width || 340}px（独立于灵动岛宽度；超长文字自动滚动）</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9.5, flex: 'none' }}>240</span>
-              <input type="range" min={240} max={880} step={10} value={p.barCfg.width || 340} onChange={(e) => p.onSetBarCfg({ ...p.barCfg, width: Number(e.target.value) })} style={{ flex: 1, accentColor: 'oklch(0.75 calc(0.14 * var(--cs, 1)) var(--th))' }} />
-              <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9.5, flex: 'none' }}>880</span>
+          )}
+          <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.5 }}>仅用于「问答助手」。Agent（Claude Code / Codex）的模型在各自 CLI 中已配置，此处不涉及。兼容 OpenAI Chat Completions 协议的服务均可接入，密钥仅保存在本机。</div>
+        </div>
+      </CollapsibleSection>
+
+      {/* 飞书日历（CalDAV 主通道 / ICS 备选）—— 可折叠；标题固定横排不换行 */}
+      <CollapsibleSection
+        icon={CalendarClock}
+        title="飞书日历"
+        open={calOpen}
+        onToggle={() => setCalOpen((v) => !v)}
+        summary={
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: FS.tiny, color: p.calMsg.startsWith('同步失败') ? sem.danger : accent(0.75, 0.85) }}>
+            {p.caldav.server || p.icsUrl ? (p.calMsg || '已配置') : '未配置'}
+          </span>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={labelSm}>CalDAV 同步（推荐 · 飞书官方支持）</div>
+          <Input value={cdDraft.server} onChange={(v) => setCdDraft((d) => ({ ...d, server: v }))} placeholder="服务器地址，如 https://caldav.feishu.cn" />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Input value={cdDraft.username} onChange={(v) => setCdDraft((d) => ({ ...d, username: v }))} placeholder="用户名" style={{ flex: 1, minWidth: 0 }} />
+            <input value={cdDraft.password} onChange={(e) => setCdDraft((d) => ({ ...d, password: e.target.value }))} type="password" placeholder="密码" style={{ ...secretInput, flex: 1 }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Button variant="primary" onClick={() => p.onSetCaldav({ server: cdDraft.server.trim(), username: cdDraft.username.trim(), password: cdDraft.password })}>
+              保存并同步
+            </Button>
+            {p.calMsg && <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: FS.tiny, color: p.calMsg.startsWith('同步失败') ? sem.danger : accent(0.8) }}>{p.calMsg}</span>}
+          </div>
+          <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.6 }}>
+            获取方式：飞书 PC 端 → 右上角<b style={{ color: ink(2) }}>个人头像 → 设置 → 日历 → CalDAV 同步</b> → 选设备类型（Windows/其他）→ 点「生成」，把 服务器地址/用户名/密码 填到上面。今日会议显示在「待办」页顶部（含一键入会），会前 5 分钟弹岛提醒，每 10 分钟刷新。密码仅加密存本机。
+          </div>
+          <div style={separatorRow()} />
+          <div style={labelSm}>ICS 订阅链接（备选 · 部分企业不开放）</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Input value={icsDraft} onChange={setIcsDraft} placeholder="webcal:// 或 https://…/xxx.ics" style={{ flex: 1, minWidth: 0 }} />
+            <Button variant="ghost" onClick={() => p.onSetIcsUrl(icsDraft.trim())}>保存</Button>
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      {/* 常驻迷你条自定义 —— 可折叠；标题固定横排 */}
+      <CollapsibleSection
+        icon={PanelTop}
+        title="常驻迷你条"
+        open={barOpen}
+        onToggle={() => setBarOpen((v) => !v)}
+        summary={
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: FS.tiny, color: accent(0.75, 0.85) }}>
+            {p.settings.ambientBar ? `已开启 · ${p.barCfg.modes.length} 种内容` : '未开启（在上方通用里开启）'}
+          </span>
+        }
+      >
+        <div style={{ ...surface.inset(), borderRadius: R.lg, display: 'flex', flexDirection: 'column', gap: 10, padding: SP.md }}>
+          <div style={labelSm}>轮播内容（多选，每 {p.barCfg.rotationSeconds || 12} 秒切换）</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {BAR_MODES.map((m) => {
+              const on = p.barCfg.modes.includes(m.key)
+              return (
+                <Chip key={m.key} active={on} onClick={() => p.onSetBarCfg({ ...p.barCfg, modes: on ? p.barCfg.modes.filter((x) => x !== m.key) : [...p.barCfg.modes, m.key] })}>
+                  {m.label}
+                </Chip>
+              )
+            })}
+          </div>
+          <div style={labelSm}>迷你条宽度 · {p.barCfg.width || 340}px（独立于灵动岛宽度；超长文字自动滚动）</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ ...text.faint(), fontSize: 9.5, flex: 'none' }}>240</span>
+            <Slider min={240} max={880} step={10} value={p.barCfg.width || 340} onChange={(v) => p.onSetBarCfg({ ...p.barCfg, width: v })} style={{ flex: 1 }} />
+            <span style={{ ...text.faint(), fontSize: 9.5, flex: 'none' }}>880</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 10 }}>
+            <div>
+              <div style={{ ...labelSm, marginBottom: 6 }}>条体外观</div>
+              <Segmented
+                options={BAR_APPEARANCES.map((item) => ({ key: item.key, label: item.label, icon: item.icon }))}
+                value={p.barCfg.appearance || 'glass'}
+                onChange={(k) => p.onSetBarCfg({ ...p.barCfg, appearance: k })}
+                style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', justifyItems: 'center', width: '100%' }}
+              />
             </div>
-            <div style={{ color: 'oklch(0.55 0.02 var(--th) / .55)', fontSize: 10, lineHeight: 1.5 }}>文字一律白色，彩色只用于光效；文字/时钟/音乐可与小宠物叠加显示。</div>
-            <div style={labelSm}>颜色</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              {([['theme', '跟随主题'], ['rainbow', '多彩'], ['custom', '自定义']] as const).map(([k, label]) => (
-                <div key={k} className="hv" onClick={() => p.onSetBarCfg({ ...p.barCfg, colorMode: k })} style={{ padding: '5px 11px', borderRadius: 999, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: p.barCfg.colorMode === k ? 'oklch(0.3 0.05 var(--th) / .5)' : 'rgba(255,255,255,.05)', border: `1px solid ${p.barCfg.colorMode === k ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.08)'}`, color: 'oklch(0.85 0.02 var(--th) / .9)' }}>
-                  {label}
-                </div>
-              ))}
-              {p.barCfg.colorMode === 'custom' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 150 }}>
-                  <input type="range" min={0} max={360} value={p.barCfg.hue} onChange={(e) => p.onSetBarCfg({ ...p.barCfg, hue: Number(e.target.value) })} style={{ flex: 1, accentColor: `oklch(0.7 0.15 ${p.barCfg.hue})` }} />
-                  <div style={{ width: 16, height: 16, borderRadius: 999, background: `oklch(0.72 0.15 ${p.barCfg.hue})`, boxShadow: `0 0 8px oklch(0.72 0.15 ${p.barCfg.hue})`, flex: 'none' }} />
-                </div>
-              )}
+            <div>
+              <div style={{ ...labelSm, marginBottom: 6 }}>动效强度</div>
+              <Segmented
+                options={BAR_MOTIONS.map((item) => ({ key: item.key, label: item.label, icon: item.icon }))}
+                value={p.barCfg.motion || 'balanced'}
+                onChange={(k) => p.onSetBarCfg({ ...p.barCfg, motion: k })}
+                style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', justifyItems: 'center', width: '100%' }}
+              />
             </div>
-            {p.barCfg.modes.includes('pet') && (
-              <>
-                <div style={labelSm}>小宠物</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {PETS.map((e) => (
-                    <div key={e} className="hv" onClick={() => p.onSetBarCfg({ ...p.barCfg, petEmoji: e })} style={{ width: 30, height: 30, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, cursor: 'pointer', background: p.barCfg.petEmoji === e ? 'oklch(0.3 0.05 var(--th) / .5)' : 'rgba(255,255,255,.05)', border: `1px solid ${p.barCfg.petEmoji === e ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .5)' : 'rgba(255,255,255,.08)'}` }}>
-                      {e}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            {/* 自定义轮播主题：AI 每 10 分钟按你的描述生成一批内容 */}
-            <div style={labelSm}>自定义主题（AI 按描述持续生成内容，聚合进「自定义主题」模式）</div>
-            {(p.barCfg.customTopics || []).map((t) => (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 9px', borderRadius: 9, background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.06)' }}>
-                <span style={{ flex: 'none', color: 'oklch(0.9 0.02 var(--th))', fontSize: 11, fontWeight: 700 }}>{t.name}</span>
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 10 }}>{t.hint}</span>
-                <span className="hv" onClick={() => p.onSetBarCfg({ ...p.barCfg, customTopics: (p.barCfg.customTopics || []).filter((x) => x.id !== t.id) })} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 11 }}>✕</span>
-              </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <TimerReset size={13} strokeWidth={1.75} style={{ color: accent(0.75), flex: 'none' }} />
+            <span style={{ ...labelSm, margin: 0, whiteSpace: 'nowrap' }}>轮播节奏 · {p.barCfg.rotationSeconds || 12}s</span>
+            <Slider min={6} max={30} step={1} value={p.barCfg.rotationSeconds || 12} onChange={(v) => p.onSetBarCfg({ ...p.barCfg, rotationSeconds: v })} style={{ flex: 1 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {([
+              ['showStatus', '实时状态舱', Activity],
+              ['showProgress', '底部时序轨', Waves]
+            ] as const).map(([key, label, Icon]) => {
+              const enabled = p.barCfg[key] !== false
+              return <button key={key} type="button" onClick={() => p.onSetBarCfg({ ...p.barCfg, [key]: !enabled })} style={{ flex: 1, height: 32, borderRadius: R.md, border: enabled ? `0.5px solid ${accent(0.7, 0.32)}` : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', color: enabled ? ink(1) : ink(3), background: enabled ? semBg(accent(), 0.14) : fill(1), fontSize: FS.tiny, fontWeight: 600, fontFamily: 'inherit', transition: 'background .15s, color .15s' }}><Icon size={12} strokeWidth={1.75} />{label}<span style={{ opacity: .58 }}>{enabled ? '开' : '关'}</span></button>
+            })}
+          </div>
+          <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.5 }}>悬停暂停轮播，可手动切换内容；审批、等待回复、到期待办、专注和勿扰状态会实时显示。</div>
+          <div style={labelSm}>颜色</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {([['theme', '跟随主题'], ['rainbow', '多彩'], ['custom', '自定义']] as const).map(([k, label]) => (
+              <Chip key={k} active={p.barCfg.colorMode === k} onClick={() => p.onSetBarCfg({ ...p.barCfg, colorMode: k })}>
+                {label}
+              </Chip>
             ))}
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input value={topicName} onChange={(e) => setTopicName(e.target.value)} placeholder="主题名，如：Rust 技巧" style={{ ...inputStyle, width: 120, fontFamily: "'Segoe UI',sans-serif", fontSize: 11, padding: '6px 9px' }} />
-              <input value={topicHint} onChange={(e) => setTopicHint(e.target.value)} placeholder="给 AI 的描述：想看什么内容…" style={{ ...inputStyle, flex: 1, fontFamily: "'Segoe UI',sans-serif", fontSize: 11, padding: '6px 9px' }} />
-              <div
-                className="hv"
-                onClick={() => {
-                  if (!topicName.trim()) return
-                  p.onSetBarCfg({ ...p.barCfg, customTopics: [...(p.barCfg.customTopics || []), { id: Date.now(), name: topicName.trim(), hint: topicHint.trim() || topicName.trim() }], modes: p.barCfg.modes.includes('custom') ? p.barCfg.modes : [...p.barCfg.modes, 'custom'] })
-                  setTopicName(''); setTopicHint('')
-                }}
-                style={{ padding: '6px 13px', borderRadius: 9, background: topicName.trim() ? 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))' : 'rgba(255,255,255,.06)', color: topicName.trim() ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
-              >
-                ＋ 添加
+            {p.barCfg.colorMode === 'custom' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 150 }}>
+                <input type="range" min={0} max={360} value={p.barCfg.hue} onChange={(e) => p.onSetBarCfg({ ...p.barCfg, hue: Number(e.target.value) })} style={{ flex: 1, accentColor: `oklch(0.7 0.15 ${p.barCfg.hue})` }} />
+                <div style={{ width: 16, height: 16, borderRadius: 999, background: `oklch(0.72 0.15 ${p.barCfg.hue})`, boxShadow: `0 0 8px oklch(0.72 0.15 ${p.barCfg.hue})`, flex: 'none' }} />
               </div>
-            </div>
-            {/* AI 10 分钟刷新开关 */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <span style={{ color: 'oklch(0.88 0.02 var(--th) / .9)', fontSize: 12 }}>AI 每 10 分钟刷新内容</span>
-                <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 10 }}>名言/经验/方法论/热管理/自定义主题持续出新（用问答模型，产生调用费用）</span>
+            )}
+          </div>
+          {p.barCfg.modes.includes('pet') && (
+            <>
+              <div style={labelSm}>小宠物</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {PETS.map((e) => (
+                  <div key={e} className="hv" onClick={() => p.onSetBarCfg({ ...p.barCfg, petEmoji: e })} style={{ width: 30, height: 30, borderRadius: R.sm, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, cursor: 'pointer', background: p.barCfg.petEmoji === e ? semBg(accent(), 0.16) : fill(2), border: p.barCfg.petEmoji === e ? `0.5px solid ${accent(0.7, 0.5)}` : 'none' }}>
+                    {e}
+                  </div>
+                ))}
               </div>
-              <div style={track(p.barCfg.aiRefresh !== false)} onClick={() => p.onSetBarCfg({ ...p.barCfg, aiRefresh: p.barCfg.aiRefresh === false ? true : false })}>
-                <div style={knob(p.barCfg.aiRefresh !== false)} />
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <div className="hv" onClick={() => { setBarAiMsg('✨ 正在提炼…'); void p.onAiBarQuotes().then(setBarAiMsg) }} style={{ padding: '6px 14px', borderRadius: 999, background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                ✨ AI 生成我的个性语录
-              </div>
-              <div className="hv" onClick={() => { setBarAiMsg('⚡ 正在生成各主题内容…'); void p.onRefreshBarContent().then(setBarAiMsg) }} style={{ padding: '6px 14px', borderRadius: 999, background: 'rgba(255,255,255,.06)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .4)', color: 'oklch(0.88 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                ⚡ 立即生成主题内容
-              </div>
-              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: barAiMsg.startsWith('✓') ? 'oklch(0.8 calc(0.14 * var(--cs, 1)) var(--th))' : 'oklch(0.72 0.02 var(--th) / .7)', fontSize: 10.5 }}>
-                {barAiMsg || `个性语录${p.barCfg.customQuotes.length ? `已有 ${p.barCfg.customQuotes.length} 条` : '未生成'}；自定义主题由 AI 持续供给内容`}
+            </>
+          )}
+          {/* 自定义轮播主题：AI 每 10 分钟按你的描述生成一批内容 */}
+          <div style={labelSm}>自定义主题（AI 按描述持续生成内容，聚合进「自定义主题」模式）</div>
+          {(p.barCfg.customTopics || []).map((t) => (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 9px', borderRadius: R.sm, background: fill(2) }}>
+              <span style={{ flex: 'none', color: ink(1), fontSize: 11, fontWeight: 700 }}>{t.name}</span>
+              <span style={{ ...text.faint(), fontSize: 10, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.hint}</span>
+              <span className="hv" onClick={() => p.onSetBarCfg({ ...p.barCfg, customTopics: (p.barCfg.customTopics || []).filter((x) => x.id !== t.id) })} style={{ display: 'inline-flex', cursor: 'pointer', color: ink(3) }}>
+                <X size={11} strokeWidth={2} />
               </span>
             </div>
+          ))}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Input value={topicName} onChange={setTopicName} placeholder="主题名，如：Rust 技巧" style={{ width: 130, flex: 'none' }} />
+            <Input value={topicHint} onChange={setTopicHint} placeholder="给 AI 的描述：想看什么内容…" style={{ flex: 1, minWidth: 0 }} />
+            <Button
+              variant="primary"
+              icon={Plus}
+              disabled={!topicName.trim()}
+              onClick={() => {
+                if (!topicName.trim()) return
+                p.onSetBarCfg({ ...p.barCfg, customTopics: [...(p.barCfg.customTopics || []), { id: Date.now(), name: topicName.trim(), hint: topicHint.trim() || topicName.trim() }], modes: p.barCfg.modes.includes('custom') ? p.barCfg.modes : [...p.barCfg.modes, 'custom'] })
+                setTopicName(''); setTopicHint('')
+              }}
+            >
+              添加
+            </Button>
           </div>
-        )}
-      </div>
+          {/* AI 10 分钟刷新开关 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+              <span style={{ ...text.body(), fontSize: 12 }}>AI 每 10 分钟刷新内容</span>
+              <span style={{ ...text.faint(), fontSize: 10 }}>名言/经验/方法论/热管理/自定义主题持续出新（用问答模型，产生调用费用）</span>
+            </div>
+            <Switch on={p.barCfg.aiRefresh !== false} onChange={() => p.onSetBarCfg({ ...p.barCfg, aiRefresh: p.barCfg.aiRefresh === false ? true : false })} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Button variant="primary" icon={Sparkles} onClick={() => { setBarAiMsg('✨ 正在提炼…'); void p.onAiBarQuotes().then(setBarAiMsg) }}>
+              AI 生成我的个性语录
+            </Button>
+            <Button variant="tinted" icon={Zap} onClick={() => { setBarAiMsg('⚡ 正在生成各主题内容…'); void p.onRefreshBarContent().then(setBarAiMsg) }}>
+              立即生成主题内容
+            </Button>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: FS.tiny, color: barAiMsg.startsWith('✓') ? sem.calm : ink(2) }}>
+              {barAiMsg || `个性语录${p.barCfg.customQuotes.length ? `已有 ${p.barCfg.customQuotes.length} 条` : '未生成'}；自定义主题由 AI 持续供给内容`}
+            </span>
+          </div>
+        </div>
+      </CollapsibleSection>
 
       {/* 后端接入 */}
-      <div>
-        <div style={sectionTitle}>后端接入</div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ color: 'oklch(0.88 0.02 var(--th) / .9)', fontSize: 12.5 }}>自动接入所有 CLI / 终端</span>
-            <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 10.5 }}>开启后，任何 Claude Code / Codex 会话都实时通信</span>
+      <Section icon={Plug} title="后端接入">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+            <span style={text.body()}>自动接入所有 CLI / 终端</span>
+            <span style={text.faint()}>开启后，任何 Claude Code / Codex 会话都实时通信</span>
           </div>
-          <div style={track(p.settings.autoConnect)} onClick={() => p.onToggle('autoConnect')}>
-            <div style={knob(p.settings.autoConnect)} />
-          </div>
+          <Switch on={p.settings.autoConnect} onChange={() => p.onToggle('autoConnect')} />
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <div onClick={() => { p.onInstallHooks(); setHookMsg('已接入 · 全局写入，所有会话的生命周期会实时反映到岛') }} style={{ flex: 1, textAlign: 'center', padding: '8px', borderRadius: 999, background: 'rgba(255,255,255,.06)', color: 'oklch(0.82 0.02 var(--th) / .85)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>立即重新接入</div>
-          <div onClick={() => { p.onUninstallHooks(); setHookMsg('已断开 · 已从全局配置移除本工具的 hook（可还原）') }} style={{ flex: 1, textAlign: 'center', padding: '8px', borderRadius: 999, background: 'rgba(255,255,255,.06)', color: 'oklch(0.78 0.02 var(--th) / .7)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>暂时断开</div>
+          <Button variant="ghost" onClick={() => { p.onInstallHooks(); setHookMsg('已接入 · 全局写入，所有会话的生命周期会实时反映到岛') }} style={{ flex: 1 }}>立即重新接入</Button>
+          <Button variant="ghost" onClick={() => { p.onUninstallHooks(); setHookMsg('已断开 · 已从全局配置移除本工具的 hook（可还原）') }} style={{ flex: 1 }}>暂时断开</Button>
         </div>
-        {hookMsg && <div style={{ color: 'oklch(0.78 calc(0.14 * var(--cs, 1)) var(--th))', fontSize: 10.5, marginTop: 8, lineHeight: 1.5 }}>{hookMsg}</div>}
-        <div style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 10.5, marginTop: 8, lineHeight: 1.5 }}>全局合并写入 ~/.claude/settings.json 与 ~/.codex/hooks.json（不覆盖已有配置，可随时还原）。覆盖会话开始 / 对话 / 工具活动 / 命令审批 / 完成全生命周期；岛未运行时 CLI 照常工作，零影响。</div>
-      </div>
+        {hookMsg && <div style={{ color: accent(0.8), fontSize: FS.tiny, marginTop: 8, lineHeight: 1.5 }}>{hookMsg}</div>}
+        <div style={{ ...text.faint(), marginTop: 8, lineHeight: 1.5 }}>全局合并写入 ~/.claude/settings.json 与 ~/.codex/hooks.json（不覆盖已有配置，可随时还原）。覆盖会话开始 / 对话 / 工具活动 / 命令审批 / 完成全生命周期；岛未运行时 CLI 照常工作，零影响。</div>
+      </Section>
 
       {/* 已支持工具 */}
-      <div>
-        <div style={sectionTitle}>已支持的工具 · {enabledTools}/4 启用</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      <Section icon={Terminal} title="已支持的工具" extra={<Badge>{enabledTools}/4 启用</Badge>}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: SP.sm }}>
           {TOOLS.map((t) => {
             const on = p.settings[t.key]
             const isApp = /App$/.test(t.key)
-            const dotColor = on ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))' : 'oklch(0.5 0.02 var(--th) / .5)'
+            const dotColor = on ? accent() : ink(4)
             return (
-              <div key={t.key} onClick={() => p.onToggle(t.key)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 11, background: on ? 'oklch(0.3 0.05 var(--th) / .3)' : 'rgba(255,255,255,.03)', border: `1px solid ${on ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .35)' : 'rgba(255,255,255,.06)'}`, cursor: 'pointer' }}>
+              <div key={t.key} onClick={() => p.onToggle(t.key)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: R.md, background: on ? semBg(accent(), 0.1) : fill(1), border: on ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', cursor: 'pointer', transition: 'background .15s' }}>
                 {isApp ? (
                   <div style={{ width: 17, height: 17, flex: 'none', borderRadius: 5, background: 'rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <div style={{ width: 10, height: 8, border: `1px solid ${dotColor}`, borderRadius: 2, overflow: 'hidden' }}><div style={{ height: 2, background: dotColor }} /></div>
@@ -714,23 +798,19 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                 ) : (
                   <div style={{ width: 17, height: 17, flex: 'none', borderRadius: 5, background: 'rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: dotColor, fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 9.5, fontWeight: 700 }}>›_</div>
                 )}
-                <span style={{ color: on ? 'oklch(0.92 0.01 var(--th))' : 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 11.5, fontWeight: 500 }}>{t.label}</span>
+                <span style={{ color: on ? ink(1) : ink(3), fontSize: FS.small, fontWeight: 500 }}>{t.label}</span>
               </div>
             )
           })}
         </div>
-        <div style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 10.5, marginTop: 9 }}>当前支持 Claude Code、Codex 的 CLI 与桌面端，共 4 种。</div>
-      </div>
+        <div style={{ ...text.faint(), marginTop: 9 }}>当前支持 Claude Code、Codex 的 CLI 与桌面端，共 4 种。</div>
+      </Section>
 
       {/* 退出应用（右下角托盘图标同样可退出/重启） */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 4, borderTop: '1px solid rgba(255,255,255,.06)' }}>
-        <div className="hv" onClick={p.onQuitApp} style={{ padding: '7px 18px', borderRadius: 999, background: 'oklch(0.32 0.09 25 / .35)', border: '1px solid oklch(0.6 0.13 25 / .4)', color: 'oklch(0.85 0.1 25)', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
-          ⏻ 退出 Agentic-Island
-        </div>
-        <span style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 10 }}>也可以右键屏幕右下角托盘图标退出 / 重启</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, borderTop: `0.5px solid ${hairline(0.08)}` }}>
+        <Button variant="danger" icon={Power} onClick={p.onQuitApp}>退出 Agentic-Island</Button>
+        <span style={{ ...text.faint(), fontSize: 10 }}>也可以右键屏幕右下角托盘图标退出 / 重启</span>
       </div>
     </div>
   )
 }
-
-const labelSm: React.CSSProperties = { color: 'oklch(0.68 0.02 var(--th) / .7)', fontSize: 10.5, fontWeight: 600 }

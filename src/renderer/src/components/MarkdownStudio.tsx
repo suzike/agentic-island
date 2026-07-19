@@ -1,11 +1,24 @@
 // 全屏 Markdown 工作台：编辑 / 分屏 / 阅读；本地文件打开·保存；查找替换；行号；同步滚动；
 // 自动配对括号·Tab 缩进·智能回车续列表；块插入菜单；速查卡；阅读排版调节；专注模式；复制 HTML/MD。
+// 视觉层：ui/tokens 设计系统重做（图标 lucide、表面层级 surface、语义色 sem、浮层 overlayPop）；编辑器逻辑与保存流程未动。
 
 import { useMemo, useRef, useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
+import {
+  AlignHorizontalSpaceAround, Baby, Bold, BookOpen, Brackets, Briefcase, Camera, CheckSquare, ClipboardCheck, Code,
+  Copy, CornerDownRight, FileDown, FileText, FolderOpen, Globe, GraduationCap, Heading1, Heading2, Heading3,
+  HelpCircle, History, Italic, Keyboard, Languages, Link, List, ListChecks, ListOrdered, ListTree, Maximize,
+  MessageSquare, Minimize, Minus, Moon, PenLine, Plus, Quote, Save, Scissors, Search, Smile, Sparkles, SpellCheck,
+  Strikethrough, Sun, Table, Tag, Tags, Target, Type, Undo2, Redo2, Wand2, Workflow, X,
+  type LucideIcon,
+} from 'lucide-react'
 import { Markdown } from './Markdown'
 import { escHtml, mdToHtml } from '../logic/mdHtml'
 import { applyMarkdownPowerAction, MARKDOWN_POWER_ACTIONS, type MarkdownPowerGroup } from '../logic/markdownPower'
 import { island } from '../bridge'
+import { Button, Chip, IconButton, Input, Segmented, Slider } from '../ui/components'
+import { fadeScaleIn, overlayPop } from '../ui/motion'
+import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
 
 interface Props {
   open: boolean
@@ -21,41 +34,41 @@ type Mode = 'edit' | 'split' | 'read'
 
 // 20+ 处 AI 增强：对选区（无选区则全文）执行；mode 决定结果如何落回文档；raw=top 模式原样插入（不套引用块）
 type AiMode = 'replace' | 'append' | 'top' | 'title'
-interface AiAction { label: string; icon: string; mode: AiMode; sys: string; wrap: (t: string) => string; raw?: boolean }
+interface AiAction { label: string; icon: LucideIcon; mode: AiMode; sys: string; wrap: (t: string) => string; raw?: boolean }
 const AI_ACTIONS: AiAction[] = [
-  { label: '润色改写', icon: '✨', mode: 'replace', sys: '你是中文写作润色助手。把用户给的内容改写得更通顺、专业、有条理，保持原意与 Markdown 结构。只输出结果。', wrap: (t) => t },
-  { label: '精简', icon: '✂️', mode: 'replace', sys: '把内容压缩到最精炼，去冗余保信息，保持 Markdown。只输出结果。', wrap: (t) => t },
-  { label: '扩写', icon: '➕', mode: 'replace', sys: '把内容展开充实：补充细节、例子、解释，保持风格与 Markdown。只输出结果。', wrap: (t) => t },
-  { label: '续写', icon: '⤵️', mode: 'append', sys: '你是写作助手。顺着下面的内容自然地继续往下写一段，风格一致。只输出续写部分。', wrap: (t) => t },
-  { label: '翻译', icon: '🌐', mode: 'replace', sys: '翻译下面的内容：中文→英文，英文→中文，保留术语与 Markdown 结构。只输出译文。', wrap: (t) => t },
-  { label: '修语法错字', icon: '🩹', mode: 'replace', sys: '修正下面内容的语法、错别字、标点，不改变原意与结构。只输出修正后的内容。', wrap: (t) => t },
-  { label: '提炼要点', icon: '•', mode: 'replace', sys: '把下面的内容提炼成简洁的 Markdown 要点列表（- 开头），抓重点。只输出列表。', wrap: (t) => t },
-  { label: '转表格', icon: '⊞', mode: 'replace', sys: '把下面的内容整理成一个合适的 Markdown 表格（含表头与分隔行）。只输出表格。', wrap: (t) => t },
-  { label: '改正式语气', icon: '🎩', mode: 'replace', sys: '把下面的内容改写成正式、书面的语气，保持 Markdown。只输出结果。', wrap: (t) => t },
-  { label: '摘要(插到顶部)', icon: '📄', mode: 'top', sys: '为下面的全文写一段 3-5 句的中文摘要。只输出摘要文字，不要标题。', wrap: (t) => t },
-  { label: '生成大纲', icon: '🗂️', mode: 'top', raw: true, sys: '为下面的内容生成一个 Markdown 标题大纲（## 开头的若干小标题）。只输出大纲。', wrap: (t) => t },
-  { label: '起个标题', icon: '🏷️', mode: 'title', sys: '为下面的内容起一个简洁有力的标题（≤20 字），只输出标题本身。', wrap: (t) => t },
+  { label: '润色改写', icon: Sparkles, mode: 'replace', sys: '你是中文写作润色助手。把用户给的内容改写得更通顺、专业、有条理，保持原意与 Markdown 结构。只输出结果。', wrap: (t) => t },
+  { label: '精简', icon: Scissors, mode: 'replace', sys: '把内容压缩到最精炼，去冗余保信息，保持 Markdown。只输出结果。', wrap: (t) => t },
+  { label: '扩写', icon: Plus, mode: 'replace', sys: '把内容展开充实：补充细节、例子、解释，保持风格与 Markdown。只输出结果。', wrap: (t) => t },
+  { label: '续写', icon: CornerDownRight, mode: 'append', sys: '你是写作助手。顺着下面的内容自然地继续往下写一段，风格一致。只输出续写部分。', wrap: (t) => t },
+  { label: '翻译', icon: Languages, mode: 'replace', sys: '翻译下面的内容：中文→英文，英文→中文，保留术语与 Markdown 结构。只输出译文。', wrap: (t) => t },
+  { label: '修语法错字', icon: SpellCheck, mode: 'replace', sys: '修正下面内容的语法、错别字、标点，不改变原意与结构。只输出修正后的内容。', wrap: (t) => t },
+  { label: '提炼要点', icon: ListChecks, mode: 'replace', sys: '把下面的内容提炼成简洁的 Markdown 要点列表（- 开头），抓重点。只输出列表。', wrap: (t) => t },
+  { label: '转表格', icon: Table, mode: 'replace', sys: '把下面的内容整理成一个合适的 Markdown 表格（含表头与分隔行）。只输出表格。', wrap: (t) => t },
+  { label: '改正式语气', icon: Briefcase, mode: 'replace', sys: '把下面的内容改写成正式、书面的语气，保持 Markdown。只输出结果。', wrap: (t) => t },
+  { label: '摘要(插到顶部)', icon: FileText, mode: 'top', sys: '为下面的全文写一段 3-5 句的中文摘要。只输出摘要文字，不要标题。', wrap: (t) => t },
+  { label: '生成大纲', icon: ListTree, mode: 'top', raw: true, sys: '为下面的内容生成一个 Markdown 标题大纲（## 开头的若干小标题）。只输出大纲。', wrap: (t) => t },
+  { label: '起个标题', icon: Tag, mode: 'title', sys: '为下面的内容起一个简洁有力的标题（≤20 字），只输出标题本身。', wrap: (t) => t },
   // ===== 第二批：语气 / 结构化 / 审阅类 =====
-  { label: '学术语气', icon: '🎓', mode: 'replace', sys: '把下面的内容改写成严谨的学术语气：客观、精确、有逻辑连接词，保持 Markdown。只输出结果。', wrap: (t) => t },
-  { label: '口语化', icon: '💬', mode: 'replace', sys: '把下面的内容改写成轻松口语化的表达，像和朋友聊天，但信息不丢失，保持 Markdown。只输出结果。', wrap: (t) => t },
-  { label: '讲给小白听', icon: '🧒', mode: 'replace', sys: '用费曼技巧把下面的内容重写：假设读者零基础，用类比和最简单的语言解释清楚，保持 Markdown。只输出结果。', wrap: (t) => t },
-  { label: '提炼金句', icon: '❝', mode: 'top', raw: true, sys: '从下面的内容里提炼 1-3 句最有价值的金句，每句一行，用 Markdown 引用块格式（> 开头）。只输出引用块。', wrap: (t) => t },
-  { label: '编辑评审', icon: '🧐', mode: 'append', sys: '你是严格的资深编辑。审阅下面的内容，给出 3-5 条具体、可执行的修改意见（指出位置与改法）。输出一个「## ✍️ 修改意见」小节 + 有序列表。', wrap: (t) => t },
-  { label: '备选标题×5', icon: '🏷', mode: 'top', raw: true, sys: '为下面的内容拟 5 个风格各异的备选标题（信息型/悬念型/数字型/对比型/金句型），输出「## 🏷 备选标题」+ 无序列表。只输出这个小节。', wrap: (t) => t },
-  { label: '提行动项', icon: '✅', mode: 'append', sys: '从下面的内容里提取可执行的行动项，输出一个「## ✅ 行动项」小节 + Markdown 任务清单（- [ ] 开头）。没有就输出"- [ ] （无明确行动项）"。只输出小节。', wrap: (t) => t },
-  { label: '生成 FAQ', icon: '❓', mode: 'append', sys: '根据下面的内容生成 3-5 个读者最可能问的问题及简答，输出「## ❓ FAQ」小节，问题用 **加粗**。只输出小节。', wrap: (t) => t },
-  { label: '术语表', icon: '📖', mode: 'append', sys: '提取下面内容中的专业术语/概念，输出「## 📖 术语表」小节 + Markdown 表格（术语 | 解释），解释一句话。只输出小节。', wrap: (t) => t },
-  { label: '智能排版', icon: '🪄', mode: 'replace', sys: '把下面的原始文本整理成规范的 Markdown：合理的标题层级、列表、强调、段落切分，不改变内容本身。只输出结果。', wrap: (t) => t },
-  { label: '标点规范', icon: '🔡', mode: 'replace', sys: '按中文排版规范修正下面的内容：全角标点统一、中英文之间加空格、数字与单位规范，不改内容。只输出结果。', wrap: (t) => t },
-  { label: '双语对照', icon: '🌍', mode: 'replace', sys: '把下面的内容改为逐段中英对照：每段原文后紧跟英文翻译（斜体）。保持 Markdown 结构。只输出结果。', wrap: (t) => t }
+  { label: '学术语气', icon: GraduationCap, mode: 'replace', sys: '把下面的内容改写成严谨的学术语气：客观、精确、有逻辑连接词，保持 Markdown。只输出结果。', wrap: (t) => t },
+  { label: '口语化', icon: MessageSquare, mode: 'replace', sys: '把下面的内容改写成轻松口语化的表达，像和朋友聊天，但信息不丢失，保持 Markdown。只输出结果。', wrap: (t) => t },
+  { label: '讲给小白听', icon: Baby, mode: 'replace', sys: '用费曼技巧把下面的内容重写：假设读者零基础，用类比和最简单的语言解释清楚，保持 Markdown。只输出结果。', wrap: (t) => t },
+  { label: '提炼金句', icon: Quote, mode: 'top', raw: true, sys: '从下面的内容里提炼 1-3 句最有价值的金句，每句一行，用 Markdown 引用块格式（> 开头）。只输出引用块。', wrap: (t) => t },
+  { label: '编辑评审', icon: ClipboardCheck, mode: 'append', sys: '你是严格的资深编辑。审阅下面的内容，给出 3-5 条具体、可执行的修改意见（指出位置与改法）。输出一个「## ✍️ 修改意见」小节 + 有序列表。', wrap: (t) => t },
+  { label: '备选标题×5', icon: Tags, mode: 'top', raw: true, sys: '为下面的内容拟 5 个风格各异的备选标题（信息型/悬念型/数字型/对比型/金句型），输出「## 🏷 备选标题」+ 无序列表。只输出这个小节。', wrap: (t) => t },
+  { label: '提行动项', icon: CheckSquare, mode: 'append', sys: '从下面的内容里提取可执行的行动项，输出一个「## ✅ 行动项」小节 + Markdown 任务清单（- [ ] 开头）。没有就输出"- [ ] （无明确行动项）"。只输出小节。', wrap: (t) => t },
+  { label: '生成 FAQ', icon: HelpCircle, mode: 'append', sys: '根据下面的内容生成 3-5 个读者最可能问的问题及简答，输出「## ❓ FAQ」小节，问题用 **加粗**。只输出小节。', wrap: (t) => t },
+  { label: '术语表', icon: BookOpen, mode: 'append', sys: '提取下面内容中的专业术语/概念，输出「## 📖 术语表」小节 + Markdown 表格（术语 | 解释），解释一句话。只输出小节。', wrap: (t) => t },
+  { label: '智能排版', icon: Wand2, mode: 'replace', sys: '把下面的原始文本整理成规范的 Markdown：合理的标题层级、列表、强调、段落切分，不改变内容本身。只输出结果。', wrap: (t) => t },
+  { label: '标点规范', icon: Type, mode: 'replace', sys: '按中文排版规范修正下面的内容：全角标点统一、中英文之间加空格、数字与单位规范，不改内容。只输出结果。', wrap: (t) => t },
+  { label: '双语对照', icon: Globe, mode: 'replace', sys: '把下面的内容改为逐段中英对照：每段原文后紧跟英文翻译（斜体）。保持 Markdown 结构。只输出结果。', wrap: (t) => t }
 ]
 
 const PAIRS: Record<string, string> = { '(': ')', '[': ']', '{': '}', '`': '`', '"': '"', '“': '”', '（': '）' }
 
-const BLOCKS: [string, string, string][] = [
-  ['H1', '一级标题', '# '], ['H2', '二级标题', '## '], ['H3', '三级标题', '### '],
-  ['•', '无序列表', '- '], ['1.', '有序列表', '1. '], ['☑', '任务', '- [ ] '],
-  ['❝', '引用', '> '], ['▤', '代码块', '```\n\n```'], ['⊞', '表格', '| 列1 | 列2 |\n| --- | --- |\n| a | b |'], ['—', '分割线', '\n---\n']
+const BLOCKS: [LucideIcon, string, string][] = [
+  [Heading1, '一级标题', '# '], [Heading2, '二级标题', '## '], [Heading3, '三级标题', '### '],
+  [List, '无序列表', '- '], [ListOrdered, '有序列表', '1. '], [CheckSquare, '任务', '- [ ] '],
+  [Quote, '引用', '> '], [Code, '代码块', '```\n\n```'], [Table, '表格', '| 列1 | 列2 |\n| --- | --- |\n| a | b |'], [Minus, '分割线', '\n---\n']
 ]
 
 const CHEATS: [string, string][] = [
@@ -64,13 +77,13 @@ const CHEATS: [string, string][] = [
   ['[文字](url)', '链接'], ['![alt](url)', '图片'], ['[[便签标题]]', '双链'], ['---', '分割线']
 ]
 
-const TOOLBAR: [string, string, (w: (b: string, a?: string, ph?: string) => void, l: (t: string) => void) => void][] = [
-  ['𝐁', '加粗', (w) => w('**', '**', '粗体')],
-  ['𝑰', '斜体', (w) => w('*', '*', '斜体')],
-  ['~', '删除线', (w) => w('~~', '~~', '删除')],
-  ['‹›', '行内代码', (w) => w('`', '`', 'code')],
-  ['🔗', '链接', (w) => w('[', '](https://)', '链接文字')],
-  ['⟦⟧', '双链', (w) => w('[[', ']]', '便签标题')]
+const TOOLBAR: [LucideIcon, string, (w: (b: string, a?: string, ph?: string) => void, l: (t: string) => void) => void][] = [
+  [Bold, '加粗', (w) => w('**', '**', '粗体')],
+  [Italic, '斜体', (w) => w('*', '*', '斜体')],
+  [Strikethrough, '删除线', (w) => w('~~', '~~', '删除')],
+  [Code, '行内代码', (w) => w('`', '`', 'code')],
+  [Link, '链接', (w) => w('[', '](https://)', '链接文字')],
+  [Brackets, '双链', (w) => w('[[', ']]', '便签标题')]
 ]
 
 // 表格美化：把文档里所有 Markdown 表格的列宽对齐（CJK 按 2 宽计）
@@ -174,7 +187,8 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
     const s = ta.selectionStart, e = ta.selectionEnd
     const sel = md.slice(s, e) || ph
     change(md.slice(0, s) + before + sel + after + md.slice(e))
-    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(s + before.length, s + before.length + sel.length) })
+    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(s + before.length, s + before.length + sel.length) }
+    )
   }
   // 光标 行:列（底栏显示）+ 打字机模式（光标行滚动居中）；读 ta.value 而非 md，避免 setState 异步导致的旧值
   const trackCursor = (): void => {
@@ -359,7 +373,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
   // AI 自定义指令
   const runCustom = async (): Promise<void> => {
     const ins = customAi.trim(); if (!ins) return
-    await runAI({ label: '自定义', icon: '🪄', mode: 'replace', sys: `你是 Markdown 写作助手。按用户指令处理下面的内容，只输出结果。指令：${ins}`, wrap: (t) => t })
+    await runAI({ label: '自定义', icon: Wand2, mode: 'replace', sys: `你是 Markdown 写作助手。按用户指令处理下面的内容，只输出结果。指令：${ins}`, wrap: (t) => t })
     setCustomAi('')
   }
   // AI 生成 Mermaid 图
@@ -408,130 +422,147 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
     }
   }
 
-  // 明暗主题作用于整个工作台
+  // 明暗主题作用于整个工作台（暗色走设计令牌，亮色保留编辑器专属配色）
   const ui = light
     ? { card: '#faf9f6', fg: '#1a1a1a', sub: 'rgba(0,0,0,.55)', bd: 'rgba(0,0,0,.1)', btn: 'rgba(0,0,0,.05)', btnA: 'rgba(0,0,0,.13)', prev: '#ffffff', panel: 'rgba(0,0,0,.03)' }
-    : { card: 'oklch(calc(0.16 * var(--pl, 1)) calc(0.03 * var(--css, 1)) var(--ths) / .99)', fg: 'oklch(0.96 0.01 var(--th))', sub: 'oklch(0.7 0.02 var(--th) / .7)', bd: 'rgba(255,255,255,.07)', btn: 'rgba(255,255,255,.06)', btnA: 'oklch(0.4 0.08 var(--th) / .5)', prev: 'rgba(255,255,255,.02)', panel: 'rgba(255,255,255,.02)' }
-  const modeBtn = (m: Mode, label: string): React.JSX.Element => (
-    <div className="hv" onClick={() => setMode(m)} style={{ padding: '4px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 600, background: mode === m ? (light ? 'rgba(0,0,0,.1)' : 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .22)') : 'transparent', color: mode === m ? (light ? '#111' : 'oklch(0.88 calc(0.12 * var(--cs, 1)) var(--th))') : ui.sub }}>{label}</div>
+    : { card: 'oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / .98)', fg: ink(1), sub: ink(3), bd: hairline(0.07), btn: fill(2), btnA: semBg(accent(), 0.16), prev: fill(1), panel: fill(1) }
+  // 工具栏图标按钮（lucide 图标，明暗自适应；填充制无描边，激活态 0.5px 语义描边）
+  const tbtn = (Icon: LucideIcon, tip: string, on: () => void, active?: boolean): React.JSX.Element => (
+    <button key={tip} type="button" className="hv" onClick={on} title={tip} style={{ width: 27, height: 27, padding: 0, borderRadius: R.sm, display: 'grid', placeItems: 'center', cursor: 'pointer', border: active ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: active ? ui.btnA : ui.btn, color: active ? (light ? '#111' : accent()) : ui.fg, opacity: active ? 1 : 0.85, transition: transition('background, border-color, color'), fontFamily: 'inherit', flex: 'none' }}>
+      <Icon size={13} strokeWidth={1.9} />
+    </button>
   )
-  const iconBtn = (icon: string, tip: string, on: () => void, active?: boolean): React.JSX.Element => (
-    <div key={tip} className="hv" onClick={on} title={tip} style={{ minWidth: 26, height: 26, padding: '0 7px', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: active ? ui.btnA : ui.btn, color: ui.fg, fontSize: 11.5, fontWeight: 700 }}>{icon}</div>
-  )
+  // 工具栏弹层统一表面（fixed 浮层，允许 overlayPop 小位移弹出；圆角走 surface.overlay 的 R.overlay）
+  const pop = (extra?: React.CSSProperties): React.CSSProperties => ({ position: 'absolute', top: 32, zIndex: 8, ...surface.overlay(), ...extra })
 
   const editor = (
-    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: SP.sm, minHeight: 0 }}>
       {!zen && (
         <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', flex: 'none', position: 'relative' }}>
-          {iconBtn('↶', '撤销 (Ctrl+Z)', undo)}
-          {iconBtn('↷', '重做 (Ctrl+Y)', redo)}
-          {TOOLBAR.map(([icon, t, fn]) => iconBtn(icon, t, () => fn(wrapSel, insertBlock)))}
-          {iconBtn('⊞表', '表格生成器', () => setTableGrid((v) => !v), tableGrid)}
-          {iconBtn('😀', 'Emoji', () => setEmojiPick((v) => !v), emojiPick)}
-          {iconBtn('＋块', '插入块', () => setBlockMenu((v) => !v), blockMenu)}
-          {iconBtn('🔍', '查找替换 (Ctrl+F)', () => setFindOpen((v) => !v), findOpen)}
-          {iconBtn('⇥⊞', '表格美化（对齐所有 Markdown 表格列宽）', () => { change(formatTables(md)); flash('✓ 表格已对齐') })}
-          {iconBtn('🎯', typewriter ? '打字机模式:开（光标行居中）' : '打字机模式:关', () => setTypewriter((v) => !v), typewriter)}
-          {iconBtn('📸', '存版本快照（可回滚）', () => { takeSnap(); setSnapMenu(false) })}
-          {snaps.current.length > 0 && iconBtn(`⏱${snaps.current.length}`, '版本快照列表（点击回滚）', () => setSnapMenu((v) => !v), snapMenu)}
-          {iconBtn('⌨', '快捷键速查', () => setKeysOpen((v) => !v), keysOpen)}
-          {iconBtn('?', 'Markdown 速查', () => setCheat((v) => !v), cheat)}
-          {iconBtn(`⚙${MARKDOWN_POWER_ACTIONS.length}`, '高级文档工具', () => setPowerOpen((v) => !v), powerOpen)}
-          <div className="hv" onClick={() => setAiMenu((v) => !v)} title="AI 增强（对选区/全文）" style={{ height: 26, padding: '0 10px', borderRadius: 7, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', background: aiMenu ? 'oklch(0.5 0.13 var(--th) / .5)' : 'linear-gradient(180deg, oklch(0.7 0.14 var(--th) / .45), oklch(0.55 0.13 var(--th2) / .4))', color: 'oklch(0.95 0.02 var(--th))', fontSize: 11, fontWeight: 700 }}>{aiBusy ? `✨ ${aiBusy}…` : '✨ AI'}</div>
+          {tbtn(Undo2, '撤销 (Ctrl+Z)', undo)}
+          {tbtn(Redo2, '重做 (Ctrl+Y)', redo)}
+          {TOOLBAR.map(([Icon, t, fn]) => tbtn(Icon, t, () => fn(wrapSel, insertBlock)))}
+          {tbtn(Table, '表格生成器', () => setTableGrid((v) => !v), tableGrid)}
+          {tbtn(Smile, 'Emoji', () => setEmojiPick((v) => !v), emojiPick)}
+          {tbtn(Plus, '插入块', () => setBlockMenu((v) => !v), blockMenu)}
+          {tbtn(Search, '查找替换 (Ctrl+F)', () => setFindOpen((v) => !v), findOpen)}
+          {tbtn(AlignHorizontalSpaceAround, '表格美化（对齐所有 Markdown 表格列宽）', () => { change(formatTables(md)); flash('✓ 表格已对齐') })}
+          {tbtn(Target, typewriter ? '打字机模式:开（光标行居中）' : '打字机模式:关', () => setTypewriter((v) => !v), typewriter)}
+          {tbtn(Camera, '存版本快照（可回滚）', () => { takeSnap(); setSnapMenu(false) })}
+          {snaps.current.length > 0 && (
+            <button type="button" className="hv" onClick={() => setSnapMenu((v) => !v)} title="版本快照列表（点击回滚）" style={{ height: 27, padding: '0 8px', borderRadius: R.sm, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', border: snapMenu ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: snapMenu ? ui.btnA : ui.btn, color: snapMenu ? (light ? '#111' : accent()) : ui.fg, fontFamily: 'inherit', flex: 'none' }}>
+              <History size={13} strokeWidth={1.9} />
+              <span style={{ fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{snaps.current.length}</span>
+            </button>
+          )}
+          {tbtn(Keyboard, '快捷键速查', () => setKeysOpen((v) => !v), keysOpen)}
+          {tbtn(HelpCircle, 'Markdown 速查', () => setCheat((v) => !v), cheat)}
+          <button type="button" className="hv" onClick={() => setPowerOpen((v) => !v)} title="高级文档工具" style={{ height: 27, padding: '0 8px', borderRadius: R.sm, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', border: powerOpen ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: powerOpen ? ui.btnA : ui.btn, color: powerOpen ? (light ? '#111' : accent()) : ui.fg, fontFamily: 'inherit', flex: 'none' }}>
+            <Wand2 size={13} strokeWidth={1.9} />
+            <span style={{ fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{MARKDOWN_POWER_ACTIONS.length}</span>
+          </button>
+          <button type="button" className="hv" onClick={() => setAiMenu((v) => !v)} title="AI 增强（对选区/全文）" style={{ height: 27, padding: '0 11px', borderRadius: R.sm, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', border: aiMenu ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: aiMenu ? semBg(accent(), 0.32) : gradient.primary(), color: aiMenu ? accent(0.9) : gradient.onPrimary(), fontSize: FS.small, fontWeight: 700, boxShadow: aiMenu ? 'none' : `0 3px 10px -3px ${accent(0.7, 0.4)}, inset 0 1px 0 rgba(255,255,255,.25)`, fontFamily: 'inherit', flex: 'none' }}>
+            <Sparkles size={12} strokeWidth={2} />{aiBusy ? `${aiBusy}…` : 'AI'}
+          </button>
           {powerOpen && (
-            <div className="ai-scroll" style={{ position: 'absolute', top: 30, left: 0, zIndex: 8, width: 'min(430px, calc(100vw - 90px))', maxHeight: 410, overflowY: 'auto', padding: 9, borderRadius: 8, background: 'oklch(0.18 0.025 var(--ths) / .99)', border: '1px solid oklch(0.6 0.1 var(--th) / .35)', boxShadow: '0 14px 34px rgba(0,0,0,.35)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 7 }}>
-                <span style={{ color: 'oklch(0.84 0.04 var(--th))', fontSize: 10.5, fontWeight: 750, marginRight: 5 }}>文档工具</span>
+            <motion.div variants={overlayPop} initial="initial" animate="animate" className="ai-scroll" style={pop({ left: 0, width: 'min(430px, calc(100vw - 90px))', maxHeight: 410, overflowY: 'auto', padding: SP.md })}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: SP.sm }}>
+                <Wand2 size={12} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+                <span style={{ ...text.overline(), marginRight: 4 }}>文档工具</span>
                 {(['结构', '整理', '审计', '块'] as MarkdownPowerGroup[]).map((group) => (
-                  <button key={group} type="button" onClick={() => setPowerGroup(group)} style={{ height: 23, padding: '0 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,.07)', background: powerGroup === group ? 'oklch(0.4 0.08 var(--th) / .45)' : 'rgba(255,255,255,.04)', color: powerGroup === group ? 'oklch(0.9 0.08 var(--th))' : 'oklch(0.66 0.02 var(--th) / .65)', cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 9.5, fontWeight: 650 }}>{group}</button>
+                  <Chip key={group} active={powerGroup === group} onClick={() => setPowerGroup(group)} style={{ padding: '2px 8px', fontSize: 10 }}>{group}</Chip>
                 ))}
                 <span style={{ flex: 1 }} />
-                <span style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 8.5 }}>{MARKDOWN_POWER_ACTIONS.length} 项</span>
+                <span style={{ ...text.faint(), fontSize: 9 }}>{MARKDOWN_POWER_ACTIONS.length} 项</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 5 }}>
                 {MARKDOWN_POWER_ACTIONS.filter((x) => x.group === powerGroup).map((action) => (
-                  <button key={action.id} type="button" className="hv" onClick={() => runMarkdownPower(action.id)} title={action.hint} style={{ height: 30, minWidth: 0, padding: '0 7px', borderRadius: 7, border: '1px solid rgba(255,255,255,.07)', background: 'rgba(255,255,255,.045)', color: 'oklch(0.8 0.03 var(--th))', cursor: 'pointer', fontFamily: 'var(--font)', fontSize: 9.5, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{action.label}</button>
+                  <button key={action.id} type="button" className="hv" onClick={() => runMarkdownPower(action.id)} title={action.hint} style={{ height: 30, minWidth: 0, padding: '0 7px', borderRadius: R.sm, border: 'none', background: fill(2), color: ink(1), cursor: 'pointer', fontFamily: 'inherit', fontSize: 10, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{action.label}</button>
                 ))}
               </div>
-            </div>
+            </motion.div>
           )}
           {aiMenu && (
-            <div className="ai-scroll" style={{ position: 'absolute', top: 30, right: 0, zIndex: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, width: 300, maxHeight: 380, overflowY: 'auto', padding: 9, borderRadius: 11, background: 'oklch(0.19 0.03 var(--ths) / .99)', border: '1px solid oklch(0.6 0.12 var(--th) / .4)' }}>
-              <div style={{ gridColumn: '1 / -1', color: 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 9, marginBottom: 2 }}>选中文字则处理选区,否则处理全文</div>
+            <motion.div variants={overlayPop} initial="initial" animate="animate" className="ai-scroll" style={pop({ right: 0, zIndex: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, width: 300, maxHeight: 380, overflowY: 'auto', padding: SP.md })}>
+              <div style={{ gridColumn: '1 / -1', ...text.faint(), fontSize: 9.5, marginBottom: 2 }}>选中文字则处理选区，否则处理全文</div>
               {AI_ACTIONS.map((a) => (
-                <div key={a.label} className="hv" onClick={() => void runAI(a)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', background: 'rgba(255,255,255,.05)', color: 'oklch(0.86 0.02 var(--th))', fontSize: 10.5, fontWeight: 600 }}>
-                  <span style={{ flex: 'none' }}>{a.icon}</span>{a.label}
+                <div key={a.label} className="hv" onClick={() => void runAI(a)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: R.sm, cursor: 'pointer', background: fill(2), border: 'none', color: ink(1), fontSize: 10.5, fontWeight: 600 }}>
+                  <a.icon size={12} strokeWidth={1.9} style={{ color: accent(0.85), flex: 'none' }} />{a.label}
                 </div>
               ))}
-              <div className="hv" onClick={() => void runMermaid()} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', background: 'rgba(255,255,255,.05)', color: 'oklch(0.86 0.02 var(--th))', fontSize: 10.5, fontWeight: 600 }}>📊 生成图表</div>
-              <div className="hv" onClick={() => { setAskOpen(true); setAiMenu(false) }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', background: 'rgba(255,255,255,.05)', color: 'oklch(0.86 0.02 var(--th))', fontSize: 10.5, fontWeight: 600 }}>💬 问文档</div>
-              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 4, marginTop: 3 }}>
-                <input value={customAi} onChange={(e) => setCustomAi(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void runCustom() }} placeholder="🪄 自定义指令，如：改成产品文案…" style={{ flex: 1, background: 'rgba(0,0,0,.3)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 7, outline: 'none', color: 'oklch(0.93 0.01 var(--th))', fontSize: 10, padding: '5px 8px' }} />
-                <div className="hv" onClick={() => void runCustom()} style={{ padding: '0 10px', borderRadius: 7, display: 'flex', alignItems: 'center', cursor: 'pointer', background: 'oklch(0.6 0.13 var(--th) / .5)', color: 'oklch(0.95 0.02 var(--th))', fontSize: 10, fontWeight: 700 }}>执行</div>
+              <div className="hv" onClick={() => void runMermaid()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: R.sm, cursor: 'pointer', background: fill(2), border: 'none', color: ink(1), fontSize: 10.5, fontWeight: 600 }}>
+                <Workflow size={12} strokeWidth={1.9} style={{ color: accent(0.85), flex: 'none' }} />生成图表
               </div>
-            </div>
+              <div className="hv" onClick={() => { setAskOpen(true); setAiMenu(false) }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: R.sm, cursor: 'pointer', background: fill(2), border: 'none', color: ink(1), fontSize: 10.5, fontWeight: 600 }}>
+                <MessageSquare size={12} strokeWidth={1.9} style={{ color: accent(0.85), flex: 'none' }} />问文档
+              </div>
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 5, marginTop: 4 }}>
+                <Input value={customAi} onChange={setCustomAi} onKeyDown={(e) => { if (e.key === 'Enter') void runCustom() }} placeholder="自定义指令，如：改成产品文案…" icon={Wand2} style={{ flex: 1 }} />
+                <Button sm variant="primary" onClick={() => void runCustom()}>执行</Button>
+              </div>
+            </motion.div>
           )}
           {tableGrid && (
-            <div style={{ position: 'absolute', top: 30, left: 40, zIndex: 6, padding: 9, borderRadius: 10, background: 'oklch(0.2 0.03 var(--ths) / .99)', border: '1px solid oklch(0.6 0.1 var(--th) / .35)' }}>
-              <div style={{ color: 'oklch(0.65 0.02 var(--th) / .6)', fontSize: 9, marginBottom: 5 }}>选择表格大小</div>
+            <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 40, zIndex: 6, padding: SP.md })}>
+              <div style={{ ...text.faint(), fontSize: 9.5, marginBottom: 6 }}>选择表格大小</div>
               {Array.from({ length: 5 }, (_, r) => (
                 <div key={r} style={{ display: 'flex', gap: 3, marginBottom: 3 }}>
                   {Array.from({ length: 6 }, (_, c) => (
-                    <div key={c} className="hv" onClick={() => { const cols = c + 1, rows = r + 1; const header = `| ${Array.from({ length: cols }, (_, i) => '列' + (i + 1)).join(' | ')} |`; const sep = `| ${Array.from({ length: cols }, () => '---').join(' | ')} |`; const body = Array.from({ length: rows }, () => `| ${Array.from({ length: cols }, () => ' ').join(' | ')} |`).join('\n'); insertBlock(`${header}\n${sep}\n${body}`); setTableGrid(false) }} style={{ width: 15, height: 15, borderRadius: 3, background: 'oklch(0.4 0.06 var(--th) / .4)', cursor: 'pointer', border: '1px solid rgba(255,255,255,.1)' }} />
+                    <div key={c} className="hv" onClick={() => { const cols = c + 1, rows = r + 1; const header = `| ${Array.from({ length: cols }, (_, i) => '列' + (i + 1)).join(' | ')} |`; const sep = `| ${Array.from({ length: cols }, () => '---').join(' | ')} |`; const body = Array.from({ length: rows }, () => `| ${Array.from({ length: cols }, () => ' ').join(' | ')} |`).join('\n'); insertBlock(`${header}\n${sep}\n${body}`); setTableGrid(false) }} style={{ width: 15, height: 15, borderRadius: 4, background: semBg(accent(), 0.3), cursor: 'pointer', border: `0.5px solid ${accent(0.7, 0.3)}` }} />
                   ))}
                 </div>
               ))}
-            </div>
+            </motion.div>
           )}
           {emojiPick && (
-            <div style={{ position: 'absolute', top: 30, left: 70, zIndex: 6, width: 220, padding: 9, borderRadius: 10, background: 'oklch(0.2 0.03 var(--ths) / .99)', border: '1px solid oklch(0.6 0.1 var(--th) / .35)', display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+            <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 70, zIndex: 6, width: 220, padding: SP.md, display: 'flex', flexWrap: 'wrap', gap: 3 })}>
               {'😀 😎 🤔 🚀 ✨ 🔥 💡 ✅ ⚠️ ❌ 📌 📎 🎯 📊 🧩 🛠️ 🐛 ⚡ 🌟 💪 👍 🎉 📝 🔑 🧠 ⏱️ 📅 🔗 💬 ⭐'.split(' ').map((em) => (
                 <span key={em} className="hv" onClick={() => { wrapSel(em, '', ''); setEmojiPick(false) }} style={{ cursor: 'pointer', fontSize: 16, padding: 2 }}>{em}</span>
               ))}
-            </div>
+            </motion.div>
           )}
           {blockMenu && (
-            <div style={{ position: 'absolute', top: 30, left: 0, zIndex: 5, display: 'flex', flexWrap: 'wrap', gap: 4, width: 220, padding: 8, borderRadius: 10, background: 'oklch(0.2 0.03 var(--ths) / .99)', border: '1px solid oklch(0.6 0.1 var(--th) / .35)' }}>
-              {BLOCKS.map(([ic, t, ins]) => <div key={t} className="hv" onClick={() => insertBlock(ins)} title={t} style={{ minWidth: 30, padding: '4px 8px', borderRadius: 7, textAlign: 'center', cursor: 'pointer', background: 'rgba(255,255,255,.06)', fontSize: 11, fontWeight: 700, color: 'oklch(0.85 0.02 var(--th))' }}>{ic}</div>)}
-            </div>
+            <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 0, zIndex: 5, display: 'flex', flexWrap: 'wrap', gap: 4, width: 220, padding: SP.sm + 1 })}>
+              {BLOCKS.map(([Icon, t, ins]) => <div key={t} className="hv" onClick={() => insertBlock(ins)} title={t} style={{ width: 30, height: 28, borderRadius: R.sm, display: 'grid', placeItems: 'center', cursor: 'pointer', background: fill(2), border: 'none', color: ink(1) }}><Icon size={13} strokeWidth={1.9} /></div>)}
+            </motion.div>
           )}
           {cheat && (
-            <div style={{ position: 'absolute', top: 30, left: 0, zIndex: 5, width: 260, padding: 10, borderRadius: 10, background: 'oklch(0.2 0.03 var(--ths) / .99)', border: '1px solid oklch(0.6 0.1 var(--th) / .35)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {CHEATS.map(([syn, desc]) => <div key={desc} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10 }}><code style={{ color: 'oklch(0.86 0.1 var(--th))', fontFamily: 'ui-monospace,monospace' }}>{syn}</code><span style={{ color: 'oklch(0.6 0.02 var(--th) / .6)' }}>{desc}</span></div>)}
-            </div>
+            <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 0, zIndex: 5, width: 260, padding: `${SP.sm}px ${SP.md}px`, display: 'flex', flexDirection: 'column' })}>
+              {CHEATS.map(([syn, desc], i) => <div key={desc} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10, padding: '4.5px 2px', borderTop: i > 0 ? `0.5px solid ${hairline(0.07)}` : 'none' }}><code style={{ ...text.mono(10), color: accent(0.85) }}>{syn}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
+            </motion.div>
           )}
           {keysOpen && (
-            <div style={{ position: 'absolute', top: 30, left: 60, zIndex: 5, width: 280, padding: 10, borderRadius: 10, background: 'oklch(0.2 0.03 var(--ths) / .99)', border: '1px solid oklch(0.6 0.1 var(--th) / .35)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ color: 'oklch(0.65 0.02 var(--th) / .6)', fontSize: 9, marginBottom: 2 }}>⌨ 快捷键</div>
-              {KEYS.map(([k, desc]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10 }}><code style={{ color: 'oklch(0.86 0.1 var(--th))', fontFamily: 'ui-monospace,monospace' }}>{k}</code><span style={{ color: 'oklch(0.6 0.02 var(--th) / .6)' }}>{desc}</span></div>)}
-            </div>
+            <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 60, zIndex: 5, width: 280, padding: `${SP.sm}px ${SP.md}px`, display: 'flex', flexDirection: 'column' })}>
+              <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2, padding: '2px 2px 5px' }}><Keyboard size={11} strokeWidth={2} style={{ color: accent() }} />快捷键</div>
+              {KEYS.map(([k, desc]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10, padding: '4.5px 2px', borderTop: `0.5px solid ${hairline(0.07)}` }}><code style={{ ...text.mono(10), color: accent(0.85) }}>{k}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
+            </motion.div>
           )}
           {snapMenu && snaps.current.length > 0 && (
-            <div style={{ position: 'absolute', top: 30, left: 120, zIndex: 6, width: 250, padding: 8, borderRadius: 10, background: 'oklch(0.2 0.03 var(--ths) / .99)', border: '1px solid oklch(0.6 0.1 var(--th) / .35)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <div style={{ color: 'oklch(0.65 0.02 var(--th) / .6)', fontSize: 9, marginBottom: 2 }}>⏱ 版本快照（点击回滚，本次会话内有效）</div>
+            <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 120, zIndex: 6, width: 250, padding: `${SP.sm}px ${SP.sm + 1}px`, display: 'flex', flexDirection: 'column' })}>
+              <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2, padding: '2px 2px 5px' }}><History size={11} strokeWidth={2} style={{ color: accent() }} />版本快照（点击回滚，本次会话内有效）</div>
               {snaps.current.map((sn) => (
-                <div key={sn.t} className="hv" onClick={() => restoreSnap(sn)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 8px', borderRadius: 7, cursor: 'pointer', background: 'rgba(255,255,255,.05)' }}>
-                  <span style={{ color: 'oklch(0.88 0.06 var(--th))', fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{new Date(sn.t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span>
-                  <span style={{ flex: 1, color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sn.title}</span>
-                  <span style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 9 }}>{sn.md.length} 字</span>
+                <div key={sn.t} className="hv" onClick={() => restoreSnap(sn)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5.5px 8px', borderRadius: R.sm, cursor: 'pointer', borderTop: `0.5px solid ${hairline(0.07)}` }}>
+                  <span style={{ ...text.mono(10), color: ink(1), fontWeight: 700 }}>{new Date(sn.t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span>
+                  <span style={{ flex: 1, color: ink(2), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sn.title}</span>
+                  <span style={{ color: ink(4), fontSize: 9 }}>{sn.md.length} 字</span>
                 </div>
               ))}
-            </div>
+            </motion.div>
           )}
         </div>
       )}
       {findOpen && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 'none' }}>
-          <input value={findText} onChange={(e) => setFindText(e.target.value)} placeholder="查找" style={{ flex: 1, background: 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 7, outline: 'none', color: 'oklch(0.93 0.01 var(--th))', fontSize: 11, padding: '5px 9px' }} />
-          <input value={replaceText} onChange={(e) => setReplaceText(e.target.value)} placeholder="替换为" style={{ flex: 1, background: 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 7, outline: 'none', color: 'oklch(0.93 0.01 var(--th))', fontSize: 11, padding: '5px 9px' }} />
-          <div className="hv" onClick={() => setUseRegex((v) => !v)} title="正则表达式模式" style={{ flex: 'none', padding: '4px 8px', borderRadius: 7, cursor: 'pointer', background: useRegex ? 'oklch(0.45 0.1 var(--th) / .55)' : 'rgba(255,255,255,.06)', color: useRegex ? 'oklch(0.92 0.08 var(--th))' : 'oklch(0.65 0.02 var(--th) / .6)', fontSize: 10, fontWeight: 700, fontFamily: 'ui-monospace,monospace' }}>.*</div>
-          <span style={{ color: findCount === -1 ? 'oklch(0.75 0.12 30)' : 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 10, flex: 'none' }}>{findCount === -1 ? '正则无效' : `${findCount} 处`}</span>
-          <div className="hv" onClick={replaceAll} style={{ flex: 'none', padding: '5px 10px', borderRadius: 7, cursor: 'pointer', background: 'oklch(0.4 0.08 var(--th) / .5)', color: 'oklch(0.88 0.1 var(--th))', fontSize: 10.5, fontWeight: 600 }}>全部替换</div>
-          <div className="hv" onClick={() => setFindOpen(false)} style={{ flex: 'none', cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 12 }}>✕</div>
+          <Input value={findText} onChange={setFindText} placeholder="查找" icon={Search} style={{ flex: 1 }} />
+          <Input value={replaceText} onChange={setReplaceText} placeholder="替换为" style={{ flex: 1 }} />
+          <Chip active={useRegex} onClick={() => setUseRegex((v) => !v)} title="正则表达式模式" style={{ flex: 'none', fontFamily: 'ui-monospace,monospace' }}>.*</Chip>
+          <span style={{ color: findCount === -1 ? sem.danger : ink(3), fontSize: FS.tiny, flex: 'none', fontVariantNumeric: 'tabular-nums' }}>{findCount === -1 ? '正则无效' : `${findCount} 处`}</span>
+          <Button sm variant="primary" onClick={replaceAll} style={{ flex: 'none' }}>全部替换</Button>
+          <button type="button" className="hv" onClick={() => setFindOpen(false)} style={{ flex: 'none', width: 22, height: 22, padding: 0, border: 'none', background: 'transparent', display: 'grid', placeItems: 'center', cursor: 'pointer', color: ink(3) }}><X size={13} strokeWidth={2} /></button>
         </div>
       )}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', background: light ? 'rgba(250,250,248,.96)' : 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 11, overflow: 'hidden' }}>
-        <div ref={gutRef} style={{ flex: 'none', width: 38, overflow: 'hidden', padding: '13px 0', textAlign: 'right', color: light ? 'rgba(0,0,0,.28)' : 'oklch(0.5 0.02 var(--th) / .4)', fontSize: 12, lineHeight: '22px', fontFamily: 'ui-monospace,monospace', userSelect: 'none' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', background: light ? 'rgba(250,250,248,.96)' : 'rgba(0,0,0,.24)', border: `0.5px solid ${light ? 'rgba(0,0,0,.08)' : hairline(0.07)}`, borderRadius: R.md, overflow: 'hidden', boxShadow: light ? 'none' : 'inset 0 1px 3px rgba(0,0,0,.25)' }}>
+        <div ref={gutRef} style={{ flex: 'none', width: 38, overflow: 'hidden', padding: '13px 0', textAlign: 'right', color: light ? 'rgba(0,0,0,.28)' : ink(4), fontSize: 12, lineHeight: '22px', fontFamily: 'ui-monospace,monospace', userSelect: 'none', borderRight: `0.5px solid ${light ? 'rgba(0,0,0,.06)' : hairline(0.05)}` }}>
           {Array.from({ length: stats.lines }, (_, i) => <div key={i} style={{ padding: '0 7px' }}>{i + 1}</div>)}
         </div>
         <textarea
@@ -547,16 +578,16 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
           placeholder="在此撰写 Markdown…（Ctrl+S 保存 · Ctrl+Z/Y 撤销重做 · Ctrl+F 查找 · 可粘贴/拖入图片）"
           className="ai-scroll"
           spellCheck={false}
-          style={{ flex: 1, minHeight: 0, resize: 'none', background: 'transparent', border: 'none', outline: 'none', color: light ? '#222' : 'oklch(0.93 0.01 var(--th))', fontSize: 13.5, lineHeight: '22px', fontFamily: "ui-monospace,'Cascadia Code',Consolas,monospace", padding: '13px 15px 13px 5px' }}
+          style={{ flex: 1, minHeight: 0, resize: 'none', background: 'transparent', border: 'none', outline: 'none', color: light ? '#222' : ink(1), fontSize: 13.5, lineHeight: '22px', fontFamily: "ui-monospace,'Cascadia Code',Consolas,monospace", padding: '13px 15px 13px 10px' }}
         />
       </div>
     </div>
   )
 
   const preview = (
-    <div ref={previewRef} className="ai-scroll" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', background: mode === 'read' ? (light ? '#ffffff' : 'transparent') : ui.prev, borderRadius: 11, border: mode === 'read' ? 'none' : `1px solid ${ui.bd}` }}>
+    <div ref={previewRef} className="ai-scroll" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', background: mode === 'read' ? (light ? '#ffffff' : 'transparent') : ui.prev, borderRadius: R.md, border: mode === 'read' ? 'none' : `0.5px solid ${ui.bd}` }}>
       <div style={{ maxWidth: mode === 'read' ? rWidth : '100%', margin: '0 auto', padding: mode === 'read' ? '8px 34px 70px' : '16px 20px', fontSize: mode === 'read' ? rFont : undefined }}>
-        {mode === 'read' && <div style={{ fontSize: rFont * 2, fontWeight: 900, color: light ? '#0f0f14' : 'oklch(0.97 0.02 var(--th))', margin: '10px 0 22px', lineHeight: 1.25 }}>{title}</div>}
+        {mode === 'read' && <div style={{ fontSize: rFont * 2, fontWeight: 900, color: light ? '#0f0f14' : ink(1), margin: '10px 0 22px', lineHeight: 1.25 }}>{title}</div>}
         <Markdown text={md} reader light={light} />
       </div>
     </div>
@@ -564,55 +595,66 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: zen ? 0 : '3vh 3vw', background: 'oklch(0.08 0.02 var(--ths) / .6)', backdropFilter: 'blur(6px)', animation: 'ai-fadein .15s ease' }}>
-      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', borderRadius: zen ? 0 : 18, overflow: 'hidden', background: ui.card, border: zen ? 'none' : `1px solid ${ui.bd}`, boxShadow: 'none' }}>
+      <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', borderRadius: zen ? 0 : R.xl, overflow: 'hidden', ...(light ? { background: ui.card } : surface.panel()), border: zen ? 'none' : `0.5px solid ${ui.bd}`, boxShadow: zen ? 'none' : '0 30px 60px -20px rgba(0,0,0,.5)' }}>
         {/* 顶栏 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 14px', borderBottom: `1px solid ${ui.bd}`, flex: 'none', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 15 }}>✍️</span>
-          <input value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true) }} placeholder="文档标题" style={{ flex: 1, minWidth: 120, background: 'transparent', border: 'none', outline: 'none', color: ui.fg, fontSize: 14.5, fontWeight: 700 }} />
-          {dirty && <span title="未保存" style={{ width: 7, height: 7, borderRadius: 999, background: 'oklch(0.8 0.13 75)', flex: 'none' }} />}
-          {filePath && <span title={filePath} style={{ color: ui.sub, fontSize: 9.5, flex: 'none', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📄 {filePath.split(/[\\/]/).pop()}</span>}
-          <div style={{ display: 'flex', gap: 2, background: ui.btn, borderRadius: 9, padding: 2, flex: 'none' }}>{modeBtn('edit', '编辑')}{modeBtn('split', '分屏')}{modeBtn('read', '阅读')}</div>
-          {iconBtn('☰', '大纲', () => setTocOpen((v) => !v), tocOpen)}
-          {iconBtn(light ? '🌙' : '☀️', light ? '暗色编辑' : '亮色编辑', () => setLight((v) => !v))}
-          {iconBtn(autoSave ? '💾' : '🅰', autoSave ? '自动保存:开' : '自动保存:关', () => setAutoSave((v) => !v), autoSave)}
-          {iconBtn(zen ? '◱' : '⛶', zen ? '退出专注' : '专注写作', () => setZen((v) => !v), zen)}
-          {msg && <span style={{ color: 'oklch(0.82 calc(0.12 * var(--cs, 1)) var(--th))', fontSize: 10.5, flex: 'none' }}>{msg}</span>}
-          {iconBtn('📂', '打开本地 .md', () => void openFile())}
-          {iconBtn('⧉', '复制富文本', copyRich)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 14px', borderBottom: `0.5px solid ${ui.bd}`, flex: 'none', flexWrap: 'wrap' }}>
+          <div style={{ width: 26, height: 26, borderRadius: R.sm, background: gradient.brand(), color: gradient.onPrimary(), display: 'grid', placeItems: 'center', flex: 'none', boxShadow: `0 2px 8px ${accent(0.7, 0.35)}, inset 0 1px 0 rgba(255,255,255,.3)` }}>
+            <PenLine size={13} strokeWidth={2} />
+          </div>
+          <input value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true) }} placeholder="文档标题" style={{ flex: 1, minWidth: 120, background: 'transparent', border: 'none', outline: 'none', color: ui.fg, fontSize: FS.subtitle, fontWeight: 700, fontFamily: 'inherit' }} />
+          {dirty && <span title="未保存" style={{ width: 7, height: 7, borderRadius: 999, background: sem.warn, boxShadow: `0 0 7px ${sem.warn}`, flex: 'none' }} />}
+          {filePath && <span title={filePath} style={{ color: ui.sub, fontSize: 9.5, flex: 'none', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={11} strokeWidth={1.9} />{filePath.split(/[\\/]/).pop()}</span>}
+          <Segmented<Mode>
+            value={mode}
+            onChange={setMode}
+            options={[
+              { key: 'edit', label: '编辑', icon: PenLine },
+              { key: 'split', label: '分屏', icon: AlignHorizontalSpaceAround },
+              { key: 'read', label: '阅读', icon: BookOpen },
+            ]}
+            style={{ flex: 'none' }}
+          />
+          {tbtn(List, '大纲', () => setTocOpen((v) => !v), tocOpen)}
+          {tbtn(light ? Moon : Sun, light ? '暗色编辑' : '亮色编辑', () => setLight((v) => !v))}
+          {tbtn(Save, autoSave ? '自动保存:开' : '自动保存:关', () => setAutoSave((v) => !v), autoSave)}
+          {tbtn(zen ? Minimize : Maximize, zen ? '退出专注' : '专注写作', () => setZen((v) => !v), zen)}
+          {msg && <span style={{ color: accent(0.85), fontSize: FS.tiny, fontWeight: 600, flex: 'none' }}>{msg}</span>}
+          {tbtn(FolderOpen, '打开本地 .md', () => void openFile())}
+          {tbtn(Copy, '复制富文本', copyRich)}
           <div style={{ position: 'relative', flex: 'none' }}>
-            {iconBtn('⤓导出', '导出 PDF/HTML/TXT/MD', () => setExportMenu((v) => !v), exportMenu)}
+            {tbtn(FileDown, '导出 PDF/HTML/TXT/MD', () => setExportMenu((v) => !v), exportMenu)}
             {exportMenu && (
-              <div style={{ position: 'absolute', top: 30, right: 0, zIndex: 7, width: 168, padding: 6, borderRadius: 9, background: 'oklch(0.2 0.03 var(--ths) / .99)', border: '1px solid oklch(0.6 0.1 var(--th) / .35)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <div style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 8.5, padding: '2px 5px' }}>样式主题（PDF/HTML）</div>
+              <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ right: 0, zIndex: 7, width: 176, padding: SP.sm + 1, display: 'flex', flexDirection: 'column', gap: 2 })}>
+                <div style={{ ...text.overline(), fontSize: 8.5, padding: '2px 5px' }}>样式主题（PDF/HTML）</div>
                 <div style={{ display: 'flex', gap: 3, padding: '0 3px 4px' }}>
                   {(Object.entries(EXPORT_THEMES) as [typeof exportTheme, { label: string }][]).map(([k, t]) => (
-                    <div key={k} className="hv" onClick={() => setExportTheme(k)} style={{ flex: 1, textAlign: 'center', padding: '3px 0', borderRadius: 6, cursor: 'pointer', background: exportTheme === k ? 'oklch(0.45 0.1 var(--th) / .55)' : 'rgba(255,255,255,.05)', color: exportTheme === k ? 'oklch(0.92 0.06 var(--th))' : 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 9.5, fontWeight: 600 }}>{t.label}</div>
+                    <div key={k} className="hv" onClick={() => setExportTheme(k)} style={{ flex: 1, textAlign: 'center', padding: '3px 0', borderRadius: R.sm, cursor: 'pointer', background: exportTheme === k ? semBg(accent(), 0.22) : fill(2), border: `0.5px solid ${exportTheme === k ? accent(0.7, 0.3) : 'transparent'}`, color: exportTheme === k ? accent(0.88) : ink(2), fontSize: 9.5, fontWeight: 600 }}>{t.label}</div>
                   ))}
                 </div>
-                {([['pdf', '📕 PDF'], ['html', '🌐 HTML'], ['txt', '📄 TXT'], ['md', '⬇ Markdown']] as const).map(([k, l]) => (
-                  <div key={k} className="hv" onClick={() => void exportAs(k)} style={{ padding: '5px 9px', borderRadius: 7, cursor: 'pointer', color: 'oklch(0.86 0.02 var(--th))', fontSize: 11 }}>{l}</div>
+                {([['pdf', 'PDF', FileText], ['html', 'HTML', Globe], ['txt', 'TXT', FileText], ['md', 'Markdown', FileDown]] as const).map(([k, l, Icon], i) => (
+                  <div key={k} className="hv" onClick={() => void exportAs(k)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 9px', borderRadius: R.sm, cursor: 'pointer', borderTop: i > 0 ? `0.5px solid ${hairline(0.07)}` : 'none', color: ink(1), fontSize: 11 }}><Icon size={12} strokeWidth={1.9} style={{ color: accent(0.85) }} />{l}</div>
                 ))}
-              </div>
+              </motion.div>
             )}
           </div>
-          <div className="hv" onClick={() => void save()} title="保存（Ctrl+S）" style={{ padding: '5px 13px', borderRadius: 8, cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 11, fontWeight: 700, flex: 'none' }}>保存</div>
-          <div className="hv" onClick={() => { onSave(title, md); onClose() }} title="关闭（自动保存到便签）" style={{ padding: '5px 10px', borderRadius: 8, cursor: 'pointer', color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 15, flex: 'none' }}>✕</div>
+          <Button sm variant="primary" icon={Save} onClick={() => void save()} title="保存（Ctrl+S）" style={{ flex: 'none' }}>保存</Button>
+          <IconButton icon={X} onClick={() => { onSave(title, md); onClose() }} title="关闭（自动保存到便签）" size={27} style={{ flex: 'none' }} />
         </div>
         {/* 阅读排版调节条 */}
         {mode === 'read' && !zen && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 16px', borderBottom: `1px solid ${ui.bd}`, flex: 'none' }}>
-            <span style={{ color: ui.sub, fontSize: 10.5 }}>字号</span>
-            <input type="range" min={13} max={22} value={rFont} onChange={(e) => setRFont(Number(e.target.value))} style={{ width: 90, accentColor: 'oklch(0.75 calc(0.14 * var(--cs, 1)) var(--th))' }} />
-            <span style={{ color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 10.5 }}>页宽</span>
-            <input type="range" min={560} max={1000} step={20} value={rWidth} onChange={(e) => setRWidth(Number(e.target.value))} style={{ width: 120, accentColor: 'oklch(0.75 calc(0.14 * var(--cs, 1)) var(--th))' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 16px', borderBottom: `0.5px solid ${ui.bd}`, flex: 'none' }}>
+            <span style={{ color: ui.sub, fontSize: FS.tiny }}>字号</span>
+            <Slider min={13} max={22} value={rFont} onChange={setRFont} style={{ width: 90 }} />
+            <span style={{ color: ui.sub, fontSize: FS.tiny }}>页宽</span>
+            <Slider min={560} max={1000} step={20} value={rWidth} onChange={setRWidth} style={{ width: 120 }} />
           </div>
         )}
         {/* 主体 */}
         <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12, padding: zen ? '14px 8vw' : 14 }}>
           {tocOpen && !zen && (
-            <div className="ai-scroll" style={{ width: 190, flex: 'none', overflowY: 'auto', borderRight: `1px solid ${ui.bd}`, paddingRight: 10, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <div style={{ color: ui.sub, fontSize: 9.5, fontWeight: 700, marginBottom: 4 }}>大纲</div>
-              {toc.length ? toc.map((t) => <div key={t.idx} className="hv" onClick={() => jumpToc(t.idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '3px 6px', borderRadius: 6, color: ui.fg, opacity: t.level <= 2 ? 0.9 : 0.7, paddingLeft: 6 + (t.level - 1) * 11, fontWeight: t.level <= 2 ? 600 : 400 }}>{t.text.slice(0, 22)}</div>) : <div style={{ color: ui.sub, fontSize: 10 }}>用 # 写标题生成大纲</div>}
+            <div className="ai-scroll" style={{ width: 190, flex: 'none', overflowY: 'auto', borderRight: `0.5px solid ${ui.bd}`, paddingRight: 10, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}><List size={11} strokeWidth={2} style={{ color: accent() }} />大纲</div>
+              {toc.length ? toc.map((t) => <div key={t.idx} className="hv" onClick={() => jumpToc(t.idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '3px 6px', borderRadius: R.sm, color: ui.fg, opacity: t.level <= 2 ? 0.9 : 0.7, paddingLeft: 6 + (t.level - 1) * 11, fontWeight: t.level <= 2 ? 600 : 400 }}>{t.text.slice(0, 22)}</div>) : <div style={{ color: ui.sub, fontSize: 10 }}>用 # 写标题生成大纲</div>}
             </div>
           )}
           {mode === 'edit' && editor}
@@ -620,39 +662,41 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
           {mode === 'read' && preview}
           {/* 问文档面板 */}
           {askOpen && !zen && (
-            <div style={{ width: 260, flex: 'none', display: 'flex', flexDirection: 'column', gap: 8, borderLeft: `1px solid ${ui.bd}`, paddingLeft: 12, minHeight: 0 }}>
+            <div style={{ width: 260, flex: 'none', display: 'flex', flexDirection: 'column', gap: 8, borderLeft: `0.5px solid ${ui.bd}`, paddingLeft: 12, minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: 'oklch(0.9 0.06 var(--th))', fontSize: 11.5, fontWeight: 800 }}>💬 问文档</span>
+                <MessageSquare size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+                <span style={{ ...text.subtitle(), fontSize: FS.small, fontWeight: 800 }}>问文档</span>
                 <span style={{ flex: 1 }} />
-                <span className="hv" onClick={() => setAskOpen(false)} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .6)', fontSize: 12 }}>✕</span>
+                <button type="button" className="hv" onClick={() => setAskOpen(false)} style={{ width: 20, height: 20, padding: 0, border: 'none', background: 'transparent', display: 'grid', placeItems: 'center', cursor: 'pointer', color: ink(3) }}><X size={12} strokeWidth={2} /></button>
               </div>
               <div style={{ display: 'flex', gap: 5 }}>
-                <input value={askQ} onChange={(e) => setAskQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void runAsk() }} placeholder="就本文提问…" style={{ flex: 1, background: 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, outline: 'none', color: 'oklch(0.93 0.01 var(--th))', fontSize: 11, padding: '6px 9px' }} />
-                <div className="hv" onClick={() => void runAsk()} style={{ padding: '0 11px', borderRadius: 8, display: 'flex', alignItems: 'center', cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 11, fontWeight: 700 }}>问</div>
+                <Input value={askQ} onChange={setAskQ} onKeyDown={(e) => { if (e.key === 'Enter') void runAsk() }} placeholder="就本文提问…" style={{ flex: 1 }} />
+                <Button sm variant="primary" onClick={() => void runAsk()}>问</Button>
               </div>
-              <div className="ai-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: askA ? 10 : 0, borderRadius: 10, background: askA ? 'rgba(255,255,255,.03)' : 'transparent', fontSize: 11.5, lineHeight: 1.6 }}>
-                {askA ? <Markdown text={askA} light={light} /> : <div style={{ color: ui.sub, fontSize: 10.5, lineHeight: 1.7 }}>只依据当前文档内容回答,不改动正文。适合快速回顾、答疑。</div>}
+              <div className="ai-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', ...(askA ? { ...surface.inset(), padding: 10 } : { padding: 0 }), fontSize: FS.small, lineHeight: 1.6 }}>
+                {askA ? <Markdown text={askA} light={light} /> : <div style={{ color: ui.sub, fontSize: FS.tiny, lineHeight: 1.7 }}>只依据当前文档内容回答，不改动正文。适合快速回顾、答疑。</div>}
               </div>
             </div>
           )}
         </div>
         {/* 底栏 */}
         {!zen && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '7px 16px', borderTop: `1px solid ${ui.bd}`, color: ui.sub, fontSize: 10, flex: 'none' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '7px 16px', borderTop: `0.5px solid ${ui.bd}`, color: ui.sub, fontSize: FS.tiny, flex: 'none', fontVariantNumeric: 'tabular-nums' }}>
             <span>{stats.words} 词</span><span>{stats.chars} 字符</span><span>{stats.lines} 行</span><span>约 {stats.min} 分钟读完</span><span>{toc.length} 个标题</span>
-            <span style={{ fontVariantNumeric: 'tabular-nums' }}>行 {curPos.ln} : 列 {curPos.col}</span>
+            <span>行 {curPos.ln} : 列 {curPos.col}</span>
             {stats.taskTotal > 0 && (
               <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                ☑ {stats.taskDone}/{stats.taskTotal}
-                <span style={{ width: 52, height: 4, borderRadius: 999, background: 'rgba(255,255,255,.1)', overflow: 'hidden', display: 'inline-block' }}>
-                  <span style={{ display: 'block', width: `${Math.round((stats.taskDone / stats.taskTotal) * 100)}%`, height: '100%', background: 'oklch(0.72 0.13 150)' }} />
+                <CheckSquare size={11} strokeWidth={2} style={{ color: sem.calm }} />
+                {stats.taskDone}/{stats.taskTotal}
+                <span style={{ width: 52, height: 4, borderRadius: 999, background: fill(3), overflow: 'hidden', display: 'inline-block' }}>
+                  <span style={{ display: 'block', width: `${Math.round((stats.taskDone / stats.taskTotal) * 100)}%`, height: '100%', background: sem.calm, borderRadius: 999 }} />
                 </span>
               </span>
             )}
-            {typewriter && <span style={{ color: 'oklch(0.8 0.1 var(--th))' }}>🎯 打字机</span>}
+            {typewriter && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: sem.focus, fontWeight: 600 }}><Target size={11} strokeWidth={2} />打字机</span>}
           </div>
         )}
-      </div>
+      </motion.div>
     </div>
   )
 }

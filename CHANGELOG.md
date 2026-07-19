@@ -2,6 +2,28 @@
 
 本项目遵循语义化版本。日期使用 Asia/Shanghai。
 
+## [0.3.0] - 2026-07-19
+
+### Added
+
+- 设置页显示器选择使用真实显示器列表（新增 `getDisplays` IPC，展示分辨率/DPI 缩放/主屏标记，替代硬编码双屏假图）。
+
+### Changed
+
+- **视觉体系 Apple（macOS/iOS）化**：层级从"1px 描边制"改为 Apple 填充制——新增 `fill(1-4)` 填充阶梯与 `hairline()` 发型线分隔（0.5px），卡片/容器全面去描边；圆角对齐 Apple 连续圆角阶梯（按钮 10/卡片 13/浮层 18/面板 28）；排版对齐 SF（标题负字距、iOS label 四级墨色、SF 字体栈优先）；分段控件改 iOS 滑动 thumb（layoutId 弹簧）、开关改 iOS 白钮、按钮改圆角矩形（新增 tinted 变体）；按压反馈改 iOS 式透明度下沉；设置/待办/观察清单等列表改 inset grouped 分组（行间 hairline 左缩进分隔，新增 `Group` 组件）。
+- **前端视觉全面重设计**（功能零改动）：新建 `src/renderer/src/ui/` 设计系统——`tokens.ts`（层级表面/排版阶梯/间距圆角/语义色令牌，消费 OKLCH 主题变量）、`components.tsx`（Button/IconButton/Card/Chip/Badge/Input/Segmented/SectionHeader/EmptyState/Switch/Slider 共享组件库）、`motion.ts`（framer-motion 动效预设）、`icons.ts`（lucide 语义图标表）。
+- 全部 11 个分区 + 12 个浮层/工作室 + 应用外壳（头部/Tab 栏/toast）重做到设计系统：emoji 图标全面替换为 lucide，Tab 栏改 layoutId 滑动胶囊指示器 + 分区图标，浮层统一 `surface.overlay()` + overlayPop 弹出，卡片入场统一 fadeScaleIn（仅 opacity/scale/filter，保留"禁 translate"约束）。
+- 材质进阶：面板顶部极光氛围光 + 玻璃颗粒噪点层 + 底部渐变收边高光 + 主题色环境投影；Tab 栏下签名渐变分割线；主按钮 hover 流光；空态图标光晕；审批卡琥珀注意力脉冲；待处理 Tab 声呐环；滚动条悬停才浮现。
+- 全屏模式恢复真全屏：窗口从工作区切到整个物理显示器（`display.bounds`，screen-saver 层级盖任务栏），退出回到工作区。
+- 新增依赖 framer-motion（动效）；AmbientBar 迷你条材质与设计令牌对齐（动效体系不变）。
+- 新增全局样式：文本选区主题色、输入焦点环（.ui-input）、滑块手柄（.ui-slider）、:focus-visible 焦点环、prefers-reduced-motion 降级。
+
+### Fixed
+
+- 问答思考过程重写为显式可折叠区块：头部可点击（字数提示 + 展开/收起 chevron），不再依赖不起眼的文字链；展开后 320px 内滚动，流式"思考中"视图保持最近几行自动跟随。
+- 修复分区切换卡顿：全岛入场动画移除 filter: blur（透明窗口大树重绘掉帧根因），Tab 内容转场改 opacity-only 快速交叉淡化并去掉 AnimatePresence mode="wait"（新分区不再干等旧分区退出），列表 stagger 降频。
+- **多显示器定位全面修复**：新增 display-added/removed/metrics-changed 监听，热插拔/改分辨率/改 DPI 后岛与挂件自动重定位；跨 DPI 屏 setBounds 增加 60ms 校验重试（修复 DIP 换算竞态导致的偏移）；启动时渲染层水合后权威同步一次多屏偏好（修复主进程默认 follow=true 与 UI 默认固定主屏不一致导致的跳屏）；桌面挂件/钉屏便签从锚主屏改为跟随岛所在显示器。
+
 ## [0.2.0] - 2026-07-11
 
 ### Added

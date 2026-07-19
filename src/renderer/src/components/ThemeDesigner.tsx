@@ -1,8 +1,14 @@
 // 主题设计器：实时拖动 OKLCH 令牌（色相/饱和/明度），整岛即时预览，保存/二次编辑自定义主题。
-// 增强：灵感种子一键载入 · 🎲 随机 · ✨ AI 按氛围描述生成 · 令牌 JSON 导出/导入。
+// 增强：灵感种子一键载入 · 随机 · AI 按氛围描述生成 · 令牌 JSON 导出/导入。
+// 视觉层：设计系统重做（ui/tokens 表面层级 + ui/components 基础件 + lucide 语义图标 + overlayPop 浮层动效），功能逻辑不变。
 
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
+import { Check, ClipboardPaste, Copy, Dices, Palette, Sparkles } from 'lucide-react'
 import { applyThemeTokens } from '../logic/themes'
+import { Button, Chip, Input, Slider } from '../ui/components'
+import { overlayPop } from '../ui/motion'
+import { accent, accent2, FS, hairline, ink, R, SP, surface, text } from '../ui/tokens'
 
 export interface Tokens { th: number; th2: number; ths: number; cs: number; css: number; pl: number }
 
@@ -110,56 +116,84 @@ export function ThemeDesigner({ open, seed, seedName, editKey, onSave, onClose, 
     } catch { flash('剪贴板里不是主题令牌 JSON') }
   }
 
-  const toolChip: React.CSSProperties = { padding: '4px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 600, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)', color: 'oklch(0.82 0.02 var(--th) / .85)', whiteSpace: 'nowrap' }
-
   return (
-    <div onMouseDown={onClose} style={{ position: 'fixed', inset: 0, zIndex: 215, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(0.08 0.02 var(--ths) / .55)', backdropFilter: 'blur(4px)', animation: 'ai-fadein .15s ease' }}>
-      <div onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(460px, 88vw)', maxHeight: '86vh', overflowY: 'auto', borderRadius: 18, background: 'oklch(calc(0.17 * var(--pl, 1)) calc(0.03 * var(--css, 1)) var(--ths) / .99)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .35)', boxShadow: 'none', animation: 'ai-riseblur .3s cubic-bezier(.22,.61,.36,1)' }} className="ai-scroll">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 16px', borderBottom: '1px solid rgba(255,255,255,.07)' }}>
-          <span style={{ fontSize: 15 }}>🎨</span>
-          <span style={{ color: 'oklch(0.96 0.01 var(--th))', fontSize: 13.5, fontWeight: 700 }}>{editKey ? `编辑主题 · ${seedName || ''}` : '主题设计器'}</span>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1, transition: { duration: 0.15 } }}
+      onMouseDown={onClose}
+      style={{ position: 'fixed', inset: 0, zIndex: 215, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.5)', backdropFilter: 'blur(4px)' }}
+    >
+      <motion.div
+        variants={overlayPop}
+        initial="initial"
+        animate="animate"
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{ width: 'min(460px, 88vw)', maxHeight: '86vh', overflowY: 'auto', ...surface.overlay() }}
+        className="ai-scroll"
+      >
+        {/* 头部：图标 + 标题 + 状态消息 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: `${SP.md + 1}px ${SP.lg}px`, borderBottom: `0.5px solid ${hairline(0.1)}` }}>
+          <div style={{ width: 24, height: 24, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: `color-mix(in oklch, ${accent()} 14%, transparent)`, color: accent() }}>
+            <Palette size={13} strokeWidth={1.75} />
+          </div>
+          <span style={text.subtitle()}>{editKey ? `编辑主题 · ${seedName || ''}` : '主题设计器'}</span>
           <span style={{ flex: 1 }} />
-          {msg ? <span style={{ color: 'oklch(0.82 calc(0.12 * var(--cs, 1)) var(--th))', fontSize: 10 }}>{msg}</span> : <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 10 }}>拖动即整岛预览</span>}
+          {msg
+            ? <span style={{ ...text.faint(), color: accent(0.85, 0.95) }}>{msg}</span>
+            : <span style={text.faint()}>拖动即整岛预览</span>}
         </div>
 
-        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* 预览条 */}
+        <div style={{ padding: `${SP.md + 2}px ${SP.lg}px`, display: 'flex', flexDirection: 'column', gap: SP.md }}>
+          {/* 预览条：主→副色相渐变 + 面板表面样例 */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ flex: 1, height: 30, borderRadius: 9, background: 'linear-gradient(90deg, oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.62 calc(0.15 * var(--cs, 1)) var(--th2)))' }} />
-            <div style={{ width: 60, height: 30, borderRadius: 9, background: 'oklch(calc(0.2 * var(--pl, 1)) calc(0.03 * var(--css, 1)) var(--ths))', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'oklch(0.9 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 10 }}>面板</div>
+            <div style={{ flex: 1, height: 30, borderRadius: R.sm, background: `linear-gradient(90deg, ${accent(0.78)}, ${accent2(0.62)})`, boxShadow: `0 4px 14px -6px ${accent(0.7, 0.4)}` }} />
+            <div style={{ width: 60, height: 30, borderRadius: R.sm, ...surface.panel(), border: `0.5px solid ${accent(0.7, 0.35)}`, display: 'flex', alignItems: 'center', justifyContent: 'center', ...text.faint(), color: ink(2) }}>面板</div>
           </div>
 
-          {/* 灵感种子 + 工具 */}
+          {/* 灵感种子 + 工具（种子 label 为数据串，原样渲染） */}
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
             {SEEDS.map((s) => (
-              <span key={s.label} className="hv" onClick={() => setT(s.t)} style={toolChip}>{s.label}</span>
+              <Chip key={s.label} onClick={() => setT(s.t)}>{s.label}</Chip>
             ))}
-            <span className="hv" onClick={randomize} title="随机一组配色" style={toolChip}>🎲 随机</span>
-            <span className="hv" onClick={copyTokens} title="复制令牌 JSON（备份/分享）" style={toolChip}>⧉ 导出</span>
-            <span className="hv" onClick={() => void importTokens()} title="从剪贴板导入令牌 JSON" style={toolChip}>📥 导入</span>
+            <Chip icon={Dices} onClick={randomize} title="随机一组配色">随机</Chip>
+            <Chip icon={Copy} onClick={copyTokens} title="复制令牌 JSON（备份/分享）">导出</Chip>
+            <Chip icon={ClipboardPaste} onClick={() => void importTokens()} title="从剪贴板导入令牌 JSON">导入</Chip>
           </div>
 
-          {/* ✨ AI 生成 */}
+          {/* AI 生成：氛围描述 → 令牌 */}
           <div style={{ display: 'flex', gap: 6 }}>
-            <input value={aiDesc} onChange={(e) => setAiDesc(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void aiGenerate() }} placeholder="✨ 描述氛围让 AI 配色：如「雨后的京都青苔」" style={{ flex: 1, background: 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, outline: 'none', color: 'oklch(0.95 0.01 var(--th))', fontSize: 11, padding: '6px 10px' }} />
-            <div className="hv" onClick={() => void aiGenerate()} style={{ padding: '0 12px', borderRadius: 8, display: 'flex', alignItems: 'center', cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.7 0.14 var(--th) / .5), oklch(0.55 0.13 var(--th2) / .4))', color: 'oklch(0.95 0.02 var(--th))', fontSize: 11, fontWeight: 700 }}>{aiBusy ? '生成中…' : '✨ 生成'}</div>
+            <Input
+              value={aiDesc}
+              onChange={setAiDesc}
+              onKeyDown={(e) => { if (e.key === 'Enter') void aiGenerate() }}
+              icon={Sparkles}
+              placeholder="描述氛围让 AI 配色：如「雨后的京都青苔」"
+              style={{ flex: 1 }}
+            />
+            <Button variant="primary" icon={Sparkles} onClick={() => void aiGenerate()}>{aiBusy ? '生成中…' : '生成'}</Button>
           </div>
 
-          {SLIDERS.map(([k, label, min, max, step]) => (
-            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ width: 78, flex: 'none', color: 'oklch(0.85 0.02 var(--th) / .85)', fontSize: 11 }}>{label}</span>
-              <input type="range" min={min} max={max} step={step} value={t[k]} onChange={(e) => setT((v) => ({ ...v, [k]: Number(e.target.value) }))} style={{ flex: 1, accentColor: 'oklch(0.75 calc(0.14 * var(--cs, 1)) var(--th))' }} />
-              <span style={{ width: 38, flex: 'none', textAlign: 'right', color: 'oklch(0.72 calc(0.1 * var(--cs, 1)) var(--th))', fontSize: 10.5, fontVariantNumeric: 'tabular-nums' }}>{k === 'th' || k === 'th2' || k === 'ths' ? t[k] : t[k].toFixed(2)}</span>
-            </div>
-          ))}
+          {/* 令牌滑杆 */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {SLIDERS.map(([k, label, min, max, step]) => (
+              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ width: 78, flex: 'none', ...text.dim(), fontSize: FS.small }}>{label}</span>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+                  <Slider min={min} max={max} step={step} value={t[k]} onChange={(v) => setT((s) => ({ ...s, [k]: v }))} />
+                </div>
+                <span style={{ width: 38, flex: 'none', textAlign: 'right', ...text.num(FS.tiny), color: ink(2) }}>{k === 'th' || k === 'th2' || k === 'ths' ? t[k] : t[k].toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
 
+          {/* 底部：主题名 + 取消/保存 */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="主题名" style={{ flex: 1, background: 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, outline: 'none', color: 'oklch(0.95 0.01 var(--th))', fontSize: 12, padding: '7px 10px' }} />
-            <div className="hv" onClick={onClose} style={{ padding: '7px 13px', borderRadius: 8, cursor: 'pointer', background: 'rgba(255,255,255,.06)', color: 'oklch(0.78 0.02 var(--th) / .75)', fontSize: 11.5 }}>取消</div>
-            <div className="hv" onClick={() => onSave(name.trim() || '自定义', t, editKey)} style={{ padding: '7px 15px', borderRadius: 8, cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 11.5, fontWeight: 700 }}>{editKey ? '✓ 更新主题' : '保存主题'}</div>
+            <Input value={name} onChange={setName} placeholder="主题名" style={{ flex: 1 }} />
+            <Button variant="ghost" onClick={onClose}>取消</Button>
+            <Button variant="primary" icon={editKey ? Check : undefined} onClick={() => onSave(name.trim() || '自定义', t, editKey)}>{editKey ? '更新主题' : '保存主题'}</Button>
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }

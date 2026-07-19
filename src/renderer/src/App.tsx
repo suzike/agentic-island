@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import type { AgentCliEvent, CalendarEvent, GitHubRepo, IslandSnapshot, KbSourceView, RuntimeInfo } from '../../shared/protocol'
+import type { AgentCliEvent, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, RuntimeInfo } from '../../shared/protocol'
 import type { ActivityEntry, AgentLive, AgentVM, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
@@ -9,6 +9,7 @@ import { tagOf } from './logic/clip'
 import { CLUSTER_SYSTEM, clusterPrompt, parseClusters } from './logic/clipCluster'
 import { noteSystemPrompt, parseAiNote, noteSearchPrompt, parseSearchIds } from './logic/noteAi'
 import { BUILTIN_POOLS, barRefreshPrompt, parseBarRefresh } from './logic/barContent'
+import { deriveAmbientStatus } from './logic/ambientBar'
 import { PRESET_FEEDS, DEFAULT_FEED_INTERESTS, linkId, dailyPrompt, parseDaily, processPrompt, parseProcess, titleBlocked } from './logic/rssAi'
 import { capsuleSystemPrompt, parseCapsule, type CapsuleResult } from './logic/capsuleAi'
 import { Capsule } from './components/Capsule'
@@ -47,20 +48,25 @@ import { PRESET_SHORTCUTS, type ShortcutDef } from './logic/shortcuts'
 import { migrateProjects, newProject } from './logic/workbench'
 import { synthesisPrompt } from './logic/newsIntel'
 import { island } from './bridge'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ArrowUpRight, BellOff, Camera, Check, ChevronDown, Download, Expand, Maximize2, Minimize2, Moon, Pin, Shrink, Timer, Waves, X } from 'lucide-react'
+import { tabContent } from './ui/motion'
+import { accent, gradient, hairline, ink } from './ui/tokens'
+import { Ico } from './ui/icons'
 
 type Tab = 'agents' | 'plan' | 'ask' | 'shortcuts' | 'todos' | 'notes' | 'news' | 'review' | 'repos' | 'term' | 'settings'
-const TABS: { key: Tab; label: string }[] = [
-  { key: 'agents', label: 'Agents' },
-  { key: 'plan', label: 'Plan' },
-  { key: 'ask', label: '问答' },
-  { key: 'shortcuts', label: '快捷' },
-  { key: 'todos', label: '待办' },
-  { key: 'notes', label: '灵感便签' },
-  { key: 'news', label: '资讯' },
-  { key: 'review', label: '复盘' },
-  { key: 'repos', label: '仓库' },
-  { key: 'term', label: '终端' },
-  { key: 'settings', label: '设置' }
+const TABS: { key: Tab; label: string; icon: (typeof Ico)[keyof typeof Ico] }[] = [
+  { key: 'agents', label: 'Agents', icon: Ico.agent },
+  { key: 'plan', label: 'Plan', icon: Ico.plan },
+  { key: 'ask', label: '问答', icon: Ico.ask },
+  { key: 'shortcuts', label: '快捷', icon: Ico.shortcuts },
+  { key: 'todos', label: '待办', icon: Ico.todos },
+  { key: 'notes', label: '灵感便签', icon: Ico.notes },
+  { key: 'news', label: '资讯', icon: Ico.news },
+  { key: 'review', label: '复盘', icon: Ico.review },
+  { key: 'repos', label: '仓库', icon: Ico.repos },
+  { key: 'term', label: '终端', icon: Ico.term },
+  { key: 'settings', label: '设置', icon: Ico.settings }
 ]
 
 // 桌面挂件「AI 速览」系统提示：只回一句极短中文提点
@@ -224,6 +230,9 @@ export function App(): React.JSX.Element {
   const [soundPickerOpen, setSoundPickerOpen] = useState(false)
   const [monitorPreviewOpen, setMonitorPreviewOpen] = useState(false)
   const [activeMonitor, setActiveMonitor] = useState(1)
+  // 真实显示器列表（设置页选择用；展开预览时刷新）
+  const [displays, setDisplays] = useState<DisplayInfo[]>([])
+  useEffect(() => { island.getDisplays().then(setDisplays).catch(() => { /* 忽略 */ }) }, [])
   const [llm, setLlm] = useState<LlmState>({
     open: false, provider: 'deepseek', model: '', baseUrl: 'https://api.deepseek.com/v1',
     apiKey: '', testStatus: 'idle', testMsg: '', saved: [],
@@ -316,6 +325,12 @@ export function App(): React.JSX.Element {
         if (typeof s.uiZoom === 'number') setUiZoom(Math.max(0.9, Math.min(1.3, s.uiZoom)))
         if (s.llm) setLlm((v) => ({ ...v, ...(s.llm as Partial<LlmState>), open: false, testStatus: 'idle', testMsg: '' }))
       }
+      // 权威同步一次多屏偏好：主进程默认 follow=true，与渲染层默认 multiMonitor=false 不一致，
+      // 以水合后的持久化值为准纠正岛所在屏（修复"设置显示固定主屏、实际岛却跟鼠标跳屏"）
+      island.reposition({
+        follow: (s?.settings as Partial<SettingsFlags> | undefined)?.multiMonitor ?? false,
+        monitorIndex: (typeof s?.activeMonitor === 'number' ? s.activeMonitor : 1) - 1
+      })
     })
     return off
   }, [])
@@ -420,6 +435,15 @@ export function App(): React.JSX.Element {
   const dndActive = settings.meetingDnd && meetingActive
 
   const hasDueTodo = dueCount > 0
+  const ambientStatus = useMemo(() => deriveAmbientStatus({
+    pending: pending.length,
+    waiting: waiting.length,
+    dueTodos: dueCount,
+    runningAgents: agents.filter((agent) => agent.status !== 'done').length,
+    project: (pending[0] || waiting[0] || agents.find((agent) => agent.status === 'running'))?.proj,
+    focusLabel: pomoWorking ? `番茄 ${pomoMMSS}` : focusActive ? focusMMSS : undefined,
+    dnd: dndActive
+  }), [pending, waiting, dueCount, agents, pomoWorking, pomoMMSS, focusActive, focusMMSS, dndActive])
   // 暂时收起：正在开会等场景，允许把"有待处理"的岛收回去；出现**新的**请求（签名变化）会重新弹出
   const [snoozeSig, setSnoozeSig] = useState('')
   const attentionSig = [
@@ -691,9 +715,10 @@ export function App(): React.JSX.Element {
   // 会议检测态：主进程推送
   useEffect(() => island.onDnd(setMeetingActive), [])
 
-  // 窗口现在**常驻铺满工作区**（主进程不再 resize，setFullMode 已是空实现）——
-  // 覆盖层 backdrop 天然盖满整屏（无隐形框），面板/覆盖层尺寸全是渲染层布局。这里只处理全屏态自动展开。
+  // 全屏模式：主进程把窗口从工作区切到整个物理显示器（display.bounds，盖住任务栏）；
+  // 面板/覆盖层 100vw/100vh 随之真正铺满。非全屏时窗口恒定铺满工作区。
   useEffect(() => {
+    island.setFullMode(fullscreen)
     if (fullscreen) setRevealed(true)
   }, [fullscreen])
 
@@ -947,6 +972,8 @@ export function App(): React.JSX.Element {
       const atTopEdge = e.clientY <= 6 && Math.abs(e.clientX - cx) <= 120
       const el = document.elementFromPoint(e.clientX, e.clientY)
       const overSolid = !!el?.closest('[data-solid]')
+      const overAmbient = !!el?.closest('[data-ambient-bar]')
+      const edgeReveal = atTopEdge && !overAmbient
       const forced = forcedRef.current || pendingRef.current
       // 已经打开时的"保持区"：按面板实际矩形外扩 48px 判定（面板可高达 1020px，硬编码 260 会在下半区点按钮时误收起）；
       // 面板内点击后 1.2s 内一律保持（内容收缩把光标"甩出"面板的瞬间不触发回缩）
@@ -956,11 +983,11 @@ export function App(): React.JSX.Element {
         ? e.clientY <= pr.bottom + 48 && e.clientX >= pr.left - 48 && e.clientX <= pr.right + 48
         : e.clientY <= 260 && Math.abs(e.clientX - cx) <= window.innerWidth / 2 - 10))
       // overlayRef：覆盖层打开时始终可点击（但不强制展开主面板，交由覆盖层自己的层级承接）
-      const interactive = atTopEdge || overSolid || forced || keepOpen || overlayRef.current
+      const interactive = edgeReveal || overSolid || forced || keepOpen || overlayRef.current
 
       setIgnore(!interactive)
 
-      if (atTopEdge || overSolid || forced) {
+      if (edgeReveal || (overSolid && !overAmbient) || forced) {
         if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = undefined }
         if (!revealedRef.current) setRevealed(true)
       } else if (interactive) {
@@ -1838,6 +1865,25 @@ export function App(): React.JSX.Element {
 
   return (
     <>
+      {settings.ambientBar && !isShown && (
+        <AmbientBar
+          cfg={barCfg}
+          media={media}
+          pools={barPools}
+          width={barCfg.width || 340}
+          status={ambientStatus}
+          brief={[
+            ...(meetings.filter((m) => m.start > Date.now()).slice(0, 1).map((m) => `⏰ ${new Date(m.start).getHours()}:${String(new Date(m.start).getMinutes()).padStart(2, '0')} ${m.title}（${Math.max(1, Math.round((m.start - Date.now()) / 60000))} 分钟后）`)),
+            ...(todos.filter((t) => !t.done && t.due && t.due <= Date.now()).length ? [`⏳ ${todos.filter((t) => !t.done && t.due && t.due <= Date.now()).length} 项待办已到时`] : []),
+            ...(agents.filter((a) => a.status !== 'done').length ? [`🤖 ${agents.filter((a) => a.status !== 'done').length} 个 Agent 会话活动中`] : []),
+            ...(todos.filter((t) => !t.done).length ? [`📝 今日还剩 ${todos.filter((t) => !t.done).length} 项待办`] : [])
+          ]}
+          onMediaKey={(cmd) => island.mediaKey(cmd)}
+          onOpen={() => setRevealed(true)}
+          onOpenTarget={(target) => { setTab(target); setRevealed(true) }}
+          fetchLyrics={(title, artist) => island.lyricsFetch(title, artist)}
+        />
+      )}
       <div style={islandWrap}>
         {/* 静默态：贴住屏幕上边缘的极简指示条（也是悬浮唤出目标）；开启常驻迷你条时由迷你条替代 */}
         <div
@@ -1849,25 +1895,6 @@ export function App(): React.JSX.Element {
             opacity: isShown || settings.ambientBar ? 0 : 1, transition: 'all .3s ease', pointerEvents: 'none'
           }}
         />
-        {/* 常驻迷你条：收起后保留的小状态条（多模式轮播，可自定义），点击展开 */}
-        {settings.ambientBar && !isShown && (
-          <AmbientBar
-            cfg={barCfg}
-            media={media}
-            pools={barPools}
-            width={barCfg.width || 340}
-            brief={[
-              ...(meetings.filter((m) => m.start > Date.now()).slice(0, 1).map((m) => `⏰ ${new Date(m.start).getHours()}:${String(new Date(m.start).getMinutes()).padStart(2, '0')} ${m.title}（${Math.max(1, Math.round((m.start - Date.now()) / 60000))} 分钟后）`)),
-              ...(todos.filter((t) => !t.done && t.due && t.due <= Date.now()).length ? [`⏳ ${todos.filter((t) => !t.done && t.due && t.due <= Date.now()).length} 项待办已到时`] : []),
-              ...(agents.filter((a) => a.status !== 'done').length ? [`🤖 ${agents.filter((a) => a.status !== 'done').length} 个 Agent 会话活动中`] : []),
-              ...(todos.filter((t) => !t.done).length ? [`📝 今日还剩 ${todos.filter((t) => !t.done).length} 项待办`] : [])
-            ]}
-            onMediaKey={(cmd) => island.mediaKey(cmd)}
-            onOpen={() => setRevealed(true)}
-            fetchLyrics={(title, artist) => island.lyricsFetch(title, artist)}
-          />
-        )}
-
         {/* 顶部两角的凹弧：把面板融进屏幕上边缘，形成「内角过渡」的灵动一体感 */}
         <div style={{ ...flareBase(isShown), left: -21, background: 'radial-gradient(circle at 0% 100%, transparent 0 21px, oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.97) 21.5px)' }} />
         <div style={{ ...flareBase(isShown), right: -21, background: 'radial-gradient(circle at 100% 100%, transparent 0 21px, oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.97) 21.5px)' }} />
@@ -1894,68 +1921,92 @@ export function App(): React.JSX.Element {
             opacity: isShown ? 1 : 0,
             pointerEvents: isShown ? 'auto' : 'none',
             overflow: 'hidden',
-            borderRadius: fullscreen ? 0 : '0 0 26px 26px',
-            background: 'oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.97)', backdropFilter: 'blur(26px) saturate(160%)',
-            borderLeft: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / 0.22)', borderRight: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / 0.22)',
-            borderBottom: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / 0.28)', borderTop: 'none',
-            // 顶部与屏幕齐平，投影只向下发散、横向收敛（负 spread），避免"四周都是阴影"；全屏时无投影
-            boxShadow: fullscreen ? 'none' : isShown ? '0 22px 38px -16px rgba(0,0,0,.5)' : 'none',
+            borderRadius: fullscreen ? 0 : '0 0 28px 28px',
+            // 材质三层：顶部极光氛围光（主色相）+ 右上副色相补光 + 玻璃底
+            background: `radial-gradient(125% 60% at 50% 0%, oklch(0.55 calc(0.13 * var(--cs, 1)) var(--th) / 0.15) 0%, transparent 64%), radial-gradient(90% 42% at 88% 0%, oklch(0.55 calc(0.11 * var(--cs, 1)) var(--th2) / 0.1) 0%, transparent 62%), oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.97)`,
+            backdropFilter: 'blur(30px) saturate(180%)',
+            // Apple 式发型线边缘（0.5px 高明度线），不再用彩色 1px 描边
+            borderLeft: `0.5px solid ${hairline(0.14)}`, borderRight: `0.5px solid ${hairline(0.14)}`,
+            borderBottom: `0.5px solid ${hairline(0.18)}`, borderTop: 'none',
+            // 顶部与屏幕齐平：向下弥散深影 + 淡淡主题色环境光，让岛"浮"在桌面上；全屏时无投影
+            boxShadow: fullscreen ? 'none' : isShown ? '0 24px 50px -18px rgba(0,0,0,.55), 0 10px 80px -24px oklch(0.6 calc(0.14 * var(--cs, 1)) var(--th) / 0.22)' : 'none',
             // 平缓缓出、无回弹，避免"蹦一下"
             transition: 'transform .5s cubic-bezier(.22,.61,.36,1), opacity .4s ease',
             boxSizing: 'border-box'
           }}
         >
+          {/* 玻璃颗粒噪点层（胶片质感，极淡） */}
+          <div className="ui-noise" style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', opacity: 0.045, mixBlendMode: 'overlay', borderRadius: 'inherit' }} />
+          {/* 底部边缘渐变高光（收边精致感） */}
+          {!fullscreen && (
+            <div style={{ position: 'absolute', left: '8%', right: '8%', bottom: 0, height: 1, zIndex: 1, pointerEvents: 'none', background: 'linear-gradient(90deg, transparent, oklch(0.75 calc(0.14 * var(--cs, 1)) var(--th) / 0.32), transparent)' }} />
+          )}
           {dropActive && (
             <div style={{ position: 'absolute', inset: 6, zIndex: 20, borderRadius: 16, border: '2px dashed oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .7)', background: 'oklch(0.2 calc(0.03 * var(--css, 1)) var(--ths) / .82)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, pointerEvents: 'none' }}>
-              <div style={{ fontSize: 26 }}>📥</div>
-              <div style={{ color: 'oklch(0.92 0.03 var(--th))', fontSize: 13, fontWeight: 600 }}>松手投喂到问答助手</div>
-              <div style={{ color: 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 11 }}>图片 / 文件都可以</div>
+              <Download size={26} strokeWidth={1.5} style={{ color: accent() }} />
+              <div style={{ color: ink(1), fontSize: 13, fontWeight: 600 }}>松手投喂到问答助手</div>
+              <div style={{ color: ink(3), fontSize: 11 }}>图片 / 文件都可以</div>
             </div>
           )}
 
           {/* header */}
           <div style={{ padding: '16px 16px 6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 13 }}>
-              <div style={{ width: 22, height: 22, borderRadius: 7, background: 'linear-gradient(135deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.62 calc(0.15 * var(--cs, 1)) var(--th2)))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>🝔</div>
-              <span style={{ color: 'oklch(0.96 0.01 var(--th))', fontSize: 13.5, fontWeight: 600 }}>Agentic-Island</span>
+              <div style={{ width: 24, height: 24, borderRadius: 8, background: gradient.brand(), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 3px 10px -2px ${accent(0.7, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.35)` }}>
+                {/* 岛标：胶囊岛 + 脉搏点（SVG 渐变不解析 var()，用 stopColor 内联） */}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <rect x="2.5" y="8.5" width="19" height="8" rx="4" fill="oklch(0.2 0.02 var(--th))" fillOpacity="0.85" />
+                  <circle cx="8.5" cy="12.5" r="1.6" fill="oklch(0.92 0.05 var(--th))" />
+                  <path d="M12 12.5h2l1.2-2.2 1.6 4 1.2-1.8h1.5" stroke="oklch(0.92 0.05 var(--th))" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2, background: gradient.brand(), WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>Agentic-Island</span>
               <div
                 className="hv"
                 title="查看运行状态"
                 onClick={() => setTab('settings')}
-                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 7px', borderRadius: 7, cursor: 'pointer', background: 'rgba(255,255,255,.05)', color: 'oklch(0.68 0.02 var(--th) / .7)', fontSize: 9.5, fontFamily: 'ui-monospace,monospace' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 999, cursor: 'pointer', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,0.06)', color: ink(3), fontSize: 9.5, fontFamily: 'ui-monospace,monospace' }}
               >
                 <span style={{ width: 5, height: 5, borderRadius: 999, background: bridgeConnected ? 'oklch(0.78 0.14 150)' : 'oklch(0.75 0.13 75)', boxShadow: bridgeConnected ? '0 0 6px oklch(0.72 0.14 150 / .45)' : undefined }} />
                 v{runtimeInfo?.version || '…'}
               </div>
-              <span style={{ marginLeft: 'auto', color: 'oklch(0.7 0.02 var(--th) / .6)', fontSize: 11 }}>{clock}</span>
-              <div className="hv" title="截图工坊（无损截图 + 高级边框美化）" onClick={() => { shotToolRef.current = true; island.triggerScreenshot() }} style={{ width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, background: 'rgba(255,255,255,.05)', color: 'oklch(0.7 0.02 var(--th) / .55)' }}>
-                📸
-              </div>
-              <div className="hv" title={settings.largeSize ? '切回标准尺寸' : '切到大尺寸工作台'} onClick={() => toggleSetting('largeSize')} style={{ width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, background: settings.largeSize ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .22)' : 'rgba(255,255,255,.05)', color: settings.largeSize ? 'oklch(0.85 calc(0.14 * var(--cs, 1)) var(--th))' : 'oklch(0.7 0.02 var(--th) / .55)' }}>
-                {settings.largeSize ? '⤡' : '⤢'}
-              </div>
-              <div className="hv" title={fullscreen ? '退出全屏' : '全屏（铺满当前显示器）'} onClick={() => setFullscreen((v) => !v)} style={{ width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, background: fullscreen ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .22)' : 'rgba(255,255,255,.05)', color: fullscreen ? 'oklch(0.85 calc(0.14 * var(--cs, 1)) var(--th))' : 'oklch(0.7 0.02 var(--th) / .55)' }}>
-                {fullscreen ? '❎' : '⛶'}
-              </div>
+              <span style={{ marginLeft: 'auto', color: ink(3), fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{clock}</span>
+              <HeaderBtn title="截图工坊（无损截图 + 高级边框美化）" onClick={() => { shotToolRef.current = true; island.triggerScreenshot() }}>
+                <Camera size={13} strokeWidth={1.75} />
+              </HeaderBtn>
+              <HeaderBtn title={settings.largeSize ? '切回标准尺寸' : '切到大尺寸工作台'} active={settings.largeSize} onClick={() => toggleSetting('largeSize')}>
+                {settings.largeSize ? <Minimize2 size={13} strokeWidth={1.75} /> : <Maximize2 size={13} strokeWidth={1.75} />}
+              </HeaderBtn>
+              <HeaderBtn title={fullscreen ? '退出全屏' : '全屏（铺满当前显示器）'} active={fullscreen} onClick={() => setFullscreen((v) => !v)}>
+                {fullscreen ? <Shrink size={13} strokeWidth={1.75} /> : <Expand size={13} strokeWidth={1.75} />}
+              </HeaderBtn>
               {dndActive && (
-                <div title="智能勿扰中（检测到会议）· 不弹窗/不响铃" style={{ height: 26, padding: '0 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 4, background: 'oklch(0.45 0.09 30 / .45)', color: 'oklch(0.85 0.11 40)', fontSize: 12 }}>🔕</div>
+                <div title="智能勿扰中（检测到会议）· 不弹窗/不响铃" style={{ height: 26, padding: '0 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 4, background: 'oklch(0.45 0.09 30 / .45)', color: 'oklch(0.85 0.11 40)' }}>
+                  <BellOff size={13} strokeWidth={1.75} />
+                </div>
               )}
               {/* 番茄钟：空闲点击开始专注；进行中显示阶段+倒计时，点击停止（今日已完成 N 个） */}
               <div
                 title={pomo.phase === 'idle' ? '开始一个番茄钟（专注 25 分钟）' : `${phaseLabel(pomo.phase)}中 · 点击停止 · 今日已完成 ${pomoDone[dayKey(now)] || 0} 个`}
                 onClick={() => setPomo((s) => (s.phase === 'idle' ? startWork(pomoCfg, Date.now()) : POMO_IDLE))}
-                style={{ height: 26, padding: '0 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', transition: 'all .18s', background: pomo.phase === 'work' ? 'oklch(0.5 0.13 25 / .5)' : pomo.phase !== 'idle' ? 'oklch(0.45 0.09 150 / .45)' : 'rgba(255,255,255,.05)', color: pomo.phase === 'work' ? 'oklch(0.85 0.12 30)' : pomo.phase !== 'idle' ? 'oklch(0.82 0.11 150)' : 'oklch(0.7 0.02 var(--th) / .55)', fontSize: 12 }}
+                style={{ height: 26, padding: '0 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', transition: 'all .18s', background: pomo.phase === 'work' ? 'oklch(0.5 0.13 25 / .5)' : pomo.phase !== 'idle' ? 'oklch(0.45 0.09 150 / .45)' : 'rgba(255,255,255,.05)', color: pomo.phase === 'work' ? 'oklch(0.85 0.12 30)' : pomo.phase !== 'idle' ? 'oklch(0.82 0.11 150)' : ink(3) }}
               >
-                🍅{pomo.phase !== 'idle' && <span style={{ fontSize: 10.5, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{pomoMMSS}</span>}
+                <Timer size={13} strokeWidth={1.75} />{pomo.phase !== 'idle' && <span style={{ fontSize: 10.5, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{pomoMMSS}</span>}
               </div>
-              <div title="专注模式（静默 25 分钟）" onClick={toggleFocus} style={{ height: 26, padding: '0 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', transition: 'all .18s', background: focusActive ? 'oklch(0.4 0.08 260 / .5)' : 'rgba(255,255,255,.05)', color: focusActive ? 'oklch(0.82 0.1 260)' : 'oklch(0.7 0.02 var(--th) / .55)', fontSize: 12 }}>
-                🌙{focusActive && <span style={{ fontSize: 10.5, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{focusMMSS}</span>}
+              <div title="专注模式（静默 25 分钟）" onClick={toggleFocus} style={{ height: 26, padding: '0 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', transition: 'all .18s', background: focusActive ? 'oklch(0.4 0.08 260 / .5)' : 'rgba(255,255,255,.05)', color: focusActive ? 'oklch(0.82 0.1 260)' : ink(3) }}>
+                <Moon size={13} strokeWidth={1.75} />{focusActive && <span style={{ fontSize: 10.5, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{focusMMSS}</span>}
               </div>
-              <div title="贴住 / 取消贴住" onClick={() => { setPinned((v) => !v); setRevealed(true) }} style={{ width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, transition: 'all .18s', background: pinned ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .22)' : 'rgba(255,255,255,.05)', color: pinned ? 'oklch(0.85 calc(0.14 * var(--cs, 1)) var(--th))' : 'oklch(0.7 0.02 var(--th) / .55)', transform: pinned ? 'rotate(0deg)' : 'rotate(38deg)' }}>📌</div>
+              <HeaderBtn title="贴住 / 取消贴住" active={pinned} onClick={() => { setPinned((v) => !v); setRevealed(true) }}>
+                <Pin size={13} strokeWidth={1.75} style={{ transform: pinned ? 'rotate(0deg)' : 'rotate(38deg)', transition: 'transform .2s ease' }} />
+              </HeaderBtn>
               {/* 一键开关常驻迷你条（避免遮挡工作界面时快速关掉） */}
-              <div className="hv" title={settings.ambientBar ? '关闭常驻迷你条' : '开启常驻迷你条'} onClick={() => toggleSetting('ambientBar')} style={{ width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, background: settings.ambientBar ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .22)' : 'rgba(255,255,255,.05)', color: settings.ambientBar ? 'oklch(0.85 calc(0.14 * var(--cs, 1)) var(--th))' : 'oklch(0.7 0.02 var(--th) / .55)' }}>〰</div>
+              <HeaderBtn title={settings.ambientBar ? '关闭常驻迷你条' : '开启常驻迷你条'} active={settings.ambientBar} onClick={() => toggleSetting('ambientBar')}>
+                <Waves size={13} strokeWidth={1.75} />
+              </HeaderBtn>
               {/* 收起：即使有待处理也能收回（开会等场景）；有新请求会重新弹出。快捷键 Esc */}
-              <div className="hv" title="收起（Esc）· 有新请求会重新弹出" onClick={snoozeNow} style={{ width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, background: 'rgba(255,255,255,.05)', color: 'oklch(0.7 0.02 var(--th) / .55)' }}>⌄</div>
+              <HeaderBtn title="收起（Esc）· 有新请求会重新弹出" onClick={snoozeNow}>
+                <ChevronDown size={14} strokeWidth={2} />
+              </HeaderBtn>
             </div>
             {/* Tab 栏：窄屏不换行不变形；隐藏滚动条，滚轮/拖拽横滑，边缘渐隐暗示更多 */}
             <div
@@ -1974,22 +2025,42 @@ export function App(): React.JSX.Element {
                       : undefined
               }}
             >
-              {TABS.map(({ key, label }) => (
-                <div key={key} className="hv" onClick={() => setTab(key)} style={tabStyle(tab === key)}>
-                  {label}
-                  {key === 'agents' && (hasPending || hasWaiting) && <span style={{ marginLeft: 5, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
-                  {key === 'plan' && pending.some((a) => a.isPlan) && <span style={{ marginLeft: 5, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
-                  {key === 'todos' && hasDueTodo && <span style={{ marginLeft: 5, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
-                  {key === 'todos' && !hasDueTodo && todos.filter((t) => !t.done).length > 0 && (
-                    <span style={{ marginLeft: 5, fontSize: 9.5, opacity: 0.75 }}>{todos.filter((t) => !t.done).length}</span>
-                  )}
-                </div>
-              ))}
+              {TABS.map(({ key, label, icon: TabIcon }) => {
+                const active = tab === key
+                return (
+                  <div key={key} className={active ? undefined : 'ui-tab'} onClick={() => setTab(key)} style={tabStyle(active)}>
+                    {active && (
+                      <motion.span
+                        layoutId="tab-active-pill"
+                        transition={{ type: 'spring', stiffness: 480, damping: 38 }}
+                        style={{
+                          position: 'absolute', inset: 0, borderRadius: 999,
+                          background: gradient.primary(),
+                          boxShadow: `0 3px 12px -4px ${accent(0.7, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.28)`
+                        }}
+                      />
+                    )}
+                    <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <TabIcon size={12} strokeWidth={active ? 2.2 : 1.75} style={{ opacity: active ? 1 : 0.75 }} />
+                      {label}
+                      {key === 'agents' && (hasPending || hasWaiting) && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
+                      {key === 'plan' && pending.some((a) => a.isPlan) && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
+                      {key === 'todos' && hasDueTodo && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
+                      {key === 'todos' && !hasDueTodo && todos.filter((t) => !t.done).length > 0 && (
+                        <span style={{ marginLeft: 2, fontSize: 9.5, opacity: 0.75 }}>{todos.filter((t) => !t.done).length}</span>
+                      )}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
+            {/* 签名分割线：Tab 栏下一道主题渐变光线（岛的"记忆点"） */}
+            <div style={{ height: 1, margin: '-6px 6px 10px', background: 'linear-gradient(90deg, transparent 2%, oklch(0.72 calc(0.15 * var(--cs, 1)) var(--th) / 0.34) 30%, oklch(0.72 calc(0.13 * var(--cs, 1)) var(--th2) / 0.3) 68%, transparent 98%)', pointerEvents: 'none' }} />
           </div>
-
-          {/* 大尺寸：844px 封顶 + min() 随工作区自适应（窗口恒定铺满，100vh 稳定）——矮屏留 ~50px 底距，不顶到任务栏 */}
           <div className="ai-scroll" style={{ padding: '0 8px 16px 16px', margin: '0 4px 0 0', maxHeight: fullscreen ? 'calc(100vh - 130px)' : settings.largeSize ? 'min(844px, calc(100vh - 175px))' : 500, overflowY: 'auto' }}>
+            {/* 不加 mode="wait"：新旧内容直接交叉淡化，新分区立即挂载（wait 会让重组件干等退出动画，感知卡顿） */}
+            <AnimatePresence initial={false}>
+            <motion.div key={tab} variants={tabContent} initial="initial" animate="animate" exit="exit">
             {tab === 'agents' && (
               <AgentsTab
                 agents={agents} armed={armed} autoAllowSafe={autoAllowSafe} onToggleAutoAllow={() => setAutoAllowSafe((v) => !v)}
@@ -2174,7 +2245,7 @@ export function App(): React.JSX.Element {
                 activeAgents={agents.filter((a) => a.status !== 'done').length} totalAgents={agents.length}
                 settings={settings} onToggle={toggleSetting}
                 soundMap={soundMap} soundPickerOpen={soundPickerOpen} onToggleSoundPicker={() => settings.sound && setSoundPickerOpen((v) => !v)} onSetSound={setSoundFor} onPreviewSound={previewSound}
-                activeMonitor={activeMonitor} monitorPreviewOpen={monitorPreviewOpen} onToggleMonitorPreview={() => setMonitorPreviewOpen((v) => !v)} onSetMonitor={changeMonitor}
+                activeMonitor={activeMonitor} displays={displays} monitorPreviewOpen={monitorPreviewOpen} onToggleMonitorPreview={() => { setMonitorPreviewOpen((v) => !v); island.getDisplays().then(setDisplays).catch(() => { /* 忽略 */ }) }} onSetMonitor={changeMonitor}
                 llm={llm} onToggleLlm={() => setLlm((s) => ({ ...s, open: !s.open }))} onSetProvider={setProvider} onSetLlmField={setLlmField} onTestLlm={testLlm} onSaveLlm={saveLlm} onLoadLlm={loadLlm} onDeleteLlm={deleteLlm}
                 onAddModel={addModel} onRemoveModel={removeModel} onPickModel={pickModel}
                 icsUrl={icsUrl} onSetIcsUrl={setIcsUrl} calMsg={calMsg}
@@ -2191,6 +2262,8 @@ export function App(): React.JSX.Element {
                 onEditTheme={(key) => { setThemeEditKey(key); setThemeDesignerOpen(true) }}
               />
             )}
+            </motion.div>
+            </AnimatePresence>
           </div>
         </div>
       </div>
@@ -2198,13 +2271,17 @@ export function App(): React.JSX.Element {
       {/* toasts */}
       {toast && (
         <div data-solid style={toastStyle}>
-          <div style={{ width: 20, height: 20, borderRadius: 999, background: 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'oklch(0.14 0.02 var(--th))', fontSize: 12, fontWeight: 800 }}>✓</div>
-          <span style={{ color: 'oklch(0.96 0.01 var(--th))', fontSize: 12.5, fontWeight: 500 }}>{toast}</span>
-          <span style={{ color: 'oklch(0.7 0.02 var(--th) / .55)', fontSize: 11, cursor: 'pointer' }} onClick={() => setToast(null)}>✕</span>
+          <div style={{ width: 20, height: 20, borderRadius: 999, background: gradient.primary(), display: 'flex', alignItems: 'center', justifyContent: 'center', color: gradient.onPrimary(), boxShadow: `0 0 10px ${accent(0.7, 0.4)}` }}>
+            <Check size={12} strokeWidth={3} />
+          </div>
+          <span style={{ color: ink(1), fontSize: 12.5, fontWeight: 500 }}>{toast}</span>
+          <X size={13} strokeWidth={2} style={{ color: ink(3), cursor: 'pointer' }} onClick={() => setToast(null)} />
         </div>
       )}
       {jumpToast && (
-        <div style={{ position: 'fixed', top: 'calc(100vh - 78px)', left: '50%', transform: 'translateX(-50%)', padding: '10px 18px', borderRadius: 999, background: 'oklch(calc(0.18 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.9)', backdropFilter: 'blur(20px)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / 0.3)', color: 'oklch(0.9 0.02 var(--th))', fontSize: 12, boxShadow: '0 14px 34px rgba(0,0,0,.5)' }}>↗ {jumpToast}</div>
+        <div style={{ position: 'fixed', top: 'calc(100vh - 78px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 999, background: 'oklch(calc(0.18 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.9)', backdropFilter: 'blur(20px)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / 0.3)', color: ink(1), fontSize: 12, boxShadow: '0 14px 34px rgba(0,0,0,.5)' }}>
+          <ArrowUpRight size={13} strokeWidth={2} style={{ color: accent() }} />{jumpToast}
+        </div>
       )}
       {capsuleOpen && <Capsule onSubmit={capsuleSubmit} onClose={closeCapsule} />}
       {shotImg && <ScreenshotAsk dataUrl={shotImg} onAsk={shotAsk} onClose={() => { setShotImg(null); island.capsuleClosed() }} />}
@@ -2215,6 +2292,17 @@ export function App(): React.JSX.Element {
           llmReady={llmReady}
           onAskImage={(du: string) => { setShotStudio(null); setShotImg(du) }}
           onAIVision={(system: string, dataUrl2: string, prompt: string) => island.llmComplete({ baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: llm.model }, system, [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: dataUrl2 } }], false)}
+          onRetake={() => { shotToolRef.current = true; island.triggerScreenshot() }}
+          onCreateTodo={(text: string) => {
+            const items = text.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+|[-*]\s*\[[ xX]\]\s*)/, '').trim()).filter(Boolean).slice(0, 30)
+            todoBulkAdd((items.length ? items : [text.trim()]).map((item) => ({ text: item.slice(0, 200) })))
+            setToast(`已从截图结果创建 ${Math.max(1, items.length)} 项待办`)
+          }}
+          onCreateNote={(title: string, text: string) => {
+            const now = Date.now()
+            setNotes((list) => [{ id: now, emoji: '📸', title: title.slice(0, 40), md: text, color: 'blue', tags: ['截图识别'], createdAt: now, updatedAt: now }, ...list].slice(0, 400))
+            setToast('截图识别结果已存入灵感便签')
+          }}
         />
       )}
       <CommandPalette open={paletteOpen} commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
@@ -2319,10 +2407,33 @@ const toastStyle: React.CSSProperties = {
 }
 function tabStyle(active: boolean): React.CSSProperties {
   return {
-    padding: '6px 12px', borderRadius: 999, font: "600 12px 'Segoe UI',sans-serif", cursor: 'pointer', transition: 'all .16s',
+    position: 'relative',
+    padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: active ? 700 : 500, fontFamily: 'var(--font)', cursor: 'pointer',
+    transition: 'color .18s ease',
     flex: 'none', whiteSpace: 'nowrap', // 窄屏下不许换行/压缩变形
-
-    background: active ? 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))' : 'rgba(255,255,255,.05)',
-    color: active ? 'oklch(0.14 0.02 var(--th))' : 'oklch(0.78 0.02 var(--th) / .7)'
+    color: active ? gradient.onPrimary() : ink(2)
   }
+}
+
+/** 头部右侧图标按钮：统一 26px 方钮 + 物理按压反馈 */
+function HeaderBtn(props: { title: string; active?: boolean; onClick?: () => void; children: React.ReactNode }): React.JSX.Element {
+  const { title, active, onClick, children } = props
+  return (
+    <motion.div
+      whileHover={{ scale: 1.08 }}
+      whileTap={{ scale: 0.9 }}
+      transition={{ type: 'spring', stiffness: 520, damping: 26 }}
+      title={title}
+      onClick={onClick}
+      style={{
+        width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+        background: active ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .22)' : 'rgba(255,255,255,.05)',
+        border: active ? `1px solid ${accent(0.7, 0.3)}` : '1px solid transparent',
+        color: active ? accent(0.85) : ink(3),
+        transition: 'background .18s ease, color .18s ease'
+      }}
+    >
+      {children}
+    </motion.div>
+  )
 }

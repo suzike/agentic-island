@@ -3,7 +3,15 @@
 // canvas 全程按原生分辨率合成（图像像素 1:1，倍率仅可选放大）；「原图」+ 无任何编辑时直接导出原始 dataURL，位级一致。
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
+import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, Languages, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Redo2, RotateCcw, RotateCw, Save, ScanLine, ScanText, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react'
+import type { LucideIcon } from '../ui/icons'
+import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
+import { fadeScaleIn, overlayPop } from '../ui/motion'
+import { accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 import { island } from '../bridge'
+import { clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, sanitizeScreenshotName } from '../logic/screenshot'
+import type { Point as Pt, Rect, ScreenshotFormat } from '../logic/screenshot'
 
 interface Props {
   dataUrl: string
@@ -11,6 +19,9 @@ interface Props {
   llmReady: boolean
   onAskImage: (dataUrl: string) => void
   onAIVision: (system: string, dataUrl: string, prompt: string) => Promise<{ ok: boolean; text?: string; error?: string }>
+  onRetake: () => void
+  onCreateTodo: (text: string) => void
+  onCreateNote: (title: string, text: string) => void
 }
 
 // ────────────────────────────── 边框 / 背景预设 ──────────────────────────────
@@ -41,7 +52,6 @@ const PALETTE = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#00c7be', '#007aff
 
 // ────────────────────────────── 标注数据模型 ──────────────────────────────
 type Tool = 'none' | 'arrow' | 'rect' | 'ellipse' | 'pen' | 'line' | 'text' | 'mosaic' | 'blur' | 'highlight' | 'number'
-type Pt = { x: number; y: number }
 interface Anno {
   id: number
   tool: Tool
@@ -231,12 +241,13 @@ function composeBase(base: HTMLCanvasElement, frame: FrameKey, bg: [string, stri
   return { canvas: c, imgX, imgY, imgW: iw, imgH: ih, W, H }
 }
 
-/** 在合成画布上绘制一条标注（坐标已在合成画布坐标系） */
+/** 标注坐标存储在基础图像坐标系中，切换边框/留白后仍保持在原内容位置。 */
 function drawAnno(ctx: CanvasRenderingContext2D, a: Anno, base: HTMLCanvasElement, imgX: number, imgY: number): void {
   ctx.save()
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'
   ctx.strokeStyle = a.color; ctx.fillStyle = a.color; ctx.lineWidth = a.width
-  const { start: s, end: e } = a
+  const map = (p: Pt): Pt => ({ x: p.x + imgX, y: p.y + imgY })
+  const s = map(a.start), e = map(a.end)
   if (a.tool === 'rect') {
     ctx.strokeRect(Math.min(s.x, e.x), Math.min(s.y, e.y), Math.abs(e.x - s.x), Math.abs(e.y - s.y))
   } else if (a.tool === 'ellipse') {
@@ -255,13 +266,15 @@ function drawAnno(ctx: CanvasRenderingContext2D, a: Anno, base: HTMLCanvasElemen
     ctx.lineTo(e.x - head * Math.cos(ang + Math.PI / 6), e.y - head * Math.sin(ang + Math.PI / 6))
     ctx.closePath(); ctx.fill()
   } else if (a.tool === 'pen' && a.points && a.points.length > 1) {
-    ctx.beginPath(); ctx.moveTo(a.points[0].x, a.points[0].y)
-    for (let i = 1; i < a.points.length; i++) ctx.lineTo(a.points[i].x, a.points[i].y)
+    const first = map(a.points[0])
+    ctx.beginPath(); ctx.moveTo(first.x, first.y)
+    for (let i = 1; i < a.points.length; i++) { const p = map(a.points[i]); ctx.lineTo(p.x, p.y) }
     ctx.stroke()
   } else if (a.tool === 'highlight' && a.points && a.points.length > 1) {
     ctx.globalAlpha = 0.35; ctx.lineWidth = a.width * 4; ctx.globalCompositeOperation = 'multiply'
-    ctx.beginPath(); ctx.moveTo(a.points[0].x, a.points[0].y)
-    for (let i = 1; i < a.points.length; i++) ctx.lineTo(a.points[i].x, a.points[i].y)
+    const first = map(a.points[0])
+    ctx.beginPath(); ctx.moveTo(first.x, first.y)
+    for (let i = 1; i < a.points.length; i++) { const p = map(a.points[i]); ctx.lineTo(p.x, p.y) }
     ctx.stroke()
   } else if (a.tool === 'text' && a.text) {
     const fs = Math.max(14, a.width * 6)
@@ -277,24 +290,27 @@ function drawAnno(ctx: CanvasRenderingContext2D, a: Anno, base: HTMLCanvasElemen
     ctx.fillText(String(a.n), s.x, s.y + 1)
   } else if (a.tool === 'mosaic' || a.tool === 'blur') {
     // 从基础图像取样对应区域，做像素化 / 模糊，画回该区域
-    const x = Math.min(s.x, e.x), y = Math.min(s.y, e.y)
+    const localX = Math.min(a.start.x, a.end.x), localY = Math.min(a.start.y, a.end.y)
+    const x = localX + imgX, y = localY + imgY
     const w = Math.abs(e.x - s.x), h = Math.abs(e.y - s.y)
     if (w > 3 && h > 3) {
-      const sx = x - imgX, sy = y - imgY // 映射回基础图像坐标
+      const sx = Math.max(0, localX), sy = Math.max(0, localY)
+      const sw = Math.min(w, base.width - sx), sh = Math.min(h, base.height - sy)
+      if (sw <= 0 || sh <= 0) { ctx.restore(); return }
       if (a.tool === 'mosaic') {
-        const cells = Math.max(6, Math.round(w / 14))
-        const tmp = document.createElement('canvas'); tmp.width = cells; tmp.height = Math.max(1, Math.round(cells * h / w))
+        const cells = Math.max(6, Math.round(sw / 14))
+        const tmp = document.createElement('canvas'); tmp.width = cells; tmp.height = Math.max(1, Math.round(cells * sh / sw))
         const tctx = tmp.getContext('2d')!
         tctx.imageSmoothingEnabled = false
-        tctx.drawImage(base, sx, sy, w, h, 0, 0, tmp.width, tmp.height)
+        tctx.drawImage(base, sx, sy, sw, sh, 0, 0, tmp.width, tmp.height)
         ctx.imageSmoothingEnabled = false
-        ctx.drawImage(tmp, 0, 0, tmp.width, tmp.height, x, y, w, h)
+        ctx.drawImage(tmp, 0, 0, tmp.width, tmp.height, x, y, sw, sh)
         ctx.imageSmoothingEnabled = true
       } else {
         ctx.save()
-        ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip()
-        ctx.filter = `blur(${Math.max(4, Math.round(w / 22))}px)`
-        ctx.drawImage(base, sx - 4, sy - 4, w + 8, h + 8, x - 4, y - 4, w + 8, h + 8)
+        ctx.beginPath(); ctx.rect(x, y, sw, sh); ctx.clip()
+        ctx.filter = `blur(${Math.max(4, Math.round(sw / 22))}px)`
+        ctx.drawImage(base, sx, sy, sw, sh, x, y, sw, sh)
         ctx.filter = 'none'
         ctx.restore()
       }
@@ -323,33 +339,39 @@ function drawWatermark(ctx: CanvasRenderingContext2D, W: number, H: number, deco
 }
 
 // ────────────────────────────── AI 增强动作定义 ──────────────────────────────
-interface AIAction { key: string; label: string; icon: string; system: string; prompt: string; group: string }
+interface AIAction { key: string; label: string; icon: LucideIcon; system: string; prompt: string; group: string }
 const OCR_SYS = '你是精准的 OCR 与图像理解助手。只依据图片内容作答，不要编造。用简体中文回复。'
 const AI_ACTIONS: AIAction[] = [
-  { key: 'ocr', group: '文字', icon: '🔤', label: 'OCR 提取文字', system: OCR_SYS, prompt: '把这张图里的所有文字**逐行**提取出来，保持原有换行与顺序，只输出文字本身，不要解释。' },
-  { key: 'trans', group: '文字', icon: '🌐', label: '翻译图中文字', system: OCR_SYS, prompt: '识别图中文字，若是中文则翻译成英文，否则翻译成简体中文。左侧给原文、右侧给译文，逐行对照。' },
-  { key: 'handwrite', group: '文字', icon: '✍️', label: '手写/笔记转文本', system: OCR_SYS, prompt: '这可能是手写内容或潦草笔记，请把它整理成整洁、通顺的书面文本，修正明显笔误，保留原意与要点结构。' },
-  { key: 'lang', group: '文字', icon: '🈳', label: '识别语言并标注', system: OCR_SYS, prompt: '识别图中出现的所有自然语言种类，列出每种语言及其对应的示例片段。' },
-  { key: 'contacts', group: '文字', icon: '📇', label: '提取链接/邮箱/电话', system: OCR_SYS, prompt: '从图中提取所有链接(URL)、邮箱地址、电话号码，分类列出；没有的类别写“无”。' },
-  { key: 'desc', group: '理解', icon: '💬', label: '一句话描述', system: OCR_SYS, prompt: '用一句话（不超过 40 字）概括这张图片的内容。' },
-  { key: 'explain', group: '理解', icon: '🔍', label: '解读/讲解内容', system: OCR_SYS, prompt: '详细解读这张截图：它展示了什么、关键信息有哪些、可能的上下文是什么。分点说明。' },
-  { key: 'summary', group: '理解', icon: '📝', label: '总结长文要点', system: OCR_SYS, prompt: '这可能是一段长文/文章截图，请提炼 3-6 条核心要点，用简洁的项目符号列出。' },
-  { key: 'ui', group: '理解', icon: '🎨', label: 'UI 设计改进建议', system: OCR_SYS, prompt: '把这张图当作一个界面设计稿，从布局、对比度、层级、可用性、无障碍角度给出 4-6 条具体改进建议。' },
-  { key: 'chart', group: '数据', icon: '📊', label: '读图表并总结', system: OCR_SYS, prompt: '这是一张图表，请读出其中的关键数值与趋势，并用 2-3 句话总结它想表达的结论。' },
-  { key: 'table', group: '数据', icon: '▦', label: '表格转 Markdown', system: OCR_SYS, prompt: '把图中的表格精确转成 Markdown 表格，保留所有行列与表头，只输出表格。' },
-  { key: 'numbers', group: '数据', icon: '🔢', label: '提取关键数字', system: OCR_SYS, prompt: '提取图中所有关键数字/指标/金额，用「名称：数值」的形式逐条列出。' },
-  { key: 'code', group: '开发', icon: '⌨️', label: '代码截图转文本', system: OCR_SYS, prompt: '这是一张代码截图，请逐字转成可复制的纯代码文本，保持缩进与换行，用代码块包裹，不要解释。' },
-  { key: 'diagnose', group: '开发', icon: '🩺', label: '报错诊断+修复', system: OCR_SYS, prompt: '这可能是一张报错/异常截图。请：1) 提取错误信息；2) 分析最可能的原因；3) 给出具体修复步骤。' },
-  { key: 'todo', group: '效率', icon: '☑️', label: '提取待办/行动项', system: OCR_SYS, prompt: '从图中提取所有待办事项 / 行动项 / 任务，用清单形式（- [ ]）逐条列出。' },
-  { key: 'alt', group: '效率', icon: '♿', label: '生成 alt 文本', system: OCR_SYS, prompt: '为这张图片生成简洁、准确的无障碍 alt 文本（一句话，客观描述，用于屏幕阅读器）。' },
-  { key: 'social', group: '效率', icon: '📢', label: '社交媒体配文', system: OCR_SYS, prompt: '为这张图配一段吸引人的社交媒体文案（含 2-3 个话题标签），语气轻松专业。' },
-  { key: 'filename', group: '效率', icon: '🏷️', label: '起个文件名', system: OCR_SYS, prompt: '根据图片内容给它起一个简洁、语义化的英文文件名（kebab-case，不含扩展名），只输出这一个文件名。' },
-  { key: 'privacy', group: '安全', icon: '🛡️', label: '敏感信息检测', system: OCR_SYS, prompt: '检查这张图是否包含敏感信息（密码、密钥、身份证、手机号、银行卡、私密路径、Token 等）。逐项指出位置与类型；若安全则明确说明“未发现敏感信息”。' },
-  { key: 'objects', group: '安全', icon: '🧩', label: '识别主要元素', system: OCR_SYS, prompt: '列出这张图中出现的主要对象/元素/区域，按重要性排序，每条一行。' }
+  { key: 'ocr', group: '文字', icon: ScanText, label: 'OCR 提取文字', system: OCR_SYS, prompt: '把这张图里的所有文字**逐行**提取出来，保持原有换行与顺序，只输出文字本身，不要解释。' },
+  { key: 'trans', group: '文字', icon: Languages, label: '翻译图中文字', system: OCR_SYS, prompt: '识别图中文字，若是中文则翻译成英文，否则翻译成简体中文。左侧给原文、右侧给译文，逐行对照。' },
+  { key: 'handwrite', group: '文字', icon: PenLine, label: '手写/笔记转文本', system: OCR_SYS, prompt: '这可能是手写内容或潦草笔记，请把它整理成整洁、通顺的书面文本，修正明显笔误，保留原意与要点结构。' },
+  { key: 'lang', group: '文字', icon: Globe, label: '识别语言并标注', system: OCR_SYS, prompt: '识别图中出现的所有自然语言种类，列出每种语言及其对应的示例片段。' },
+  { key: 'contacts', group: '文字', icon: AtSign, label: '提取链接/邮箱/电话', system: OCR_SYS, prompt: '从图中提取所有链接(URL)、邮箱地址、电话号码，分类列出；没有的类别写“无”。' },
+  { key: 'desc', group: '理解', icon: MessageSquare, label: '一句话描述', system: OCR_SYS, prompt: '用一句话（不超过 40 字）概括这张图片的内容。' },
+  { key: 'explain', group: '理解', icon: ScanLine, label: '解读/讲解内容', system: OCR_SYS, prompt: '详细解读这张截图：它展示了什么、关键信息有哪些、可能的上下文是什么。分点说明。' },
+  { key: 'summary', group: '理解', icon: FileText, label: '总结长文要点', system: OCR_SYS, prompt: '这可能是一段长文/文章截图，请提炼 3-6 条核心要点，用简洁的项目符号列出。' },
+  { key: 'ui', group: '理解', icon: Palette, label: 'UI 设计改进建议', system: OCR_SYS, prompt: '把这张图当作一个界面设计稿，从布局、对比度、层级、可用性、无障碍角度给出 4-6 条具体改进建议。' },
+  { key: 'chart', group: '数据', icon: BarChart3, label: '读图表并总结', system: OCR_SYS, prompt: '这是一张图表，请读出其中的关键数值与趋势，并用 2-3 句话总结它想表达的结论。' },
+  { key: 'table', group: '数据', icon: Table, label: '表格转 Markdown', system: OCR_SYS, prompt: '把图中的表格精确转成 Markdown 表格，保留所有行列与表头，只输出表格。' },
+  { key: 'numbers', group: '数据', icon: Hash, label: '提取关键数字', system: OCR_SYS, prompt: '提取图中所有关键数字/指标/金额，用「名称：数值」的形式逐条列出。' },
+  { key: 'code', group: '开发', icon: Code, label: '代码截图转文本', system: OCR_SYS, prompt: '这是一张代码截图，请逐字转成可复制的纯代码文本，保持缩进与换行，用代码块包裹，不要解释。' },
+  { key: 'diagnose', group: '开发', icon: Stethoscope, label: '报错诊断+修复', system: OCR_SYS, prompt: '这可能是一张报错/异常截图。请：1) 提取错误信息；2) 分析最可能的原因；3) 给出具体修复步骤。' },
+  { key: 'todo', group: '效率', icon: ListChecks, label: '提取待办/行动项', system: OCR_SYS, prompt: '从图中提取所有待办事项 / 行动项 / 任务，用清单形式（- [ ]）逐条列出。' },
+  { key: 'alt', group: '效率', icon: Accessibility, label: '生成 alt 文本', system: OCR_SYS, prompt: '为这张图片生成简洁、准确的无障碍 alt 文本（一句话，客观描述，用于屏幕阅读器）。' },
+  { key: 'social', group: '效率', icon: Megaphone, label: '社交媒体配文', system: OCR_SYS, prompt: '为这张图配一段吸引人的社交媒体文案（含 2-3 个话题标签），语气轻松专业。' },
+  { key: 'filename', group: '效率', icon: Tag, label: '起个文件名', system: OCR_SYS, prompt: '根据图片内容给它起一个简洁、语义化的英文文件名（kebab-case，不含扩展名），只输出这一个文件名。' },
+  { key: 'privacy', group: '安全', icon: ShieldCheck, label: '敏感信息检测', system: OCR_SYS, prompt: '检查这张图是否包含敏感信息（密码、密钥、身份证、手机号、银行卡、私密路径、Token 等）。逐项指出位置与类型；若安全则明确说明“未发现敏感信息”。' },
+  { key: 'objects', group: '安全', icon: Shapes, label: '识别主要元素', system: OCR_SYS, prompt: '列出这张图中出现的主要对象/元素/区域，按重要性排序，每条一行。' }
 ]
 
 // ────────────────────────────── 组件 ──────────────────────────────
-export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIVision }: Props): React.JSX.Element {
+export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIVision, onRetake, onCreateTodo, onCreateNote }: Props): React.JSX.Element {
+  const [sourceData, setSourceData] = useState(dataUrl)
+  const [sourceVersion, setSourceVersion] = useState(0)
+  const [sourceName, setSourceName] = useState(() => {
+    const d = new Date()
+    return `截图_${d.getMonth() + 1}-${d.getDate()}_${d.getHours()}${String(d.getMinutes()).padStart(2, '0')}`
+  })
   const [frame, setFrame] = useState<FrameKey>('glass')
   const [bgKey, setBgKey] = useState('aurora')
   const [deco, setDeco] = useState<Deco>(DEFAULT_DECO)
@@ -363,7 +385,7 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
   const [redoStack, setRedoStack] = useState<Anno[]>([])
   const [draft, setDraft] = useState<Anno | null>(null) // 正在绘制
   const [textInput, setTextInput] = useState<{ x: number; y: number; sx: number; sy: number; value: string } | null>(null)
-  const [cropSel, setCropSel] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const [cropSel, setCropSel] = useState<Rect | null>(null)
   const [cropMode, setCropMode] = useState(false)
 
   const [tab, setTab] = useState<'design' | 'annotate' | 'ai'>('design')
@@ -374,32 +396,63 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
   const [aiBusy, setAiBusy] = useState('')
   const [aiResults, setAiResults] = useState<{ id: number; label: string; text: string; err?: boolean }[]>([])
   const [askInput, setAskInput] = useState('')
+  const [zoom, setZoom] = useState<'fit' | number>('fit')
+  const [exportFormat, setExportFormat] = useState<ScreenshotFormat>('png')
+  const [exportQuality, setExportQuality] = useState(0.9)
+  const [originalSize, setOriginalSize] = useState({ width: 0, height: 0 })
 
   const imgRef = useRef<HTMLImageElement | null>(null)
+  const originalSourceRef = useRef(dataUrl)
   const [imgLoaded, setImgLoaded] = useState(false)
   const composedRef = useRef<Composed | null>(null) // 最近一次合成（含坐标映射）
   const previewRef = useRef<HTMLImageElement | null>(null) // 预览 <img> DOM
+  const cropAnchorRef = useRef<Pt | null>(null)
   const numCounter = useRef(1)
   const idCounter = useRef(1)
 
   const bg = useMemo(() => (BGS.find((b) => b.key === bgKey) || BGS[0]).stops, [bgKey])
 
+  const resetEdits = (): void => {
+    setFrame('glass'); setBgKey('aurora'); setDeco(DEFAULT_DECO); setXf(DEFAULT_XFORM)
+    setAnnos([]); setRedoStack([]); setDraft(null); setCropMode(false); setCropSel(null); setTool('none')
+    setExportFormat('png'); setExportQuality(0.9); setZoom('fit'); numCounter.current = 1
+  }
+
+  const useSource = (url: string, name?: string): void => {
+    originalSourceRef.current = url
+    setSourceData(url)
+    setSourceVersion((v) => v + 1)
+    if (name) setSourceName(sanitizeScreenshotName(name))
+    resetEdits()
+    setImgLoaded(false)
+  }
+
+  useEffect(() => {
+    useSource(dataUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataUrl])
+
   // 加载原图
   useEffect(() => {
     const img = new Image()
-    img.onload = () => { imgRef.current = img; setImgLoaded(true) }
-    img.src = dataUrl
-  }, [dataUrl])
+    img.onload = () => {
+      imgRef.current = img
+      setOriginalSize({ width: img.naturalWidth, height: img.naturalHeight })
+      setImgLoaded(true)
+    }
+    img.onerror = () => { setImgLoaded(false); setToast('图片加载失败') }
+    img.src = sourceData
+  }, [sourceData, sourceVersion])
 
   // 是否处于“零处理”路径：原图 + 无任何编辑 → 位级一致导出原始 dataUrl
   const untouched = frame === 'none' && annos.length === 0 && !xf.crop && xf.rotate === 0 && !xf.flipH && !xf.flipV &&
     !deco.watermark && !deco.wmStamp && deco.scale === 1
 
   /** 核心：完整合成（transform → 边框/背景/装饰 → 标注 → 水印 → 倍率），返回 dataURL */
-  const render = (mult = deco.scale): string => {
+  const render = (mult = deco.scale, format: ScreenshotFormat = exportFormat, quality = exportQuality): string => {
     const img = imgRef.current
-    if (!img) return dataUrl
-    if (untouched && mult === 1) return dataUrl
+    if (!img) return sourceData
+    if (untouched && mult === 1 && format === 'png' && sourceData.startsWith('data:image/png')) return sourceData
     const base = bakeTransform(img, xf)
     const comp = composeBase(base, frame, bg, deco)
     composedRef.current = comp
@@ -414,19 +467,22 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
       const uctx = up.getContext('2d')!
       uctx.imageSmoothingEnabled = true; uctx.imageSmoothingQuality = 'high'
       uctx.drawImage(comp.canvas, 0, 0, up.width, up.height)
-      return up.toDataURL('image/png')
+      return up.toDataURL(`image/${format}`, quality)
     }
-    return comp.canvas.toDataURL('image/png')
+    return comp.canvas.toDataURL(`image/${format}`, quality)
   }
 
   // 重新渲染预览（依赖变化 / 标注变化 / 草稿变化）
   useEffect(() => {
     if (!imgLoaded) return
-    setOut(render(1))
+    setOut(render(1, 'png', 1))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imgLoaded, frame, bgKey, deco.radius, deco.shadow, deco.pad, deco.watermark, deco.wmStamp, annos, draft, xf])
 
-  const final = untouched ? dataUrl : out || dataUrl
+  const final = untouched ? sourceData : out || sourceData
+  const compSize = composedRef.current ? { width: composedRef.current.W, height: composedRef.current.H } : originalSize
+  const exportSize = exportDimensions(compSize.width || 1, compSize.height || 1, deco.scale)
+  const previewBytes = dataUrlBytes(final)
 
   const flash = (m: string): void => { setToast(m); setTimeout(() => setToast(''), 2400) }
 
@@ -449,23 +505,27 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
   }
   const clearAnno = (): void => { setAnnos([]); setRedoStack([]); numCounter.current = 1 }
 
-  // ── 坐标换算：预览 <img> 事件坐标 → 合成画布坐标 ──
-  const toCanvasPt = (e: React.MouseEvent): Pt | null => {
+  // ── 坐标换算：预览事件坐标 → 基础图像坐标 ──
+  const toCanvasPt = (e: React.PointerEvent): Pt | null => {
     const el = previewRef.current
     const comp = composedRef.current
     if (!el || !comp) return null
     const rect = el.getBoundingClientRect()
-    const px = (e.clientX - rect.left) / rect.width
-    const py = (e.clientY - rect.top) / rect.height
-    return { x: px * comp.W, y: py * comp.H }
+    const canvasX = ((e.clientX - rect.left) / rect.width) * comp.W
+    const canvasY = ((e.clientY - rect.top) / rect.height) * comp.H
+    const x = canvasX - comp.imgX
+    const y = canvasY - comp.imgY
+    if (x < 0 || y < 0 || x > comp.imgW || y > comp.imgH) return null
+    return { x: Math.max(0, Math.min(comp.imgW, x)), y: Math.max(0, Math.min(comp.imgH, y)) }
   }
 
   // ── 标注绘制交互 ──
-  const onDown = (e: React.MouseEvent): void => {
-    if (cropMode) { const p = toCanvasPt(e); if (p) setCropSel({ x: p.x, y: p.y, w: 0, h: 0 }); return }
-    if (tool === 'none') return
+  const onDown = (e: React.PointerEvent<HTMLImageElement>): void => {
     const p = toCanvasPt(e)
     if (!p) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    if (cropMode) { cropAnchorRef.current = p; setCropSel({ x: p.x, y: p.y, w: 0, h: 0 }); return }
+    if (tool === 'none') return
     if (tool === 'text') {
       const el = previewRef.current!
       const rect = el.getBoundingClientRect()
@@ -481,10 +541,11 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
     if (tool === 'pen' || tool === 'highlight') base.points = [p]
     setDraft(base)
   }
-  const onMove = (e: React.MouseEvent): void => {
-    if (cropMode && cropSel && e.buttons === 1) {
+  const onMove = (e: React.PointerEvent<HTMLImageElement>): void => {
+    if (cropMode && cropAnchorRef.current && e.buttons === 1) {
       const p = toCanvasPt(e); if (!p) return
-      setCropSel({ x: Math.min(cropSel.x, p.x), y: Math.min(cropSel.y, p.y), w: Math.abs(p.x - cropSel.x), h: Math.abs(p.y - cropSel.y) })
+      const comp = composedRef.current
+      setCropSel(comp ? clampRect(dragRect(cropAnchorRef.current, p), comp.imgW, comp.imgH) : dragRect(cropAnchorRef.current, p))
       return
     }
     if (!draft) return
@@ -496,8 +557,9 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
       return { ...d, end: p }
     })
   }
-  const onUp = (): void => {
-    if (cropMode) return
+  const onUp = (e?: React.PointerEvent<HTMLImageElement>): void => {
+    if (e?.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+    if (cropMode) { cropAnchorRef.current = null; return }
     if (draft) {
       const d = draft
       const moved = Math.abs(d.end.x - d.start.x) > 2 || Math.abs(d.end.y - d.start.y) > 2 || (d.points && d.points.length > 2)
@@ -519,9 +581,8 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
     const comp = composedRef.current
     const sel = cropSel
     if (!comp || !sel || sel.w < 8 || sel.h < 8) { setCropMode(false); setCropSel(null); return }
-    // 合成画布坐标 → 基础图像坐标（减去图像在画布内偏移）
-    const bx = Math.max(0, sel.x - comp.imgX)
-    const by = Math.max(0, sel.y - comp.imgY)
+    const bx = Math.max(0, sel.x)
+    const by = Math.max(0, sel.y)
     const bw = Math.min(comp.imgW - bx, sel.w)
     const bh = Math.min(comp.imgH - by, sel.h)
     if (bw < 4 || bh < 4) { setCropMode(false); setCropSel(null); return }
@@ -532,37 +593,70 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
     const cropped = document.createElement('canvas')
     cropped.width = Math.round(bw); cropped.height = Math.round(bh)
     cropped.getContext('2d')!.drawImage(baseCanvas, bx, by, bw, bh, 0, 0, cropped.width, cropped.height)
+    const croppedUrl = cropped.toDataURL('image/png')
     const newImg = new Image()
     newImg.onload = () => {
       imgRef.current = newImg
-      setXf(DEFAULT_XFORM) // 已烘焙进新原图
+      setSourceData(croppedUrl)
+      setSourceVersion((v) => v + 1)
+      setXf(DEFAULT_XFORM)
       setAnnos([]); setRedoStack([])
       setCropMode(false); setCropSel(null)
-      setOut(''); setImgLoaded(true); flash('✓ 已裁剪')
-      // 触发重渲
-      setTimeout(() => setOut(render(1)), 0)
+      setOut(''); setImgLoaded(false); flash('✓ 已裁剪')
     }
-    newImg.src = cropped.toDataURL('image/png')
+    newImg.src = croppedUrl
   }
   const rotate = (deg: number): void => setXf((x) => ({ ...x, rotate: (((x.rotate + deg) % 360) + 360) % 360 }))
   const flip = (dir: 'h' | 'v'): void => setXf((x) => (dir === 'h' ? { ...x, flipH: !x.flipH } : { ...x, flipV: !x.flipV }))
 
+  const restoreOriginal = (): void => {
+    resetEdits()
+    setSourceData(originalSourceRef.current)
+    setSourceVersion((v) => v + 1)
+    flash('已恢复原始截图')
+  }
+
+  const openImage = (): void => {
+    void island.openImageFile().then((r) => {
+      if (r.ok && r.dataUrl) useSource(r.dataUrl, r.name)
+      else if (r.error) flash('✗ ' + r.error)
+    })
+  }
+
+  const pasteImage = (): void => {
+    void island.readClipboardImage().then((r) => {
+      if (r.ok && r.dataUrl) useSource(r.dataUrl, '剪贴板图片')
+      else flash('✗ ' + (r.error || '剪贴板中没有图片'))
+    })
+  }
+
+  const captureDisplay = (): void => {
+    void island.captureScreen().then((r) => {
+      if (r.ok && r.dataUrl) useSource(r.dataUrl, '整屏截图')
+      else flash('✗ 整屏截图失败')
+    })
+  }
+
   // ── 导出 ──
-  const doCopy = (): void => { island.copyImage(render(deco.scale)); flash(`✓ 已复制到剪贴板（PNG${deco.scale > 1 ? ` ${deco.scale}x` : ' 无损'}）`) }
+  const doCopy = (): void => {
+    void island.copyImage(render(deco.scale, 'png', 1)).then((r) => {
+      flash(r.ok ? `✓ 已复制 PNG${deco.scale > 1 ? ` ${deco.scale}x` : ''}` : `✗ ${r.error || '复制失败'}`)
+    })
+  }
   const doSave = (): void => {
-    const img = render(deco.scale)
-    const d = new Date()
-    void island.saveImage(img, `截图_${d.getMonth() + 1}-${d.getDate()}_${d.getHours()}${String(d.getMinutes()).padStart(2, '0')}${deco.scale > 1 ? `_${deco.scale}x` : ''}`).then((r) => {
+    const img = render(deco.scale, exportFormat, exportQuality)
+    const name = `${sanitizeScreenshotName(sourceName)}${deco.scale > 1 ? `_${deco.scale}x` : ''}`
+    void island.saveImage(img, name).then((r) => {
       if (r.ok) flash('✓ 已保存 ' + (r.path || '')); else if (!r.canceled) flash('✗ ' + (r.error || '保存失败'))
     })
   }
-  const doAsk = (): void => onAskImage(render(deco.scale))
+  const doAsk = (): void => onAskImage(render(1, 'png', 1))
 
   // ── AI 调用 ──
   const runAI = (label: string, system: string, prompt: string): void => {
     if (!llmReady || aiBusy) return
     setAiBusy(label); setTab('ai')
-    const img = render(1)
+    const img = render(1, 'jpeg', 0.9)
     void onAIVision(system, img, prompt).then((r) => {
       const id = Date.now() + Math.random()
       if (r.ok) setAiResults((prev) => [{ id, label, text: (r.text || '').trim() || '(空结果)' }, ...prev])
@@ -595,74 +689,77 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
       else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); redo() }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { e.preventDefault(); doCopy() }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); doSave() }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') { e.preventDefault(); pasteImage() }
+      else if (e.key === '0') setZoom('fit')
+      else if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(2, (z === 'fit' ? 1 : z) + 0.25))
+      else if (e.key === '-') setZoom((z) => Math.max(0.25, (z === 'fit' ? 1 : z) - 0.25))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textInput, annos, redoStack, deco, xf, frame, bgKey])
+  }, [textInput, annos, redoStack, deco, xf, frame, bgKey, sourceData, exportFormat, exportQuality])
 
-  // ── 样式片段 ──
-  const chip = (active: boolean): React.CSSProperties => ({
-    flex: 'none', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 11px', borderRadius: 9, cursor: 'pointer',
-    background: active ? 'oklch(0.4 0.09 var(--th) / .45)' : 'rgba(255,255,255,.04)',
-    border: `1px solid ${active ? 'oklch(0.72 0.14 var(--th) / .55)' : 'rgba(255,255,255,.07)'}`,
-    color: active ? 'oklch(0.92 0.06 var(--th))' : 'oklch(0.8 0.02 var(--th) / .8)', fontSize: 11, fontWeight: 600
-  })
-  const label9: React.CSSProperties = { color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 9.5, flex: 'none' }
-  const slider: React.CSSProperties = { flex: 1, accentColor: 'oklch(0.75 calc(0.14 * var(--cs, 1)) var(--th))' }
-  const btnSm = (active = false): React.CSSProperties => ({
-    padding: '5px 9px', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 600,
-    background: active ? 'oklch(0.42 0.1 var(--th) / .5)' : 'rgba(255,255,255,.05)',
-    border: `1px solid ${active ? 'oklch(0.72 0.14 var(--th) / .5)' : 'rgba(255,255,255,.08)'}`,
-    color: 'oklch(0.86 0.02 var(--th))'
-  })
+  // ── 样式片段（设计系统令牌） ──
+  const label9: React.CSSProperties = { ...text.faint(), fontSize: 9.5, flex: 'none' }
+  const groupLabel: React.CSSProperties = { ...text.overline(), fontSize: 9.5, flex: 'none' }
+  const toolRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8 }
+  const toolLabel: React.CSSProperties = { ...label9, width: 42 }
 
-  const TOOLS: { key: Tool; icon: string; label: string }[] = [
-    { key: 'none', icon: '👆', label: '选择' },
-    { key: 'arrow', icon: '➘', label: '箭头' },
-    { key: 'rect', icon: '▭', label: '矩形' },
-    { key: 'ellipse', icon: '◯', label: '椭圆' },
-    { key: 'line', icon: '╱', label: '直线' },
-    { key: 'pen', icon: '✎', label: '画笔' },
-    { key: 'highlight', icon: '🖍', label: '荧光笔' },
-    { key: 'text', icon: 'T', label: '文字' },
-    { key: 'number', icon: '①', label: '序号' },
-    { key: 'mosaic', icon: '▦', label: '马赛克' },
-    { key: 'blur', icon: '◌', label: '模糊' }
+  const TOOLS: { key: Tool; icon: LucideIcon; label: string }[] = [
+    { key: 'none', icon: MousePointer2, label: '选择' },
+    { key: 'arrow', icon: MoveUpRight, label: '箭头' },
+    { key: 'rect', icon: Square, label: '矩形' },
+    { key: 'ellipse', icon: Circle, label: '椭圆' },
+    { key: 'line', icon: Slash, label: '直线' },
+    { key: 'pen', icon: Pencil, label: '画笔' },
+    { key: 'highlight', icon: Highlighter, label: '荧光笔' },
+    { key: 'text', icon: Type, label: '文字' },
+    { key: 'number', icon: Hash, label: '序号' },
+    { key: 'mosaic', icon: Grid, label: '马赛克' },
+    { key: 'blur', icon: Droplets, label: '模糊' }
   ]
 
   const drawing = tool !== 'none' || cropMode
 
   return (
-    <div onMouseDown={onClose} style={{ position: 'fixed', inset: 0, zIndex: 210, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(0.08 0.02 var(--ths) / .55)', backdropFilter: 'blur(4px)', animation: 'ai-fadein .15s ease' }}>
-      <div onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(960px, 94vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column', borderRadius: 16, overflow: 'hidden', background: 'oklch(calc(0.16 * var(--pl, 1)) calc(0.03 * var(--css, 1)) var(--ths) / .98)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .35)', animation: 'ai-riseblur .3s cubic-bezier(.22,.61,.36,1)' }}>
+    <div onMouseDown={onClose} style={{ position: 'fixed', inset: 0, zIndex: 210, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(8px)', animation: 'ai-fadein .15s ease' }}>
+      <motion.div variants={overlayPop} initial="initial" animate="animate" onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(1000px, 72vw)', height: 'min(680px, 68vh)', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...surface.overlay(), borderRadius: R.panel }}>
         {/* 头 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 15px', borderBottom: '1px solid rgba(255,255,255,.07)' }}>
-          <span style={{ fontSize: 15 }}>📸</span>
-          <span style={{ color: 'oklch(0.95 0.01 var(--th))', fontSize: 13, fontWeight: 700 }}>截图工坊 <span style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 9.5, fontWeight: 400 }}>专业版 · 原生分辨率 · PNG 无损</span></span>
-          {/* 顶部 Tab */}
-          <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
-            {([['design', '🎨 设计'], ['annotate', '✏️ 标注'], ['ai', '✨ AI']] as const).map(([k, l]) => (
-              <span key={k} className="hv" onClick={() => setTab(k)} style={{ ...btnSm(tab === k), padding: '4px 10px' }}>{l}</span>
-            ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 52, padding: `0 ${SP.md}px`, borderBottom: `0.5px solid ${hairline(0.1)}` }}>
+          <div style={{ width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accent(), flex: 'none' }}>
+            <Camera size={14} strokeWidth={1.75} />
           </div>
+          <span style={text.subtitle()}>截图工坊</span>
+          <span style={{ ...text.faint(), fontVariantNumeric: 'tabular-nums' }}>{originalSize.width} × {originalSize.height} · {formatBytes(dataUrlBytes(sourceData))}</span>
+          {/* 顶部 Tab */}
+          <Segmented value={tab} onChange={(k) => setTab(k)} style={{ marginLeft: 6 }} options={[
+            { key: 'design', label: '设计', icon: Palette },
+            { key: 'annotate', label: '标注', icon: PenTool },
+            { key: 'ai', label: 'AI', icon: Sparkles }
+          ]} />
+          <Button sm variant="ghost" icon={FileImage} onClick={openImage} title="打开本地图片">打开</Button>
+          <Button sm variant="ghost" icon={ClipboardPaste} onClick={pasteImage} title="从剪贴板粘贴图片 (Ctrl+V)">粘贴</Button>
+          <Button sm variant="ghost" icon={Monitor} onClick={captureDisplay} title="捕获鼠标所在显示器">整屏</Button>
+          <Button sm variant="ghost" icon={ScanLine} onClick={onRetake} title="重新框选截图">重截</Button>
           <span style={{ flex: 1 }} />
-          {toast && <span style={{ color: 'oklch(0.8 0.11 150)', fontSize: 10.5 }}>{toast}</span>}
-          <span className="hv" onClick={onClose} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 14 }}>✕</span>
+          {toast && <span style={{ color: sem.calm, fontSize: FS.tiny, fontWeight: 600 }}>{toast}</span>}
+          <IconButton icon={X} onClick={onClose} title="关闭" size={28} />
         </div>
 
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           {/* 预览区 */}
-          <div className="ai-scroll" style={{ flex: 1, minWidth: 0, minHeight: 260, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'repeating-conic-gradient(rgba(255,255,255,.045) 0% 25%, transparent 0% 50%) 0 0 / 22px 22px', position: 'relative' }}>
-            <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '58vh', lineHeight: 0 }}>
+          <div className="ai-scroll" style={{ flex: 1, minWidth: 0, minHeight: 300, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 34, background: 'repeating-conic-gradient(rgba(255,255,255,.035) 0% 25%, rgba(0,0,0,.045) 0% 50%) 0 0 / 20px 20px', position: 'relative' }}>
+            <div style={{ position: 'relative', maxWidth: zoom === 'fit' ? '100%' : 'none', maxHeight: zoom === 'fit' ? 'calc(68vh - 140px)' : 'none', lineHeight: 0, flex: 'none' }}>
               <img ref={previewRef} src={final} alt="截图预览" draggable={false}
-                onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
-                style={{ maxWidth: '100%', maxHeight: '58vh', borderRadius: 8, boxShadow: '0 10px 34px rgba(0,0,0,.45)', cursor: drawing ? 'crosshair' : 'default', userSelect: 'none' }} />
+                onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+                style={zoom === 'fit'
+                  ? { maxWidth: '100%', maxHeight: 'calc(68vh - 140px)', borderRadius: R.sm, boxShadow: '0 14px 44px rgba(0,0,0,.48)', cursor: drawing ? 'crosshair' : 'default', userSelect: 'none', touchAction: 'none' }
+                  : { width: `${Math.max(1, compSize.width * zoom)}px`, maxWidth: 'none', borderRadius: R.sm, boxShadow: '0 14px 44px rgba(0,0,0,.48)', cursor: drawing ? 'crosshair' : 'default', userSelect: 'none', touchAction: 'none' }} />
               {/* 裁剪选框叠层（预览像素） */}
               {cropMode && cropSel && composedRef.current && previewRef.current && (
                 <div style={{
-                  position: 'absolute', pointerEvents: 'none', border: '2px dashed oklch(0.85 0.14 var(--th))', background: 'oklch(0.85 0.14 var(--th) / .12)',
-                  left: `${(cropSel.x / composedRef.current.W) * 100}%`, top: `${(cropSel.y / composedRef.current.H) * 100}%`,
+                  position: 'absolute', pointerEvents: 'none', border: `2px dashed ${accent()}`, background: semBg(accent(), 0.12),
+                  left: `${((composedRef.current.imgX + cropSel.x) / composedRef.current.W) * 100}%`, top: `${((composedRef.current.imgY + cropSel.y) / composedRef.current.H) * 100}%`,
                   width: `${(cropSel.w / composedRef.current.W) * 100}%`, height: `${(cropSel.h / composedRef.current.H) * 100}%`
                 }} />
               )}
@@ -671,75 +768,116 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
                 <input autoFocus value={textInput.value} onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
                   onBlur={commitText} onKeyDown={(e) => { if (e.key === 'Enter') commitText(); if (e.key === 'Escape') setTextInput(null) }}
                   placeholder="输入文字，回车确认"
-                  style={{ position: 'absolute', left: textInput.x, top: textInput.y, minWidth: 120, padding: '2px 6px', border: `2px solid ${color}`, borderRadius: 5, background: 'rgba(20,20,26,.9)', color, fontSize: 13, fontWeight: 700, outline: 'none' }} />
+                  style={{ position: 'absolute', left: textInput.x, top: textInput.y, minWidth: 120, padding: '3px 7px', border: `2px solid ${color}`, borderRadius: R.sm, background: 'rgba(0,0,0,.72)', color, fontSize: 13, fontWeight: 700, outline: 'none', fontFamily: 'inherit' }} />
               )}
             </div>
             {aiBusy && (
-              <div style={{ position: 'absolute', top: 14, left: 14, display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 999, background: 'oklch(0.2 0.04 var(--th) / .9)', border: '1px solid oklch(0.6 0.12 var(--th) / .4)' }}>
+              <div style={{ position: 'absolute', top: 14, left: 14, display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: R.pill, background: 'rgba(0,0,0,.45)', border: `0.5px solid ${accent(0.7, 0.4)}`, backdropFilter: 'blur(12px)' }}>
                 <span style={{ display: 'inline-flex', gap: 3 }}>
-                  {[0, 1, 2].map((i) => <span key={i} style={{ width: 5, height: 5, borderRadius: 3, background: 'oklch(0.8 0.14 var(--th))', animation: `ai-dotpulse 1s ${i * 0.15}s infinite` }} />)}
+                  {[0, 1, 2].map((i) => <span key={i} style={{ width: 5, height: 5, borderRadius: 3, background: accent(), animation: `ai-dotpulse 1s ${i * 0.15}s infinite` }} />)}
                 </span>
-                <span style={{ color: 'oklch(0.88 0.04 var(--th))', fontSize: 11 }}>{aiBusy}…</span>
+                <span style={{ color: ink(1), fontSize: FS.small }}>{aiBusy}…</span>
               </div>
             )}
+            <div style={{ position: 'absolute', right: 12, bottom: 12, display: 'flex', alignItems: 'center', gap: 3, padding: 3, borderRadius: R.pill, background: 'rgba(0,0,0,.42)', border: `0.5px solid ${hairline(0.12)}`, backdropFilter: 'blur(12px)' }}>
+              <IconButton icon={ZoomOut} title="缩小 (-)" size={24} onClick={() => setZoom((z) => Math.max(0.25, (z === 'fit' ? 1 : z) - 0.25))} />
+              <Chip active={zoom === 'fit'} title="适应窗口 (0)" onClick={() => setZoom('fit')} style={{ minWidth: 48, justifyContent: 'center' }}>{zoom === 'fit' ? '适应' : `${Math.round(zoom * 100)}%`}</Chip>
+              <IconButton icon={ZoomIn} title="放大 (+)" size={24} onClick={() => setZoom((z) => Math.min(2, (z === 'fit' ? 1 : z) + 0.25))} />
+              <IconButton icon={Maximize2} title="100% 原始像素" size={24} active={zoom === 1} onClick={() => setZoom(1)} />
+            </div>
           </div>
 
           {/* 右侧控制面板 */}
-          <div className="ai-scroll" style={{ width: 320, flex: 'none', overflow: 'auto', borderLeft: '1px solid rgba(255,255,255,.07)', padding: '12px 13px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="ai-scroll" style={{ width: 300, flex: 'none', overflow: 'auto', borderLeft: `0.5px solid ${hairline(0.1)}`, padding: `${SP.md + 2}px ${SP.md + 3}px`, display: 'flex', flexDirection: 'column', gap: SP.md + 2 }}>
             {tab === 'design' && (
               <>
                 {/* 边框 */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {FRAMES.map((f) => (
-                    <div key={f.key} className="hv" onClick={() => setFrame(f.key)} title={f.hint} style={chip(frame === f.key)}>{f.label}</div>
-                  ))}
+                <div>
+                  <div style={{ ...groupLabel, marginBottom: 7 }}>边框</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {FRAMES.map((f) => (
+                      <Chip key={f.key} active={frame === f.key} onClick={() => setFrame(f.key)} title={f.hint}>{f.label}</Chip>
+                    ))}
+                  </div>
                 </div>
                 {/* 背景 */}
                 {frame !== 'none' && frame !== 'minimal' && frame !== 'polaroid' && frame !== 'dark' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <div style={{ ...toolRow, flexWrap: 'wrap', gap: 6 }}>
                     <span style={label9}>背景</span>
                     {BGS.map((b) => (
-                      <div key={b.key} className="hv" onClick={() => setBgKey(b.key)} title={b.label} style={{ width: 26, height: 26, borderRadius: 8, cursor: 'pointer', background: `linear-gradient(135deg, ${b.stops[0]}, ${b.stops[1]}, ${b.stops[2]})`, border: bgKey === b.key ? '2px solid oklch(0.85 0.12 var(--th))' : '2px solid transparent' }} />
+                      <div key={b.key} className="hv" onClick={() => setBgKey(b.key)} title={b.label} style={{ width: 24, height: 24, borderRadius: R.sm, cursor: 'pointer', background: `linear-gradient(135deg, ${b.stops[0]}, ${b.stops[1]}, ${b.stops[2]})`, border: bgKey === b.key ? `2px solid ${accent()}` : `0.5px solid ${hairline(0.15)}`, boxShadow: bgKey === b.key ? `0 0 8px ${accent(0.7, 0.5)}` : 'none' }} />
                     ))}
                   </div>
                 )}
                 {/* 装饰滑杆 */}
                 {frame !== 'none' && (
                   <>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ ...label9, width: 42 }}>圆角</span><input type="range" min={0} max={1} step={0.05} value={deco.radius} onChange={(e) => setDeco({ ...deco, radius: Number(e.target.value) })} style={slider} /></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ ...label9, width: 42 }}>阴影</span><input type="range" min={0} max={1} step={0.05} value={deco.shadow} onChange={(e) => setDeco({ ...deco, shadow: Number(e.target.value) })} style={slider} /></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ ...label9, width: 42 }}>内边距</span><input type="range" min={0} max={1} step={0.05} value={deco.pad} onChange={(e) => setDeco({ ...deco, pad: Number(e.target.value) })} style={slider} /></div>
+                    <div style={toolRow}><span style={toolLabel}>圆角</span><Slider min={0} max={1} step={0.05} value={deco.radius} onChange={(v) => setDeco({ ...deco, radius: v })} style={{ flex: 1 }} /></div>
+                    <div style={toolRow}><span style={toolLabel}>阴影</span><Slider min={0} max={1} step={0.05} value={deco.shadow} onChange={(v) => setDeco({ ...deco, shadow: v })} style={{ flex: 1 }} /></div>
+                    <div style={toolRow}><span style={toolLabel}>内边距</span><Slider min={0} max={1} step={0.05} value={deco.pad} onChange={(v) => setDeco({ ...deco, pad: v })} style={{ flex: 1 }} /></div>
                   </>
                 )}
                 {/* 变换 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <div style={{ ...toolRow, flexWrap: 'wrap', gap: 6 }}>
                   <span style={label9}>变换</span>
-                  <span className="hv" onClick={() => rotate(-90)} style={btnSm()} title="逆时针 90°">⟲</span>
-                  <span className="hv" onClick={() => rotate(90)} style={btnSm()} title="顺时针 90°">⟳</span>
-                  <span className="hv" onClick={() => flip('h')} style={btnSm(xf.flipH)} title="水平翻转">◧</span>
-                  <span className="hv" onClick={() => flip('v')} style={btnSm(xf.flipV)} title="垂直翻转">⬒</span>
-                  <span className="hv" onClick={() => { setCropMode((v) => !v); setCropSel(null); setTool('none') }} style={btnSm(cropMode)} title="框选裁剪">✂ 裁剪</span>
-                  {cropMode && <span className="hv" onClick={applyCrop} style={{ ...btnSm(), background: 'oklch(0.55 0.14 150 / .5)' }}>应用</span>}
+                  <IconButton icon={RotateCcw} onClick={() => rotate(-90)} title="逆时针 90°" />
+                  <IconButton icon={RotateCw} onClick={() => rotate(90)} title="顺时针 90°" />
+                  <IconButton icon={FlipHorizontal} active={xf.flipH} onClick={() => flip('h')} title="水平翻转" />
+                  <IconButton icon={FlipVertical} active={xf.flipV} onClick={() => flip('v')} title="垂直翻转" />
+                  <Chip icon={Crop} active={cropMode} onClick={() => { setCropMode((v) => !v); setCropSel(null); setTool('none') }} title="框选裁剪">裁剪</Chip>
+                  {cropMode && <Button sm variant="ghost" icon={Check} onClick={applyCrop} disabled={!cropSel || cropSel.w < 8 || cropSel.h < 8} style={{ background: semBg(sem.calm, 0.18), color: sem.calm, border: `0.5px solid ${semBg(sem.calm, 0.45)}` }}>应用</Button>}
                 </div>
                 {/* 水印 */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ ...label9, width: 42 }}>水印</span>
-                    <input value={deco.watermark} onChange={(e) => setDeco({ ...deco, watermark: e.target.value })} placeholder="自定义水印文字"
-                      style={{ flex: 1, padding: '5px 8px', borderRadius: 7, background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)', color: 'oklch(0.9 0.02 var(--th))', fontSize: 11, outline: 'none' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={toolRow}>
+                    <span style={toolLabel}>水印</span>
+                    <Input value={deco.watermark} onChange={(v) => setDeco({ ...deco, watermark: v })} placeholder="自定义水印文字" style={{ flex: 1 }} />
                   </div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'oklch(0.78 0.02 var(--th) / .8)', fontSize: 11 }}>
-                    <input type="checkbox" checked={deco.wmStamp} onChange={(e) => setDeco({ ...deco, wmStamp: e.target.checked })} style={{ accentColor: 'oklch(0.75 0.14 var(--th))' }} /> 追加时间戳
-                  </label>
+                  <div style={toolRow}>
+                    <Switch on={deco.wmStamp} onChange={(on) => setDeco({ ...deco, wmStamp: on })} />
+                    <span className="hv" onClick={() => setDeco({ ...deco, wmStamp: !deco.wmStamp })} style={{ ...text.dim(), cursor: 'pointer' }}>追加时间戳</span>
+                  </div>
                 </div>
                 {/* 倍率 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ ...toolRow, gap: 6 }}>
                   <span style={label9}>导出倍率</span>
                   {[1, 2, 3].map((s) => (
-                    <span key={s} className="hv" onClick={() => setDeco({ ...deco, scale: s })} style={btnSm(deco.scale === s)}>{s}x</span>
+                    <Chip key={s} active={deco.scale === s} onClick={() => setDeco({ ...deco, scale: s })}>{s}x</Chip>
                   ))}
-                  <span style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 8.5 }}>1x 无损</span>
+                  <span style={{ ...text.faint(), fontSize: 9 }}>1x 无损</span>
                 </div>
+                <div style={{ height: 0.5, background: hairline(0.09) }} />
+                <div style={toolRow}>
+                  <span style={toolLabel}>文件名</span>
+                  <Input value={sourceName} onChange={setSourceName} style={{ flex: 1 }} />
+                  <span style={text.mono(10)}>.{formatExtension(exportFormat)}</span>
+                </div>
+                <div style={toolRow}>
+                  <span style={toolLabel}>格式</span>
+                  <Segmented<ScreenshotFormat> value={exportFormat} onChange={setExportFormat} options={[
+                    { key: 'png', label: 'PNG' },
+                    { key: 'jpeg', label: 'JPG' },
+                    { key: 'webp', label: 'WEBP' }
+                  ]} />
+                </div>
+                {exportFormat !== 'png' && (
+                  <div style={toolRow}>
+                    <span style={toolLabel}>质量</span>
+                    <Slider min={0.5} max={1} step={0.05} value={exportQuality} onChange={setExportQuality} style={{ flex: 1 }} />
+                    <span style={{ ...text.num(10), width: 30, textAlign: 'right' }}>{Math.round(exportQuality * 100)}%</span>
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div style={{ ...surface.inset(), padding: '7px 10px' }}>
+                    <div style={label9}>导出尺寸</div>
+                    <div style={{ marginTop: 3, ...text.num(FS.small) }}>{exportSize.width} × {exportSize.height}</div>
+                  </div>
+                  <div style={{ ...surface.inset(), padding: '7px 10px' }}>
+                    <div style={label9}>当前预览</div>
+                    <div style={{ marginTop: 3, ...text.num(FS.small) }}>{formatBytes(previewBytes)}</div>
+                  </div>
+                </div>
+                <Button variant="ghost" icon={RotateCcw} onClick={restoreOriginal}>恢复原始截图与默认样式</Button>
               </>
             )}
 
@@ -748,29 +886,29 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
                 {/* 工具 */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {TOOLS.map((t) => (
-                    <div key={t.key} className="hv" onClick={() => { setTool(t.key); setCropMode(false) }} title={t.label} style={{ ...chip(tool === t.key), padding: '6px 9px' }}><span style={{ fontSize: 12 }}>{t.icon}</span>{t.label}</div>
+                    <Chip key={t.key} icon={t.icon} active={tool === t.key} onClick={() => { setTool(t.key); setCropMode(false) }} title={t.label}>{t.label}</Chip>
                   ))}
                 </div>
                 {/* 颜色 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <div style={{ ...toolRow, flexWrap: 'wrap', gap: 6 }}>
                   <span style={label9}>颜色</span>
                   {PALETTE.map((c) => (
-                    <div key={c} className="hv" onClick={() => setColor(c)} style={{ width: 22, height: 22, borderRadius: 6, cursor: 'pointer', background: c, border: color === c ? '2px solid oklch(0.92 0.05 var(--th))' : '2px solid rgba(255,255,255,.15)' }} />
+                    <div key={c} className="hv" onClick={() => setColor(c)} style={{ width: 20, height: 20, borderRadius: 7, cursor: 'pointer', background: c, border: color === c ? `2px solid ${accent()}` : `0.5px solid ${hairline(0.18)}`, boxShadow: color === c ? `0 0 8px ${accent(0.7, 0.45)}` : 'none' }} />
                   ))}
                 </div>
                 {/* 线宽 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ ...label9, width: 42 }}>线宽</span>
-                  <input type="range" min={2} max={16} step={1} value={lineW} onChange={(e) => setLineW(Number(e.target.value))} style={slider} />
-                  <span style={{ color: 'oklch(0.7 0.02 var(--th) / .6)', fontSize: 10, width: 20, textAlign: 'right' }}>{lineW}</span>
+                <div style={toolRow}>
+                  <span style={toolLabel}>线宽</span>
+                  <Slider min={2} max={16} step={1} value={lineW} onChange={setLineW} style={{ flex: 1 }} />
+                  <span style={{ ...text.num(10), width: 20, textAlign: 'right' }}>{lineW}</span>
                 </div>
                 {/* 撤销/重做/清空 */}
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <span className="hv" onClick={undo} style={{ ...btnSm(), flex: 1, textAlign: 'center', opacity: annos.length ? 1 : 0.4 }}>↶ 撤销</span>
-                  <span className="hv" onClick={redo} style={{ ...btnSm(), flex: 1, textAlign: 'center', opacity: redoStack.length ? 1 : 0.4 }}>↷ 重做</span>
-                  <span className="hv" onClick={clearAnno} style={{ ...btnSm(), flex: 1, textAlign: 'center', opacity: annos.length ? 1 : 0.4 }}>🗑 清空</span>
+                  <Button sm variant="ghost" icon={Undo2} onClick={undo} disabled={!annos.length} style={{ flex: 1 }}>撤销</Button>
+                  <Button sm variant="ghost" icon={Redo2} onClick={redo} disabled={!redoStack.length} style={{ flex: 1 }}>重做</Button>
+                  <Button sm variant="ghost" onClick={clearAnno} disabled={!annos.length} style={{ flex: 1 }}>清空</Button>
                 </div>
-                <div style={{ color: 'oklch(0.58 0.02 var(--th) / .55)', fontSize: 9.5, lineHeight: 1.6 }}>
+                <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.6 }}>
                   在左侧图上按住拖拽绘制。文字/序号点击即放置。马赛克/模糊框选区域遮盖敏感内容。<br />快捷键：Ctrl+Z 撤销 · Ctrl+Shift+Z 重做 · Esc 关闭。
                 </div>
               </>
@@ -779,27 +917,30 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
             {tab === 'ai' && (
               <>
                 {!llmReady && (
-                  <div style={{ padding: '9px 11px', borderRadius: 9, background: 'oklch(0.4 0.09 75 / .18)', border: '1px solid oklch(0.7 0.13 75 / .35)', color: 'oklch(0.85 0.09 75)', fontSize: 10.5, lineHeight: 1.55 }}>
-                    ⚠ 请先在「设置」里配置视觉模型（API），再使用 AI 增强能力。
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7, padding: '9px 11px', borderRadius: R.md, background: semBg(sem.warn, 0.14), border: `0.5px solid ${semBg(sem.warn, 0.4)}`, color: sem.warn, fontSize: FS.tiny, lineHeight: 1.55 }}>
+                    <TriangleAlert size={13} strokeWidth={1.75} style={{ flex: 'none', marginTop: 1 }} />
+                    <span>请先在「设置」里配置视觉模型（API），再使用 AI 增强能力。</span>
                   </div>
                 )}
                 {/* 自由问图 */}
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <input value={askInput} disabled={!llmReady} onChange={(e) => setAskInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') runAsk() }}
-                    placeholder="问关于这张图的任何问题…"
-                    style={{ flex: 1, padding: '7px 9px', borderRadius: 8, background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)', color: 'oklch(0.9 0.02 var(--th))', fontSize: 11, outline: 'none', opacity: llmReady ? 1 : 0.5 }} />
-                  <span className="hv" onClick={runAsk} style={{ ...btnSm(), opacity: llmReady && askInput.trim() && !aiBusy ? 1 : 0.4, padding: '7px 12px' }}>问</span>
+                  <div style={{ ...surface.inset(), flex: 1, display: 'flex', alignItems: 'center', padding: '0 10px', opacity: llmReady ? 1 : 0.5 }}>
+                    <input value={askInput} disabled={!llmReady} onChange={(e) => setAskInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') runAsk() }}
+                      placeholder="问关于这张图的任何问题…"
+                      style={{ flex: 1, minWidth: 0, height: 30, border: 0, outline: 'none', background: 'transparent', color: ink(1), fontSize: FS.body, fontFamily: 'inherit' }} />
+                  </div>
+                  <Button sm variant="primary" onClick={runAsk} disabled={!llmReady || !askInput.trim() || !!aiBusy}>问</Button>
                 </div>
                 {/* 动作矩阵，按分组 */}
                 {['文字', '理解', '数据', '开发', '效率', '安全'].map((grp) => (
                   <div key={grp} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    <span style={{ ...label9, letterSpacing: 1 }}>{grp}</span>
+                    <span style={groupLabel}>{grp}</span>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                       {AI_ACTIONS.filter((a) => a.group === grp).map((a) => (
-                        <div key={a.key} className="hv" onClick={() => runAI(a.label, a.system, a.prompt)} title={a.label}
-                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 9px', borderRadius: 8, cursor: llmReady && !aiBusy ? 'pointer' : 'not-allowed', opacity: llmReady && !aiBusy ? 1 : 0.4, background: 'rgba(255,255,255,.045)', border: '1px solid rgba(255,255,255,.08)', color: 'oklch(0.85 0.02 var(--th))', fontSize: 10.5 }}>
-                          <span>{a.icon}</span>{a.label}
-                        </div>
+                        <Chip key={a.key} icon={a.icon} onClick={() => runAI(a.label, a.system, a.prompt)} title={a.label}
+                          style={{ cursor: llmReady && !aiBusy ? 'pointer' : 'not-allowed', opacity: llmReady && !aiBusy ? 1 : 0.4, fontSize: 10.5 }}>
+                          {a.label}
+                        </Chip>
                       ))}
                     </div>
                   </div>
@@ -808,17 +949,24 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
                 {aiResults.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ ...label9, letterSpacing: 1 }}>结果</span>
-                      <span className="hv" onClick={() => setAiResults([])} style={{ color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 9.5, cursor: 'pointer', marginLeft: 'auto' }}>清空</span>
+                      <span style={groupLabel}>结果</span>
+                      <span className="hv" onClick={() => setAiResults([])} style={{ ...text.faint(), fontSize: 9.5, cursor: 'pointer', marginLeft: 'auto' }}>清空</span>
                     </div>
                     {aiResults.map((r) => (
-                      <div key={r.id} style={{ padding: '8px 10px', borderRadius: 9, background: r.err ? 'oklch(0.35 0.1 25 / .18)' : 'rgba(255,255,255,.04)', border: `1px solid ${r.err ? 'oklch(0.6 0.14 25 / .35)' : 'rgba(255,255,255,.08)'}`, animation: 'ai-fadein .2s ease' }}>
+                      <motion.div key={r.id} variants={fadeScaleIn} initial="initial" animate="animate" className="ai-card"
+                        style={r.err
+                          ? { padding: '9px 11px', borderRadius: R.lg, background: semBg(sem.danger, 0.12), border: `0.5px solid ${semBg(sem.danger, 0.4)}` }
+                          : { ...surface.card(), padding: '9px 11px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-                          <span style={{ color: r.err ? 'oklch(0.75 0.13 25)' : 'oklch(0.82 0.06 var(--th))', fontSize: 10.5, fontWeight: 700 }}>{r.label}</span>
-                          {!r.err && <span className="hv" onClick={() => copyResult(r.text)} style={{ marginLeft: 'auto', color: 'oklch(0.65 0.02 var(--th) / .7)', fontSize: 9.5, cursor: 'pointer' }}>📋 复制</span>}
+                          <span style={{ color: r.err ? sem.danger : accent(0.88), fontSize: FS.small, fontWeight: 700 }}>{r.label}</span>
+                          {!r.err && <div style={{ display: 'flex', gap: 9, marginLeft: 'auto' }}>
+                            <span className="hv" onClick={() => onCreateTodo(r.text)} style={{ color: ink(3), fontSize: 9.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><ListChecks size={10} strokeWidth={2} />转待办</span>
+                            <span className="hv" onClick={() => onCreateNote(r.label, r.text)} style={{ color: ink(3), fontSize: 9.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><FileText size={10} strokeWidth={2} />存便签</span>
+                            <span className="hv" onClick={() => copyResult(r.text)} style={{ color: ink(3), fontSize: 9.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Copy size={10} strokeWidth={2} />复制</span>
+                          </div>}
                         </div>
-                        <div style={{ color: r.err ? 'oklch(0.8 0.08 25)' : 'oklch(0.85 0.015 var(--th))', fontSize: 11, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 220, overflow: 'auto' }} className="ai-scroll">{r.text}</div>
-                      </div>
+                        <div style={{ color: r.err ? sem.danger : ink(1), fontSize: FS.small, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 220, overflow: 'auto' }} className="ai-scroll">{r.text}</div>
+                      </motion.div>
                     ))}
                   </div>
                 )}
@@ -828,12 +976,16 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
         </div>
 
         {/* 底部操作栏 */}
-        <div style={{ display: 'flex', gap: 8, padding: '10px 15px 13px', borderTop: '1px solid rgba(255,255,255,.06)' }}>
-          <div className="hv" onClick={doAsk} style={{ flex: 'none', textAlign: 'center', padding: '9px 14px', borderRadius: 10, cursor: 'pointer', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', color: 'oklch(0.88 0.02 var(--th))', fontSize: 12, fontWeight: 700 }} title="把当前图交给「截图问 AI」浮层">💬 问 AI</div>
-          <div className="hv" onClick={doCopy} style={{ flex: 1, textAlign: 'center', padding: '9px 0', borderRadius: 10, cursor: 'pointer', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.1)', color: 'oklch(0.88 0.02 var(--th))', fontSize: 12, fontWeight: 700 }}>📋 复制</div>
-          <div className="hv" onClick={doSave} style={{ flex: 1, textAlign: 'center', padding: '9px 0', borderRadius: 10, cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 12, fontWeight: 700 }}>💾 保存 PNG{deco.scale > 1 ? ` ${deco.scale}x` : ''}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: SP.sm, minHeight: 56, padding: `0 ${SP.md}px`, borderTop: `0.5px solid ${hairline(0.1)}` }}>
+          <div style={{ minWidth: 230, ...text.faint(), fontVariantNumeric: 'tabular-nums' }}>
+            画布 {compSize.width} × {compSize.height} · {annos.length} 个标注 · {frame === 'none' ? '原图' : FRAMES.find((x) => x.key === frame)?.label}
+          </div>
+          <span style={{ flex: 1 }} />
+          <Button variant="ghost" icon={MessageSquare} onClick={doAsk} title="把当前图交给截图问答">问 AI</Button>
+          <Button variant="ghost" icon={Copy} onClick={doCopy}>复制 PNG</Button>
+          <Button variant="primary" icon={Save} onClick={doSave}>保存 {exportFormat === 'jpeg' ? 'JPG' : exportFormat.toUpperCase()}{deco.scale > 1 ? ` ${deco.scale}x` : ''}</Button>
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }

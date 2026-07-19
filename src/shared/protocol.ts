@@ -172,6 +172,19 @@ export interface CalendarEvent {
   location?: string
 }
 
+/** 显示器信息（getDisplays；index = getAllDisplays() 枚举序号，reposition 的 monitorIndex 即它） */
+export interface DisplayInfo {
+  /** Electron display.id（跨枚举稳定） */
+  id: number
+  /** getAllDisplays() 枚举序号（0 起） */
+  index: number
+  label: string
+  primary: boolean
+  width: number
+  height: number
+  scaleFactor: number
+}
+
 /** preload 通过 contextBridge 暴露给渲染进程的 API */
 export interface IslandBridgeApi {
   getRuntimeInfo: () => Promise<RuntimeInfo>
@@ -188,8 +201,10 @@ export interface IslandBridgeApi {
   setAutostart: (on: boolean) => void
   reposition: (opts: { follow: boolean; monitorIndex: number }) => void
   setSizeMode: (large: boolean) => void
-  /** 全屏模式：窗口铺满当前显示器 */
+  /** 全屏模式：窗口铺满当前显示器（含任务栏区域，主进程切 display.bounds） */
   setFullMode: (full: boolean) => void
+  /** 真实显示器列表（设置页选择用；index 与 reposition 的 monitorIndex 对应） */
+  getDisplays: () => Promise<DisplayInfo[]>
   /** 灵动岛整体宽度（标准模式面板宽 380–880） */
   setIslandWidth: (w: number) => void
   /** 界面缩放（0.9–1.3，提升小字清晰度） */
@@ -287,10 +302,14 @@ export interface IslandBridgeApi {
   clipWriteText: (t: string) => void
   /** 截图工坊：主动拉起框选截图（结果仍走 onScreenshot 事件） */
   triggerScreenshot: () => void
-  /** 图片写剪贴板（PNG 无损） */
-  copyImage: (dataUrl: string) => void
-  /** 图片存盘（PNG 无损，弹保存框） */
+  /** 图片写剪贴板 */
+  copyImage: (dataUrl: string) => Promise<{ ok: boolean; error?: string }>
+  /** 图片存盘（PNG/JPEG/WebP，弹保存框） */
   saveImage: (dataUrl: string, name: string) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
+  /** 从本地选择一张图片进入截图工坊 */
+  openImageFile: () => Promise<{ ok: boolean; dataUrl?: string; name?: string; error?: string }>
+  /** 从系统剪贴板读取图片 */
+  readClipboardImage: () => Promise<{ ok: boolean; dataUrl?: string; error?: string }>
   /** 拉取并解析飞书日历 ICS 订阅链接 */
   fetchCalendar: (url: string) => Promise<{ ok: boolean; events?: CalendarEvent[]; error?: string }>
   /** 抓取网页正文纯文本（灵感便签：丢链接给 AI 整理） */

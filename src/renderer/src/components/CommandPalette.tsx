@@ -1,7 +1,13 @@
 // 全局命令面板（Ctrl+Alt+K）：模糊搜索一键跳分区 / 执行动作 / 切主题。
 // 键盘全程可用：↑↓ 选择 · Enter 执行 · Esc 关闭。命令列表由 App 组装（掌握所有动作）。
+// 视觉层：ui/tokens 设计系统 + lucide 语义图标 + overlayPop 浮层动效（功能逻辑不变）。
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
+import { EmptyState } from '../ui/components'
+import { overlayPop } from '../ui/motion'
+import { accent, fill, FS, hairline, ink, R, semBg, SP, surface, text, transition } from '../ui/tokens'
+import { Ico } from '../ui/icons'
 
 export interface Command {
   id: string
@@ -56,9 +62,12 @@ export function CommandPalette({ open, commands, onClose }: { open: boolean; com
   return (
     <div
       onMouseDown={onClose}
-      style={{ position: 'fixed', inset: 0, zIndex: 210, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '13vh', background: 'oklch(0.08 0.02 var(--ths) / .5)', backdropFilter: 'blur(3px)', animation: 'ai-fadein .15s ease' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 210, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '13vh', background: 'rgba(0,0,0,.5)', backdropFilter: 'blur(4px)', animation: 'ai-fadein .15s ease' }}
     >
-      <div
+      <motion.div
+        variants={overlayPop}
+        initial="initial"
+        animate="animate"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(s + 1, filtered.length - 1)) }
@@ -66,44 +75,57 @@ export function CommandPalette({ open, commands, onClose }: { open: boolean; com
           else if (e.key === 'Enter') { e.preventDefault(); exec(filtered[sel]) }
           else if (e.key === 'Escape') { e.preventDefault(); onClose() }
         }}
-        style={{ width: 'min(560px, 80vw)', maxHeight: '64vh', display: 'flex', flexDirection: 'column', borderRadius: 16, overflow: 'hidden', background: 'oklch(calc(0.17 * var(--pl, 1)) calc(0.03 * var(--css, 1)) var(--ths) / .98)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .35)', boxShadow: 'none', animation: 'ai-riseblur .3s cubic-bezier(.22,.61,.36,1)' }}
+        style={{ ...surface.overlay(), width: 'min(560px, 80vw)', maxHeight: '64vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
       >
         {/* 搜索框 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '12px 15px', borderBottom: '1px solid rgba(255,255,255,.07)' }}>
-          <span style={{ fontSize: 15, opacity: 0.7 }}>⌘</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: `${SP.md}px ${SP.lg - 1}px`, borderBottom: `0.5px solid ${hairline()}` }}>
+          <Ico.search size={14} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
           <input
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="搜索分区 / 动作 / 主题…"
-            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'oklch(0.96 0.01 var(--th))', fontSize: 14, fontFamily: 'var(--font)' }}
+            style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: ink(1), fontSize: FS.subtitle, fontFamily: 'var(--font)' }}
           />
-          <span style={{ fontSize: 9.5, color: 'oklch(0.6 0.02 var(--th) / .5)', flex: 'none' }}>↑↓ 选择 · Enter 执行 · Esc 关闭</span>
+          <span style={{ ...text.faint(), fontSize: 9.5, flex: 'none' }}>↑↓ 选择 · Enter 执行 · Esc 关闭</span>
         </div>
         {/* 命令列表 */}
-        <div ref={listRef} className="ai-scroll" style={{ overflowY: 'auto', padding: 6 }}>
+        <div ref={listRef} className="ai-scroll" style={{ overflowY: 'auto', padding: SP.sm - 2 }}>
           {filtered.length === 0 ? (
-            <div style={{ padding: '22px 12px', textAlign: 'center', color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 12 }}>没有匹配的命令</div>
+            <EmptyState icon={Ico.search} title="没有匹配的命令" style={{ margin: SP.sm, border: 'none', background: 'transparent' }} />
           ) : (
-            filtered.map((c, i) => (
-              <div
-                key={c.id}
-                data-sel={i === sel ? '1' : '0'}
-                onMouseEnter={() => setSel(i)}
-                onClick={() => exec(c)}
-                style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '8px 11px', borderRadius: 10, cursor: 'pointer', background: i === sel ? 'oklch(0.4 calc(0.09 * var(--cs, 1)) var(--th) / .4)' : 'transparent' }}
-              >
-                <span style={{ flex: 'none', width: 24, textAlign: 'center', fontSize: 15 }}>{c.icon}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: 'oklch(0.94 0.01 var(--th))', fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
-                  {c.hint && <div style={{ color: 'oklch(0.66 0.02 var(--th) / .6)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.hint}</div>}
+            filtered.map((c, i) => {
+              const active = i === sel
+              return (
+                <div
+                  key={c.id}
+                  data-sel={active ? '1' : '0'}
+                  onMouseEnter={() => setSel(i)}
+                  onClick={() => exec(c)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: `${SP.sm}px ${SP.md - 1}px`,
+                    borderRadius: R.md,
+                    cursor: 'pointer',
+                    background: active ? semBg(accent(), 0.14) : 'transparent',
+                    transition: transition('background'),
+                  }}
+                >
+                  {/* icon 字段是调用方传入的 emoji 字符串数据，保持原样渲染 */}
+                  <span style={{ flex: 'none', width: 24, height: 24, display: 'grid', placeItems: 'center', fontSize: 14, borderRadius: R.sm - 2, background: active ? semBg(accent(), 0.16) : fill(1) }}>{c.icon}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ ...text.body(), fontWeight: 600, color: active ? accent(0.88) : ink(1), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
+                    {c.hint && <div style={{ ...text.faint(), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.hint}</div>}
+                  </div>
+                  <span style={{ flex: 'none', ...text.faint(), fontSize: 9.5, fontWeight: 600, padding: '2px 7px', borderRadius: R.sm - 2, background: fill(1) }}>{c.group}</span>
                 </div>
-                <span style={{ flex: 'none', fontSize: 9.5, color: 'oklch(0.62 calc(0.08 * var(--cs, 1)) var(--th) / .7)', padding: '2px 7px', borderRadius: 6, background: 'rgba(255,255,255,.05)' }}>{c.group}</span>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }

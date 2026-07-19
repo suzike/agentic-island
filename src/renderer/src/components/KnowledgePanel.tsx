@@ -1,10 +1,17 @@
 // 知识库管理浮层：接入本地文件夹 / 文件（含 PDF·Word）/ 网页 → 切块+向量化 → 语义检索作答（RAG）。
 // 检索必须向量嵌入：顶部要求配置 Embedding 模型（未配则禁用添加，给出引导）。
+// 视觉层已重做到设计系统（ui/tokens + ui/components + framer-motion），功能逻辑不变。
 
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
+import { FileText, FolderOpen, Globe, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import type { KbSourceView, LlmRequestConfig } from '../../../shared/protocol'
 import { island } from '../bridge'
 import { Markdown } from './Markdown'
+import { Badge, Button, EmptyState, IconButton, Input } from '../ui/components'
+import { Ico, type LucideIcon } from '../ui/icons'
+import { fadeScaleIn, overlayPop } from '../ui/motion'
+import { accent, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
 
 interface Props {
   open: boolean
@@ -17,7 +24,7 @@ interface Props {
   llmReady: boolean
 }
 
-const KIND_ICON: Record<string, string> = { folder: '📁', files: '📄', url: '🔗' }
+const KIND_GLYPH: Record<string, LucideIcon> = { folder: FolderOpen, files: FileText, url: Globe }
 
 // LLM-Wiki 合成：把代表性片段综合成一页结构化知识总览（编译一次、长期复用）
 const WIKI_SYSTEM =
@@ -83,81 +90,123 @@ export function KnowledgePanel({ open, onClose, embedCfg, embedModel, onSetEmbed
   const reindex = (): void => { setBusy('reindex'); setErr(''); setMsg(''); void island.kbReindex(embedCfg).then((r) => after('增量重扫', r)) }
   const remove = (id: string): void => { void island.kbRemove(id).then(() => { refresh(); onChanged() }) }
 
+  /** 添加动作大卡（文件夹/文件/网页）：激活态走主题色 */
   const btn = (active: boolean): React.CSSProperties => ({
-    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '11px 6px', borderRadius: 11,
-    cursor: embedReady && !busy ? 'pointer' : 'default', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.07)',
-    opacity: embedReady ? 1 : 0.5, color: active ? 'oklch(0.9 0.1 var(--th))' : 'oklch(0.85 0.02 var(--th) / .85)'
+    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '11px 6px',
+    borderRadius: R.lg,
+    cursor: embedReady && !busy ? 'pointer' : 'default',
+    background: active ? semBg(accent(), 0.16) : fill(2),
+    border: `0.5px solid ${active ? accent(0.7, 0.4) : hairline(0.06)}`,
+    opacity: embedReady ? 1 : 0.45,
+    color: active ? accent() : ink(2),
+    transition: transition('background, border-color, color'),
   })
 
   return (
-    <div onMouseDown={onClose} style={{ position: 'fixed', inset: 0, zIndex: 210, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '10vh', background: 'oklch(0.08 0.02 var(--ths) / .5)', backdropFilter: 'blur(3px)', animation: 'ai-fadein .15s ease' }}>
-      <div onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(620px, 84vw)', maxHeight: '76vh', display: 'flex', flexDirection: 'column', borderRadius: 16, overflow: 'hidden', background: 'oklch(calc(0.17 * var(--pl, 1)) calc(0.03 * var(--css, 1)) var(--ths) / .98)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .35)', boxShadow: 'none', animation: 'ai-riseblur .3s cubic-bezier(.22,.61,.36,1)' }}>
+    <div onMouseDown={onClose} style={{ position: 'fixed', inset: 0, zIndex: 210, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '10vh', background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(3px)', animation: 'ai-fadein .15s ease' }}>
+      <motion.div
+        variants={overlayPop}
+        initial="initial"
+        animate="animate"
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{ width: 'min(620px, 84vw)', maxHeight: '76vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...surface.overlay() }}
+      >
         {/* 头 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '12px 15px', borderBottom: '1px solid rgba(255,255,255,.07)' }}>
-          <span style={{ fontSize: 15 }}>📚</span>
-          <span style={{ flex: 1, color: 'oklch(0.95 0.01 var(--th))', fontSize: 13.5, fontWeight: 700 }}>知识库 · 本地 RAG</span>
-          <span style={{ color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 10 }}>{sources.length} 源 · {totalDocs} 块</span>
-          <span className="hv" onClick={onClose} style={{ cursor: 'pointer', color: 'oklch(0.6 0.02 var(--th) / .5)', fontSize: 14 }}>✕</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 15px', borderBottom: `0.5px solid ${hairline(0.1)}` }}>
+          <div style={{ width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accent(), flex: 'none' }}>
+            <Ico.kb size={14} strokeWidth={1.75} />
+          </div>
+          <span style={{ flex: 1, ...text.subtitle(), fontSize: FS.subtitle, fontWeight: 700 }}>知识库 · 本地 RAG</span>
+          <span style={{ ...text.faint(), fontVariantNumeric: 'tabular-nums' }}>{sources.length} 源 · {totalDocs} 块</span>
+          <IconButton icon={Ico.close} onClick={onClose} title="关闭" size={26} />
         </div>
 
         {/* Embedding 模型（检索必须向量嵌入） */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderBottom: '1px solid rgba(255,255,255,.06)', background: embedReady ? 'rgba(255,255,255,.02)' : 'oklch(0.4 0.09 75 / .16)' }}>
-          <span style={{ color: 'oklch(0.72 0.02 var(--th) / .75)', fontSize: 10.5, flex: 'none' }}>🔮 向量模型</span>
-          <input value={embedModel} onChange={(e) => onSetEmbedModel(e.target.value)} placeholder="必填，如 text-embedding-3-small / bge-m3 / embedding-3" style={{ flex: 1, background: 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 7, outline: 'none', color: 'oklch(0.93 0.01 var(--th))', fontSize: 10.5, padding: '5px 9px', fontFamily: "ui-monospace,'Cascadia Code',monospace" }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 15px', borderBottom: `0.5px solid ${hairline(0.09)}`, background: embedReady ? fill(1) : semBg(sem.warn, 0.1) }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: embedReady ? ink(2) : sem.warn, fontSize: FS.tiny, fontWeight: 600, flex: 'none' }}>
+            <Ico.brain size={12} strokeWidth={1.75} />向量模型
+          </span>
+          <Input value={embedModel} onChange={onSetEmbedModel} placeholder="必填，如 text-embedding-3-small / bge-m3 / embedding-3" style={{ flex: 1, fontFamily: "'Cascadia Code', Consolas, ui-monospace, monospace" }} />
         </div>
-        {!embedReady && <div style={{ padding: '7px 15px', color: 'oklch(0.82 0.1 75)', fontSize: 10.5, background: 'oklch(0.4 0.09 75 / .1)' }}>先填向量模型并在「设置 › 问答助手模型」配好端点/Key，才能建立与检索知识库（复用同一端点）。</div>}
+        {!embedReady && <div style={{ padding: '7px 15px', color: sem.warn, fontSize: FS.tiny, background: semBg(sem.warn, 0.08), lineHeight: 1.5 }}>先填向量模型并在「设置 › 问答助手模型」配好端点/Key，才能建立与检索知识库（复用同一端点）。</div>}
 
         {/* 添加动作 */}
         <div style={{ display: 'flex', gap: 8, padding: '12px 15px 8px' }}>
-          <div className="hv" onClick={() => embedReady && !busy && addFolder()} style={btn(busy === 'folder')}><span style={{ fontSize: 18 }}>📁</span><span style={{ fontSize: 10.5, fontWeight: 600 }}>{busy === 'folder' ? '索引中…' : '文件夹'}</span></div>
-          <div className="hv" onClick={() => embedReady && !busy && addFiles()} style={btn(busy === 'files')}><span style={{ fontSize: 18 }}>📄</span><span style={{ fontSize: 10.5, fontWeight: 600 }}>{busy === 'files' ? '索引中…' : '文件 (PDF/Word)'}</span></div>
-          <div className="hv" onClick={() => embedReady && !busy && setShowUrl((v) => !v)} style={btn(showUrl || busy === 'url')}><span style={{ fontSize: 18 }}>🔗</span><span style={{ fontSize: 10.5, fontWeight: 600 }}>{busy === 'url' ? '抓取中…' : '网页'}</span></div>
+          <div className="hv" onClick={() => embedReady && !busy && addFolder()} style={btn(busy === 'folder')}><FolderOpen size={17} strokeWidth={1.75} /><span style={{ fontSize: FS.tiny, fontWeight: 600 }}>{busy === 'folder' ? '索引中…' : '文件夹'}</span></div>
+          <div className="hv" onClick={() => embedReady && !busy && addFiles()} style={btn(busy === 'files')}><FileText size={17} strokeWidth={1.75} /><span style={{ fontSize: FS.tiny, fontWeight: 600 }}>{busy === 'files' ? '索引中…' : '文件 (PDF/Word)'}</span></div>
+          <div className="hv" onClick={() => embedReady && !busy && setShowUrl((v) => !v)} style={btn(showUrl || busy === 'url')}><Globe size={17} strokeWidth={1.75} /><span style={{ fontSize: FS.tiny, fontWeight: 600 }}>{busy === 'url' ? '抓取中…' : '网页'}</span></div>
         </div>
         {showUrl && (
           <div style={{ display: 'flex', gap: 6, padding: '0 15px 8px' }}>
-            <input autoFocus value={urlInput} onChange={(e) => setUrlInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addUrl() }} placeholder="https://… 粘贴要收进知识库的网页" style={{ flex: 1, background: 'rgba(0,0,0,.28)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, outline: 'none', color: 'oklch(0.93 0.01 var(--th))', fontSize: 11, padding: '7px 10px' }} />
-            <div className="hv" onClick={addUrl} style={{ padding: '0 14px', borderRadius: 8, display: 'flex', alignItems: 'center', cursor: 'pointer', background: 'linear-gradient(180deg, oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th)), oklch(0.7 calc(0.16 * var(--cs, 1)) var(--th)))', color: 'oklch(0.14 0.02 var(--th))', fontSize: 11.5, fontWeight: 700 }}>抓取</div>
+            <Input autoFocus value={urlInput} onChange={setUrlInput} onKeyDown={(e) => { if (e.key === 'Enter') addUrl() }} placeholder="https://… 粘贴要收进知识库的网页" icon={Ico.link} style={{ flex: 1 }} />
+            <Button variant="primary" onClick={addUrl}>抓取</Button>
           </div>
         )}
 
-        {(msg || err) && <div style={{ padding: '2px 15px 8px', fontSize: 10.5, color: err ? 'oklch(0.78 0.12 30)' : 'oklch(0.8 0.11 150)' }}>{err || msg}</div>}
+        {(msg || err) && <div style={{ padding: '2px 15px 8px', fontSize: FS.tiny, color: err ? sem.danger : sem.calm }}>{err || msg}</div>}
 
         {/* 源列表 + AI 知识总览 */}
         <div className="ai-scroll" style={{ flex: 1, overflowY: 'auto', padding: '4px 15px 14px', display: 'flex', flexDirection: 'column', gap: 7 }}>
           {/* AI 知识总览（LLM-Wiki：编译一次、长期复用） */}
           {sources.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '9px 11px', borderRadius: 11, background: 'linear-gradient(160deg, oklch(0.3 0.05 280 / .28), oklch(0.2 0.03 var(--th) / .4))', border: '1px solid oklch(0.6 0.1 280 / .25)' }}>
+            <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 11px', borderRadius: R.lg, background: semBg(sem.focus, 0.12), border: `0.5px solid ${semBg(sem.focus, 0.35)}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <span style={{ fontSize: 12 }}>🧬</span>
-                <span style={{ flex: 1, color: 'oklch(0.9 0.03 var(--th))', fontSize: 11.5, fontWeight: 700 }}>AI 知识总览</span>
-                {wiki && <span className="hv" onClick={() => setWikiOpen((v) => !v)} style={{ cursor: 'pointer', color: 'oklch(0.75 0.02 var(--th) / .7)', fontSize: 10 }}>{wikiOpen ? '收起' : '展开'}</span>}
-                <span className="hv" onClick={() => void genOverview()} style={{ cursor: llmReady ? 'pointer' : 'default', padding: '3px 10px', borderRadius: 8, background: 'oklch(0.5 0.13 280 / .4)', color: 'oklch(0.9 0.11 280)', fontSize: 10, fontWeight: 700, opacity: llmReady ? 1 : 0.5 }}>{busy === 'wiki' ? '合成中…' : wiki ? '重新生成' : '✨ 生成总览'}</span>
+                <Ico.ai size={13} strokeWidth={1.75} style={{ color: sem.focus, flex: 'none' }} />
+                <span style={{ flex: 1, color: ink(1), fontSize: FS.small, fontWeight: 700 }}>AI 知识总览</span>
+                {wiki && (
+                  <span className="hv" onClick={() => setWikiOpen((v) => !v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', color: ink(3), fontSize: FS.tiny }}>
+                    {wikiOpen ? <Ico.expand size={11} strokeWidth={2} /> : <Ico.collapse size={11} strokeWidth={2} />}
+                    {wikiOpen ? '收起' : '展开'}
+                  </span>
+                )}
+                <span
+                  className="hv"
+                  onClick={() => void genOverview()}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: llmReady ? 'pointer' : 'default', padding: '4px 10px', borderRadius: R.pill, background: semBg(sem.focus, 0.22), border: `0.5px solid ${semBg(sem.focus, 0.4)}`, color: sem.focus, fontSize: FS.tiny, fontWeight: 700, opacity: llmReady ? 1 : 0.5, transition: transition('background, border-color') }}
+                >
+                  {busy === 'wiki' ? '合成中…' : wiki ? '重新生成' : <><Sparkles size={11} strokeWidth={2} />生成总览</>}
+                </span>
               </div>
-              {!wiki && <div style={{ color: 'oklch(0.66 0.02 var(--th) / .6)', fontSize: 9.5, lineHeight: 1.5 }}>把整库综合成一页结构化 Wiki（主题/术语/可问的问题），编译一次长期复用；资料更新后可重新生成。</div>}
+              {!wiki && <div style={{ color: ink(3), fontSize: 10, lineHeight: 1.5 }}>把整库综合成一页结构化 Wiki（主题/术语/可问的问题），编译一次长期复用；资料更新后可重新生成。</div>}
               {wiki && wikiOpen && (
-                <div style={{ padding: '9px 11px', borderRadius: 9, background: 'rgba(0,0,0,.25)', fontSize: 11, lineHeight: 1.6, maxHeight: 260, overflowY: 'auto' }} className="ai-scroll"><Markdown text={wiki} /></div>
+                <div style={{ ...surface.inset(), padding: '9px 11px', fontSize: FS.small, lineHeight: 1.6, maxHeight: 260, overflowY: 'auto' }} className="ai-scroll"><Markdown text={wiki} /></div>
               )}
-              {wiki && wikiAt > 0 && <div style={{ color: 'oklch(0.55 0.02 var(--th) / .5)', fontSize: 8.5 }}>更新于 {new Date(wikiAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>}
-            </div>
+              {wiki && wikiAt > 0 && <div style={{ color: ink(4), fontSize: 9 }}>更新于 {new Date(wikiAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>}
+            </motion.div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'oklch(0.66 0.02 var(--th) / .6)', fontSize: 10, fontWeight: 700, flex: 1 }}>已接入的知识源</span>
-            {sources.some((s) => s.kind === 'folder') && <span className="hv" onClick={() => !busy && reindex()} title="按文件修改时间增量重扫所有文件夹源" style={{ cursor: 'pointer', color: 'oklch(0.75 0.02 var(--th) / .7)', fontSize: 10.5 }}>{busy === 'reindex' ? '重扫中…' : '↻ 增量重扫'}</span>}
+            <span style={{ ...text.overline(), flex: 1 }}>已接入的知识源</span>
+            {sources.some((s) => s.kind === 'folder') && (
+              <span className="hv" onClick={() => !busy && reindex()} title="按文件修改时间增量重扫所有文件夹源" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: ink(2), fontSize: FS.tiny, fontWeight: 600 }}>
+                <RefreshCw size={11} strokeWidth={2} />{busy === 'reindex' ? '重扫中…' : '增量重扫'}
+              </span>
+            )}
           </div>
-          {sources.length === 0 && <div style={{ color: 'oklch(0.6 0.02 var(--th) / .55)', fontSize: 11, lineHeight: 1.7, padding: '10px 2px' }}>还没有知识源。添加文件夹/文件/网页后，去问答区打开「📚 知识库」开关，AI 会只依据你的知识库作答并给出出处。</div>}
-          {sources.map((s) => (
-            <div key={s.id} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 10, background: 'rgba(255,255,255,.035)', border: '1px solid rgba(255,255,255,.06)' }}>
-              <span style={{ flex: 'none', fontSize: 15 }}>{KIND_ICON[s.kind] || '📄'}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: 'oklch(0.9 0.02 var(--th))', fontSize: 11.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</div>
-                <div style={{ color: 'oklch(0.58 0.02 var(--th) / .5)', fontSize: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "ui-monospace,monospace" }}>{s.target}</div>
-              </div>
-              <span style={{ flex: 'none', padding: '2px 8px', borderRadius: 999, background: 'oklch(0.35 0.06 var(--th) / .45)', color: 'oklch(0.82 0.09 var(--th))', fontSize: 9, fontWeight: 700 }}>{s.docCount} 块</span>
-              <span className="hv" onClick={() => remove(s.id)} title="移除该源及其索引" style={{ flex: 'none', cursor: 'pointer', color: 'oklch(0.6 0.05 25 / .8)', fontSize: 11 }}>✕</span>
-            </div>
-          ))}
+          {sources.length === 0 && (
+            <EmptyState
+              icon={Ico.kb}
+              title="还没有知识源"
+              desc="添加文件夹/文件/网页后，去问答区打开「知识库」开关，AI 会只依据你的知识库作答并给出出处。"
+            />
+          )}
+          {sources.map((s) => {
+            const Glyph = KIND_GLYPH[s.kind] || FileText
+            return (
+              <motion.div key={s.id} variants={fadeScaleIn} initial="initial" animate="animate" className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', ...surface.card() }}>
+                <div style={{ flex: 'none', width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.12), color: accent(0.85) }}>
+                  <Glyph size={13} strokeWidth={1.75} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: ink(1), fontSize: FS.small, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</div>
+                  <div style={{ ...text.mono(9), color: ink(4), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.target}</div>
+                </div>
+                <Badge style={{ height: 17, padding: '0 8px', flex: 'none' }}>{s.docCount} 块</Badge>
+                <IconButton icon={Trash2} onClick={() => remove(s.id)} title="移除该源及其索引" size={24} color={sem.danger} style={{ flex: 'none' }} />
+              </motion.div>
+            )
+          })}
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }

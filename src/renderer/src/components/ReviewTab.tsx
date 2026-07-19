@@ -1,7 +1,12 @@
 // 今日复盘 / 周报：把当天完成的待办 + Agent 编码活动 + 代码变更汇成事实卡，
 // 一键交给 AI 写成叙述性复盘/周报。数据源自岛内已有信号，不额外采集、不打扰主力工作流。
+// 视觉层：ui/tokens 层级表面 + lucide 语义图标 + framer-motion 入场（功能逻辑保持不变）。
 
 import { useMemo, useState } from 'react'
+import { motion } from 'framer-motion'
+import {
+  BarChart3, Check, Copy, Loader2, NotebookPen, RefreshCw, Sparkles, StickyNote, Sunrise, Volume2
+} from 'lucide-react'
 import type { ActivityEntry, TodoItem } from '../types'
 import {
   buildFacts, dayKey, hasContent, reviewPrompt, weeklyPrompt, morningPrompt,
@@ -10,6 +15,9 @@ import {
 import { Markdown, Collapsible } from './Markdown'
 import { InsightsPanel } from './InsightsPanel'
 import { PetPanel } from './PetPanel'
+import { Button, Chip, IconButton } from '../ui/components'
+import { fadeScaleIn } from '../ui/motion'
+import { accent, accent2, FS, ink, R, sem, SP, surface, text } from '../ui/tokens'
 
 interface ReviewTabProps {
   todos: TodoItem[]
@@ -26,24 +34,15 @@ interface ReviewTabProps {
   onOpenLlmSettings: () => void
 }
 
-const chip = (active: boolean): React.CSSProperties => ({
-  padding: '4px 10px', borderRadius: 999, cursor: 'pointer', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
-  background: active ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .2)' : 'rgba(255,255,255,.05)',
-  color: active ? 'oklch(0.88 calc(0.12 * var(--cs, 1)) var(--th))' : 'oklch(0.72 0.02 var(--th) / .7)',
-  border: `1px solid ${active ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / .35)' : 'rgba(255,255,255,.06)'}`
-})
-
-const statBox: React.CSSProperties = {
-  flex: 1, minWidth: 74, padding: '9px 10px', borderRadius: 11,
-  background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.06)',
-  display: 'flex', flexDirection: 'column', gap: 3
-}
-
+/** 统计小格：内嵌井表面 + 等大数字，拉开数字/标签层级 */
 function Stat({ n, label }: { n: number | string; label: string }): React.JSX.Element {
   return (
-    <div style={statBox}>
-      <span style={{ color: 'oklch(0.92 calc(0.08 * var(--cs, 1)) var(--th))', fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{n}</span>
-      <span style={{ color: 'oklch(0.66 0.02 var(--th) / .65)', fontSize: 10 }}>{label}</span>
+    <div style={{
+      flex: 1, minWidth: 74, padding: '9px 10px', ...surface.inset(),
+      display: 'flex', flexDirection: 'column', gap: 3
+    }}>
+      <span style={{ ...text.num(18), lineHeight: 1 }}>{n}</span>
+      <span style={{ ...text.faint(), fontSize: 10 }}>{label}</span>
     </div>
   )
 }
@@ -102,106 +101,133 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
     else setErr(res.error || '生成失败，请检查模型配置')
   }
 
+  /** 生成按钮：busy 转圈 / 已有内容刷新 / 首次生成 */
+  const genIcon = (key: string, hasMd: boolean): typeof Sparkles =>
+    busy === key ? Loader2 : hasMd ? RefreshCw : Sparkles
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: SP.md }}>
       {/* 晨间简报：今日作战地图（聚合日程+待办+资讯+昨日复盘） */}
-      <div style={{ padding: '13px 14px', borderRadius: 15, background: 'linear-gradient(135deg, oklch(0.34 calc(0.07 * var(--cs, 1)) var(--th) / .5), oklch(0.24 calc(0.05 * var(--cs, 1)) var(--th2) / .3))', border: '1px solid oklch(0.65 calc(0.12 * var(--cs, 1)) var(--th) / .35)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <motion.div
+        variants={fadeScaleIn}
+        initial="initial"
+        animate="animate"
+        style={{
+          padding: `${SP.md + 1}px ${SP.md + 2}px`,
+          borderRadius: R.xl,
+          background: `linear-gradient(135deg, ${accent(0.34, 0.5)}, ${accent2(0.26, 0.3)})`,
+          border: `0.5px solid ${accent(0.65, 0.3)}`,
+          boxShadow: `0 8px 24px -12px ${accent(0.5, 0.4)}`,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: SP.sm
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <span style={{ color: 'oklch(0.96 0.01 var(--th))', fontSize: 12.5, fontWeight: 800 }}>🌅 今日作战地图</span>
+          <Sunrise size={14} strokeWidth={1.75} style={{ color: accent(0.9), flex: 'none' }} />
+          <span style={{ ...text.subtitle(), fontSize: FS.body }}>今日作战地图</span>
           <span style={{ flex: 1 }} />
           {morningMd && (
-            <span className="hv" onClick={() => speak(morningMd)} title="语音播报 / 停止" style={chip(false)}>🔊</span>
+            <IconButton icon={Volume2} size={24} title="语音播报 / 停止" onClick={() => speak(morningMd)} />
           )}
-          <span className="hv" onClick={() => run(morningKey, MORNING_SYSTEM, morningPrompt(p.morning))} style={chip(true)}>
-            {busy === morningKey ? '✨ 生成中…' : morningMd ? '↺ 刷新' : '✨ 生成简报'}
-          </span>
+          <Button sm variant="primary" icon={genIcon(morningKey, !!morningMd)} onClick={() => run(morningKey, MORNING_SYSTEM, morningPrompt(p.morning))}>
+            {busy === morningKey ? '生成中…' : morningMd ? '刷新' : '生成简报'}
+          </Button>
         </div>
-        {err && busy === null && <div style={{ color: 'oklch(0.75 0.1 30)', fontSize: 11 }}>{err}</div>}
+        {err && busy === null && <div style={{ color: sem.danger, fontSize: FS.tiny }}>{err}</div>}
         {morningMd ? (
-          <div style={{ fontSize: 12, lineHeight: 1.65 }}><Markdown text={morningMd} /></div>
+          <div style={{ fontSize: FS.small, lineHeight: 1.65 }}><Markdown text={morningMd} /></div>
         ) : (
-          <div style={{ color: 'oklch(0.82 0.02 var(--th) / .82)', fontSize: 11, lineHeight: 1.6 }}>
+          <div style={{ ...text.dim(), fontSize: FS.small, lineHeight: 1.6 }}>
             聚合今日日程 · {p.morning.meetings.length} 个会议 / {p.morning.todos.length} 项待办 / {p.morning.picks.length} 条精选 → 一键生成今日定调与优先级。
           </div>
         )}
-      </div>
+      </motion.div>
 
       {/* 日期切换 */}
       <div className="ai-scroll" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 2 }}>
         {days.map((k) => (
-          <div key={k} className="hv" onClick={() => setSel(k)} style={chip(sel === k)}>
+          <Chip key={k} active={sel === k} onClick={() => setSel(k)}>
             {k === todayKey ? '今天' : k.split('-').slice(1).join('/')}
-          </div>
+          </Chip>
         ))}
       </div>
 
       {/* 事实卡 */}
-      <div style={{ display: 'flex', gap: 7 }}>
+      <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', gap: 7 }}>
         <Stat n={facts.doneTodos.length} label="完成待办" />
         <Stat n={facts.activities.length} label="编码会话" />
         <Stat n={facts.projects.length} label="涉及项目" />
         <Stat n={facts.files ? `+${facts.added}` : '—'} label={facts.files ? `${facts.files} 文件变更` : '代码变更'} />
-      </div>
+      </motion.div>
 
       {/* 今日复盘 */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <span style={{ color: 'oklch(0.92 calc(0.06 * var(--cs, 1)) var(--th))', fontSize: 12.5, fontWeight: 800 }}>📝 {sel === todayKey ? '今日复盘' : '当日复盘'}</span>
+          <NotebookPen size={13} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+          <span style={{ ...text.subtitle(), fontSize: FS.body }}>{sel === todayKey ? '今日复盘' : '当日复盘'}</span>
           <span style={{ flex: 1 }} />
           {dayMd && busy !== dayReviewKey && (
             <>
-              <span className="hv" onClick={() => p.onSaveToNotes(dayMd)} style={chip(false)}>存为灵感便签</span>
-              <span className="hv" onClick={() => navigator.clipboard?.writeText(dayMd).catch(() => {})} style={chip(false)}>⧉</span>
+              <Button sm variant="ghost" icon={StickyNote} onClick={() => p.onSaveToNotes(dayMd)}>存为灵感便签</Button>
+              <IconButton icon={Copy} size={24} title="复制 Markdown" onClick={() => navigator.clipboard?.writeText(dayMd).catch(() => {})} />
             </>
           )}
           {hasContent(facts) ? (
-            <span className="hv" onClick={() => run(dayReviewKey, REVIEW_SYSTEM, reviewPrompt(facts))} style={chip(true)}>
-              {busy === dayReviewKey ? '✨ 生成中…' : dayMd ? '↺ 重新生成' : '✨ 生成复盘'}
-            </span>
+            <Button sm variant="primary" icon={genIcon(dayReviewKey, !!dayMd)} onClick={() => run(dayReviewKey, REVIEW_SYSTEM, reviewPrompt(facts))}>
+              {busy === dayReviewKey ? '生成中…' : dayMd ? '重新生成' : '生成复盘'}
+            </Button>
           ) : null}
         </div>
-        {err && busy === null && <div style={{ color: 'oklch(0.75 0.1 30)', fontSize: 11 }}>{err}</div>}
+        {err && busy === null && <div style={{ color: sem.danger, fontSize: FS.tiny }}>{err}</div>}
         {!hasContent(facts) ? (
-          <div style={{ color: 'oklch(0.62 0.02 var(--th) / .6)', fontSize: 11, padding: '10px 4px', lineHeight: 1.6 }}>
+          <div style={{ ...text.faint(), padding: '10px 4px', lineHeight: 1.6 }}>
             这一天暂无可复盘的记录。完成待办、或让 Claude Code / Codex 会话在岛内跑起来后，这里会自动积累「今天做了什么」。
           </div>
         ) : dayMd ? (
-          <div style={{ padding: 13, borderRadius: 13, background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.05)', fontSize: 12, lineHeight: 1.6 }}>
+          <div style={{ ...surface.inset(), padding: SP.md + 1, fontSize: FS.small, lineHeight: 1.6 }}>
             <Markdown text={dayMd} />
           </div>
         ) : (
           // 未生成时先给事实预览，让用户知道有哪些素材
-          <div style={{ padding: 12, borderRadius: 13, background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.05)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ ...surface.inset(), padding: SP.md, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {facts.doneTodos.slice(0, 6).map((t, i) => (
-              <div key={`t${i}`} style={{ color: 'oklch(0.8 0.02 var(--th) / .82)', fontSize: 11 }}>✓ {t}</div>
+              <div key={`t${i}`} style={{ display: 'flex', alignItems: 'baseline', gap: 6, color: ink(2), fontSize: FS.tiny }}>
+                <Check size={11} strokeWidth={2.5} style={{ color: sem.calm, flex: 'none', position: 'relative', top: 1 }} />
+                <span style={{ minWidth: 0 }}>{t}</span>
+              </div>
             ))}
             {facts.activities.slice(0, 5).map((a) => (
-              <div key={a.id} style={{ color: 'oklch(0.72 0.02 var(--th) / .7)', fontSize: 10.5 }}>
-                ◆ [{a.tool}] {a.proj}{a.files ? ` · +${a.added}/-${a.removed}` : ''}
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 6, ...text.mono(10.5) }}>
+                <span style={{ width: 5, height: 5, borderRadius: R.pill, background: accent(0.82, 0.7), flex: 'none' }} />
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  [{a.tool}] {a.proj}{a.files ? ` · +${a.added}/-${a.removed}` : ''}
+                </span>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </motion.div>
 
       {/* 周报 */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
+      <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm, marginTop: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <span style={{ color: 'oklch(0.9 calc(0.06 * var(--cs, 1)) var(--th))', fontSize: 12, fontWeight: 800 }}>📊 本周周报</span>
+          <BarChart3 size={13} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+          <span style={{ ...text.subtitle(), fontSize: FS.body }}>本周周报</span>
           <span style={{ flex: 1 }} />
           {weekMd && busy !== weekReviewKey && (
-            <span className="hv" onClick={() => p.onSaveToNotes(weekMd)} style={chip(false)}>存为灵感便签</span>
+            <Button sm variant="ghost" icon={StickyNote} onClick={() => p.onSaveToNotes(weekMd)}>存为灵感便签</Button>
           )}
-          <span className="hv" onClick={() => run(weekReviewKey, WEEKLY_SYSTEM, weeklyPrompt(weekFacts))} style={chip(true)}>
-            {busy === weekReviewKey ? '✨ 生成中…' : weekMd ? '↺ 重新生成' : '✨ 生成周报'}
-          </span>
+          <Button sm variant="primary" icon={genIcon(weekReviewKey, !!weekMd)} onClick={() => run(weekReviewKey, WEEKLY_SYSTEM, weeklyPrompt(weekFacts))}>
+            {busy === weekReviewKey ? '生成中…' : weekMd ? '重新生成' : '生成周报'}
+          </Button>
         </div>
         {weekMd && (
-          <div style={{ padding: 13, borderRadius: 13, background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.05)', fontSize: 12, lineHeight: 1.6 }}>
+          <div style={{ ...surface.inset(), padding: SP.md + 1, fontSize: FS.small, lineHeight: 1.6 }}>
             <Collapsible collapsedHeight={140}><Markdown text={weekMd} /></Collapsible>
           </div>
         )}
-      </div>
+      </motion.div>
 
       {/* 桌宠成长 */}
       <PetPanel pomoDone={p.pomoDone} todos={p.todos} activities={p.activities} />
