@@ -14,7 +14,7 @@ import { island } from '../bridge'
 import { IslandChat } from './IslandChat'
 import { Button, Chip, Segmented } from '../ui/components'
 import { overlayPop } from '../ui/motion'
-import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accent, fill, FS, gradient, hairline, hueAccent, ink, R, sem, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface AskTabProps {
   modelLabel: string
@@ -306,7 +306,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
               const txt = c.text ?? ''
               return (
                 <div key={c.id} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 9px', borderRadius: R.md, background: fill(1) }}>
-                  <span style={{ flex: 'none', padding: '1px 6px', borderRadius: 5, background: `oklch(0.32 0.06 ${hue} / .45)`, color: `oklch(0.85 0.1 ${hue})`, fontSize: 9, fontWeight: 700 }}>{c.tag}</span>
+                  <span style={{ flex: 'none', padding: '1px 6px', borderRadius: 5, background: tintSurface(String(hue), .72, true), color: hueAccent(String(hue), .11), fontSize: 9, fontWeight: 700 }}>{c.tag}</span>
                   <span className="hv" onClick={() => { p.conv.onText(txt); setShowClips(false) }} title="填入输入框" style={{ flex: 1, minWidth: 0, color: ink(2), fontSize: 10.5, fontFamily: "ui-monospace,'Cascadia Code',monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{txt.replace(/\s+/g, ' ').slice(0, 60)}</span>
                   {CLIP_ACTIONS.map((a) => (
                     <span key={a.key} className="hv" onClick={() => { p.onSendClip(a.prefix + txt); setShowClips(false) }} title={`AI ${a.title}`} style={{ flex: 'none', padding: '2px 6px', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent(0.85), fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>{a.label}</span>
@@ -364,7 +364,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
 
       {/* 沉浸式空态：欢迎 + 指令卡片网格 + 示例问题 */}
       {p.empty && (
-        <motion.div variants={overlayPop} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '18px 14px 14px', ...surface.section() }}>
+        <motion.div variants={overlayPop} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '18px 14px 14px', ...surface.section() }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 42, height: 42, borderRadius: 13, background: gradient.brand(), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 4px 18px ${accent(0.7, 0.35)}, inset 0 1px 0 rgba(255,255,255,0.3)`, color: gradient.onPrimary() }}>
               <Sparkles size={20} strokeWidth={1.75} />

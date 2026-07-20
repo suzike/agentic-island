@@ -24,7 +24,7 @@ import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
 import { PROVIDERS } from './logic/providers'
 import { systemFor, parseBlocks, looseBlocks, historyFromThread, buildQuotedPrompt } from './logic/chat'
-import { applyThemeAny, makeCustomTheme, THEMES, type ThemeDef } from './logic/themes'
+import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
 import { ThemeDesigner, type Tokens } from './components/ThemeDesigner'
 import { CalcSheet } from './components/CalcSheet'
 import { LearnCenter, type RadarItem } from './components/LearnCenter'
@@ -48,10 +48,9 @@ import { PRESET_SHORTCUTS, type ShortcutDef } from './logic/shortcuts'
 import { migrateProjects, newProject } from './logic/workbench'
 import { synthesisPrompt } from './logic/newsIntel'
 import { island } from './bridge'
-import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowUpRight, BellOff, Camera, Check, ChevronDown, Download, Expand, Maximize2, Minimize2, Moon, Pin, Shrink, Timer, Waves, X } from 'lucide-react'
-import { tabContent } from './ui/motion'
-import { accent, gradient, hairline, ink } from './ui/tokens'
+import { motion } from 'framer-motion'
+import { ArrowUpRight, BellOff, Camera, Check, ChevronDown, Download, Expand, Maximize2, Minimize2, Moon, Pin, Shrink, Timer, Video, Waves, X } from 'lucide-react'
+import { accent, fill, gradient, hairline, ink } from './ui/tokens'
 import { Ico } from './ui/icons'
 
 type Tab = 'agents' | 'plan' | 'ask' | 'shortcuts' | 'todos' | 'notes' | 'news' | 'review' | 'repos' | 'term' | 'settings'
@@ -73,6 +72,8 @@ const TABS: { key: Tab; label: string; icon: (typeof Ico)[keyof typeof Ico] }[] 
 const WIDGET_BRIEF_SYSTEM =
   '你是桌面挂件里的贴身助理。根据用户当下的时间、待办、日程与 Agent 状态，用一句不超过 22 个汉字的中文，' +
   '给出此刻最值得做的一件事或一句恰当提点（可略带鼓励）。只输出这一句话，不要引号、不要解释、不要标点堆砌。'
+
+const RECORDING_STUDIO_CONTEXT = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mNkYGD4z8DAwMDEAAUADikBA7xgG3sAAAAASUVORK5CYII='
 
 export function App(): React.JSX.Element {
   // 真实快照（唯一 Agent 数据源）
@@ -185,9 +186,9 @@ export function App(): React.JSX.Element {
   const [clipClustering, setClipClustering] = useState(false)
   // 智能截图问 AI（全局热键 Ctrl+Alt+S 框选后弹出）
   const [shotImg, setShotImg] = useState<string | null>(null)
-  // 截图工坊：📸 按钮拉起框选截图 → 结果进美化工坊（而非问 AI）；用 ref 标记本次截图的去向
+  // 截图工坊：截图目标由主进程随结果回传，不依赖取消后可能残留的渲染层 ref。
   const [shotStudio, setShotStudio] = useState<string | null>(null)
-  const shotToolRef = useRef(false)
+  const [shotStudioMode, setShotStudioMode] = useState<'image' | 'record'>('image')
   // 迷你条动态内容池：AI 每 10 分钟刷新 + GitHub 热门（内存态，重启重新拉）
   const [aiPools, setAiPools] = useState<Record<string, string[]>>({})
   const [ghItems, setGhItems] = useState<string[]>([])
@@ -465,6 +466,7 @@ export function App(): React.JSX.Element {
   // 打开文件夹、网页、会议或外部终端前主动让位：完整面板收起，当前提醒静默到下一条新事件。
   // 主进程同时会临时取消 screen-saver 级置顶；这里同步 lastIgnore，避免下次唤出时缓存与真实窗口状态失步。
   useEffect(() => island.onExternalYield(() => {
+    const recordingWorkspaceOpen = !!document.querySelector('[data-recording-studio], [data-recording-compact]')
     setSnoozeSig(attentionSigRef.current)
     setPinned(false)
     setRevealed(false)
@@ -477,9 +479,10 @@ export function App(): React.JSX.Element {
     setCalcOpen(false)
     setLearnOpen(false)
     setShotImg(null)
-    setShotStudio(null)
+    // 录制会话必须跨外部文件/网页/会议操作持续存在；让位只降低窗口层级，不能卸载录制器。
+    if (!recordingWorkspaceOpen) setShotStudio(null)
     setDropActive(false)
-    lastIgnore.current = true
+    if (!recordingWorkspaceOpen) lastIgnore.current = true
   }), [])
 
   // 供 mousemove 处理器读取的最新值（处理器只注册一次）
@@ -728,8 +731,8 @@ export function App(): React.JSX.Element {
   // ===== 桌面挂件：开关 + 每秒推送速览数据（时钟/番茄/待办/日程/Agent/媒体 + AI 速览）=====
   useEffect(() => { island.toggleWidget(settings.desktopWidget) }, [settings.desktopWidget])
   const [widgetBrief, setWidgetBrief] = useState('')
-  const widgetSrcRef = useRef({ pomo, todos, agents, pending, media, theme, meetings, brief: widgetBrief })
-  widgetSrcRef.current = { pomo, todos, agents, pending, media, theme, meetings, brief: widgetBrief }
+  const widgetSrcRef = useRef({ pomo, todos, agents, pending, media, theme, customThemes, meetings, brief: widgetBrief })
+  widgetSrcRef.current = { pomo, todos, agents, pending, media, theme, customThemes, meetings, brief: widgetBrief }
   useEffect(() => {
     if (!settings.desktopWidget) return
     const push = (): void => {
@@ -739,6 +742,7 @@ export function App(): React.JSX.Element {
       const nextM = s.meetings.filter((m) => m.start > nowMs).sort((a, b) => a.start - b.start)[0]
       // 下一个要做的：置顶优先 → 优先级(1紧急最靠前) → 最近截止
       const focus = [...open].sort((a, b) => Number(b.pinned || 0) - Number(a.pinned || 0) || (a.priority || 3) - (b.priority || 3) || (a.due || Infinity) - (b.due || Infinity))[0]
+      const widgetTheme = normalizeThemeTokens([...s.customThemes, ...THEMES].find((t) => t.key === s.theme) || THEMES[0])
       island.widgetPush({
         clock: new Date(nowMs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }),
         date: new Date(nowMs).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }),
@@ -756,7 +760,7 @@ export function App(): React.JSX.Element {
         mediaTitle: s.media ? `${s.media.title}${s.media.artist ? ' · ' + s.media.artist : ''}` : '',
         mediaPlaying: !!s.media?.playing,
         brief: s.brief,
-        theme: THEMES.find((t) => t.key === s.theme)?.th || '210'
+        theme: widgetTheme
       })
     }
     push()
@@ -841,7 +845,11 @@ export function App(): React.JSX.Element {
   }, [askMode])
 
   // ===== 智能截图问 AI：框选完成 → 弹出截图问答卡 =====
-  useEffect(() => island.onScreenshot((url) => { setRevealed(true); if (shotToolRef.current) { shotToolRef.current = false; setShotStudio(url) } else setShotImg(url) }), [])
+  useEffect(() => island.onScreenshot(({ dataUrl, target }) => {
+    setRevealed(true)
+    if (target === 'studio') { setShotStudioMode('image'); setShotStudio(dataUrl) }
+    else setShotImg(dataUrl)
+  }), [])
   const shotAsk = useCallback((prompt: string, dataUrl: string): void => {
     setShotImg(null)
     island.capsuleClosed() // 还原点击穿透 + blur（复用同一还原逻辑）
@@ -967,6 +975,12 @@ export function App(): React.JSX.Element {
       if (ig !== lastIgnore.current) { lastIgnore.current = ig; island.setIgnoreMouse(ig) }
     }
     const onMove = (e: MouseEvent): void => {
+      const compactRecording = !!document.querySelector('[data-recording-compact]')
+      if (compactRecording) {
+        const overRecordingControl = !!document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-recording-control]')
+        setIgnore(!overRecordingControl)
+        return
+      }
       const cx = window.innerWidth / 2
       // 触发区：只有贴着屏幕最顶边、且靠近中央时才唤出（避免提前弹出）
       const atTopEdge = e.clientY <= 6 && Math.abs(e.clientX - cx) <= 120
@@ -999,6 +1013,7 @@ export function App(): React.JSX.Element {
     }
     // 鼠标移出窗口：若非强制态，恢复穿透并延时隐藏（兜底，避免状态卡住）；点击后 1.2s 内同样豁免
     const onLeave = (): void => {
+      if (document.querySelector('[data-recording-compact]')) { setIgnore(true); return }
       if (forcedRef.current || pendingRef.current || overlayRef.current || Date.now() - lastClickRef.current < 1200) return
       setIgnore(true)
       if (!hideTimer.current) hideTimer.current = setTimeout(() => { hideTimer.current = undefined; setRevealed(false) }, 400)
@@ -1854,12 +1869,13 @@ export function App(): React.JSX.Element {
     { id: 'act:bar', title: (settings.ambientBar ? '关闭' : '开启') + '常驻迷你条', hint: '底部迷你状态条', icon: '〰', group: '动作', keywords: 'bar miniao', run: () => toggleSetting('ambientBar') },
     { id: 'act:size', title: (settings.largeSize ? '切回标准尺寸' : '切到大尺寸工作台'), hint: '面板大小', icon: '⤢', group: '动作', keywords: 'size chicun', run: () => toggleSetting('largeSize') },
     { id: 'act:full', title: (fullscreen ? '退出全屏' : '全屏模式'), hint: '铺满当前显示器', icon: '⛶', group: '动作', keywords: 'fullscreen quanping', run: () => setFullscreen((v) => !v) },
-    { id: 'act:shot', title: '截图工坊', hint: '无损截图 + 高级边框美化', icon: '📸', group: '动作', keywords: 'screenshot jietu gongfang', run: () => { shotToolRef.current = true; island.triggerScreenshot() } },
+    { id: 'act:shot', title: '截图工坊', hint: '无损截图 + 高级边框美化', icon: '📸', group: '动作', keywords: 'screenshot jietu gongfang', run: () => island.triggerScreenshot('studio') },
+    { id: 'act:record', title: '录屏工坊', hint: '鼠标跟随运镜 · 高清录制 · AI 后期', icon: '🎥', group: '动作', keywords: 'record screen video luping', run: () => { setRevealed(true); setShotStudioMode('record'); setShotStudio(RECORDING_STUDIO_CONTEXT) } },
     { id: 'act:kb', title: '知识库管理', hint: '接入文件夹/文件/网页 · 本地 RAG', icon: '📚', group: '动作', keywords: 'knowledge zhishiku rag', run: () => { setRevealed(true); setKbOpen(true) } },
     // ⚡ 每条快捷指令都可从命令面板直接运行（切到分区后自动执行）
     ...shortcuts.map((s): Command => ({ id: 'sc:' + s.id, title: '⚡ ' + s.name, hint: s.desc || `${s.steps.length} 步快捷指令`, icon: s.icon, group: '快捷指令', keywords: 'shortcut kuaijie zhiling ' + s.name, run: () => { goTab('shortcuts'); setShortcutRunId(s.id) } })),
     { id: 'act:themedesign', title: '主题设计器', hint: '拖动令牌自定义主题', icon: '🎨', group: '动作', keywords: 'theme designer zhuti sheji', run: () => { setRevealed(true); setThemeDesignerOpen(true) } },
-    ...customThemes.map((t): Command => ({ id: 'theme:' + t.key, title: '主题 · ' + t.label, hint: t.desc, icon: '🎨', group: '主题', keywords: 'theme zhuti custom ' + t.key, run: () => setTheme(t.key) })),
+    ...customThemes.map((t): Command => ({ id: 'theme:' + t.key, title: '主题 · ' + t.label, hint: t.desc, icon: '🎨', group: '主题', keywords: `theme zhuti custom ${t.key} ${(t.tags || []).join(' ')}`, run: () => setTheme(t.key) })),
     ...THEMES.map((t): Command => ({ id: 'theme:' + t.key, title: '主题 · ' + t.label, hint: t.desc, icon: '🎨', group: '主题', keywords: 'theme zhuti ' + t.key, run: () => setTheme(t.key) }))
   ]
 
@@ -1896,8 +1912,8 @@ export function App(): React.JSX.Element {
           }}
         />
         {/* 顶部两角的凹弧：把面板融进屏幕上边缘，形成「内角过渡」的灵动一体感 */}
-        <div style={{ ...flareBase(isShown), left: -21, background: 'radial-gradient(circle at 0% 100%, transparent 0 21px, oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.97) 21.5px)' }} />
-        <div style={{ ...flareBase(isShown), right: -21, background: 'radial-gradient(circle at 100% 100%, transparent 0 21px, oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.97) 21.5px)' }} />
+        <div style={{ ...flareBase(isShown), left: -21, background: 'radial-gradient(circle at 0% 100%, transparent 0 21px, oklch(var(--panel-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a)) 21.5px)' }} />
+        <div style={{ ...flareBase(isShown), right: -21, background: 'radial-gradient(circle at 100% 100%, transparent 0 21px, oklch(var(--panel-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a)) 21.5px)' }} />
 
         {/* 岛面板：从屏幕上边缘「内弧」滑出，顶部与屏幕齐平、底部圆弧，营造灵动一体感 */}
         <div
@@ -1923,13 +1939,13 @@ export function App(): React.JSX.Element {
             overflow: 'hidden',
             borderRadius: fullscreen ? 0 : '0 0 28px 28px',
             // 材质三层：顶部极光氛围光（主色相）+ 右上副色相补光 + 玻璃底
-            background: `radial-gradient(125% 60% at 50% 0%, oklch(0.55 calc(0.13 * var(--cs, 1)) var(--th) / 0.15) 0%, transparent 64%), radial-gradient(90% 42% at 88% 0%, oklch(0.55 calc(0.11 * var(--cs, 1)) var(--th2) / 0.1) 0%, transparent 62%), oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.97)`,
-            backdropFilter: 'blur(30px) saturate(180%)',
+            background: `radial-gradient(125% 60% at 50% 0%, ${accent(0.62, 0.14)} 0%, transparent 64%), radial-gradient(90% 42% at 88% 0%, oklch(calc(0.62 + var(--accent2-l-shift, 0)) var(--accent2-c) var(--th2) / 0.1) 0%, transparent 62%), oklch(var(--panel-l) var(--surface-c) var(--ths) / var(--glass-a))`,
+            backdropFilter: 'blur(var(--glass-blur)) saturate(180%)',
             // Apple 式发型线边缘（0.5px 高明度线），不再用彩色 1px 描边
             borderLeft: `0.5px solid ${hairline(0.14)}`, borderRight: `0.5px solid ${hairline(0.14)}`,
             borderBottom: `0.5px solid ${hairline(0.18)}`, borderTop: 'none',
             // 顶部与屏幕齐平：向下弥散深影 + 淡淡主题色环境光，让岛"浮"在桌面上；全屏时无投影
-            boxShadow: fullscreen ? 'none' : isShown ? '0 24px 50px -18px rgba(0,0,0,.55), 0 10px 80px -24px oklch(0.6 calc(0.14 * var(--cs, 1)) var(--th) / 0.22)' : 'none',
+            boxShadow: fullscreen ? 'none' : isShown ? '0 24px 50px -18px rgb(0 0 0 / calc(.55 * var(--shadow-k))), 0 10px 80px -24px oklch(calc(0.6 + var(--accent1-l-shift, 0)) var(--accent-c) var(--th) / 0.22)' : 'none',
             // 平缓缓出、无回弹，避免"蹦一下"
             transition: 'transform .5s cubic-bezier(.22,.61,.36,1), opacity .4s ease',
             boxSizing: 'border-box'
@@ -1939,10 +1955,10 @@ export function App(): React.JSX.Element {
           <div className="ui-noise" style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', opacity: 0.045, mixBlendMode: 'overlay', borderRadius: 'inherit' }} />
           {/* 底部边缘渐变高光（收边精致感） */}
           {!fullscreen && (
-            <div style={{ position: 'absolute', left: '8%', right: '8%', bottom: 0, height: 1, zIndex: 1, pointerEvents: 'none', background: 'linear-gradient(90deg, transparent, oklch(0.75 calc(0.14 * var(--cs, 1)) var(--th) / 0.32), transparent)' }} />
+            <div style={{ position: 'absolute', left: '8%', right: '8%', bottom: 0, height: 1, zIndex: 1, pointerEvents: 'none', background: 'linear-gradient(90deg, transparent, oklch(0.75 var(--accent-c) var(--th) / 0.32), transparent)' }} />
           )}
           {dropActive && (
-            <div style={{ position: 'absolute', inset: 6, zIndex: 20, borderRadius: 16, border: '2px dashed oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .7)', background: 'oklch(0.2 calc(0.03 * var(--css, 1)) var(--ths) / .82)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, pointerEvents: 'none' }}>
+            <div style={{ position: 'absolute', inset: 6, zIndex: 20, borderRadius: 16, border: `2px dashed ${accent(.78, .7)}`, background: 'oklch(var(--overlay-l) var(--surface-c) var(--ths) / .86)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, pointerEvents: 'none' }}>
               <Download size={26} strokeWidth={1.5} style={{ color: accent() }} />
               <div style={{ color: ink(1), fontSize: 13, fontWeight: 600 }}>松手投喂到问答助手</div>
               <div style={{ color: ink(3), fontSize: 11 }}>图片 / 文件都可以</div>
@@ -1971,8 +1987,11 @@ export function App(): React.JSX.Element {
                 v{runtimeInfo?.version || '…'}
               </div>
               <span style={{ marginLeft: 'auto', color: ink(3), fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{clock}</span>
-              <HeaderBtn title="截图工坊（无损截图 + 高级边框美化）" onClick={() => { shotToolRef.current = true; island.triggerScreenshot() }}>
+              <HeaderBtn title="截图工坊（无损截图 + 高级边框美化）" onClick={() => island.triggerScreenshot('studio')}>
                 <Camera size={13} strokeWidth={1.75} />
+              </HeaderBtn>
+              <HeaderBtn title="录屏工坊（智能运镜 + 高清录制 + AI 后期）" onClick={() => { setShotStudioMode('record'); setShotStudio(RECORDING_STUDIO_CONTEXT) }}>
+                <Video size={13} strokeWidth={1.75} />
               </HeaderBtn>
               <HeaderBtn title={settings.largeSize ? '切回标准尺寸' : '切到大尺寸工作台'} active={settings.largeSize} onClick={() => toggleSetting('largeSize')}>
                 {settings.largeSize ? <Minimize2 size={13} strokeWidth={1.75} /> : <Maximize2 size={13} strokeWidth={1.75} />}
@@ -2012,6 +2031,8 @@ export function App(): React.JSX.Element {
             <div
               ref={tabBarRef}
               className="noscrollbar"
+              role="tablist"
+              aria-label="主功能"
               onScroll={measureTabs}
               onWheel={(e) => { const el = tabBarRef.current; if (el && el.scrollWidth > el.clientWidth) el.scrollLeft += e.deltaY }}
               style={{
@@ -2028,7 +2049,17 @@ export function App(): React.JSX.Element {
               {TABS.map(({ key, label, icon: TabIcon }) => {
                 const active = tab === key
                 return (
-                  <div key={key} className={active ? undefined : 'ui-tab'} onClick={() => setTab(key)} style={tabStyle(active)}>
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    aria-controls="main-tab-panel"
+                    data-main-tab={key}
+                    className={active ? undefined : 'ui-tab'}
+                    onClick={() => setTab(key)}
+                    style={tabStyle(active)}
+                  >
                     {active && (
                       <motion.span
                         layoutId="tab-active-pill"
@@ -2041,7 +2072,7 @@ export function App(): React.JSX.Element {
                       />
                     )}
                     <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <TabIcon size={12} strokeWidth={active ? 2.2 : 1.75} style={{ opacity: active ? 1 : 0.75 }} />
+                      <TabIcon size={12} strokeWidth={1.9} style={{ flex: 'none' }} />
                       {label}
                       {key === 'agents' && (hasPending || hasWaiting) && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
                       {key === 'plan' && pending.some((a) => a.isPlan) && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
@@ -2050,17 +2081,15 @@ export function App(): React.JSX.Element {
                         <span style={{ marginLeft: 2, fontSize: 9.5, opacity: 0.75 }}>{todos.filter((t) => !t.done).length}</span>
                       )}
                     </span>
-                  </div>
+                  </button>
                 )
               })}
             </div>
             {/* 签名分割线：Tab 栏下一道主题渐变光线（岛的"记忆点"） */}
-            <div style={{ height: 1, margin: '-6px 6px 10px', background: 'linear-gradient(90deg, transparent 2%, oklch(0.72 calc(0.15 * var(--cs, 1)) var(--th) / 0.34) 30%, oklch(0.72 calc(0.13 * var(--cs, 1)) var(--th2) / 0.3) 68%, transparent 98%)', pointerEvents: 'none' }} />
+            <div style={{ height: 1, margin: '-6px 6px 10px', background: 'linear-gradient(90deg, transparent 2%, oklch(0.72 var(--accent-c) var(--th) / 0.34) 30%, oklch(0.72 var(--accent2-c) var(--th2) / 0.3) 68%, transparent 98%)', pointerEvents: 'none' }} />
           </div>
           <div className="ai-scroll" style={{ padding: '0 8px 16px 16px', margin: '0 4px 0 0', maxHeight: fullscreen ? 'calc(100vh - 130px)' : settings.largeSize ? 'min(844px, calc(100vh - 175px))' : 500, overflowY: 'auto' }}>
-            {/* 不加 mode="wait"：新旧内容直接交叉淡化，新分区立即挂载（wait 会让重组件干等退出动画，感知卡顿） */}
-            <AnimatePresence initial={false}>
-            <motion.div key={tab} variants={tabContent} initial="initial" animate="animate" exit="exit">
+            <div id="main-tab-panel" role="tabpanel" data-main-tab-content>
             {tab === 'agents' && (
               <AgentsTab
                 agents={agents} armed={armed} autoAllowSafe={autoAllowSafe} onToggleAutoAllow={() => setAutoAllowSafe((v) => !v)}
@@ -2262,8 +2291,7 @@ export function App(): React.JSX.Element {
                 onEditTheme={(key) => { setThemeEditKey(key); setThemeDesignerOpen(true) }}
               />
             )}
-            </motion.div>
-            </AnimatePresence>
+            </div>
           </div>
         </div>
       </div>
@@ -2279,7 +2307,7 @@ export function App(): React.JSX.Element {
         </div>
       )}
       {jumpToast && (
-        <div style={{ position: 'fixed', top: 'calc(100vh - 78px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 999, background: 'oklch(calc(0.18 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.9)', backdropFilter: 'blur(20px)', border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / 0.3)', color: ink(1), fontSize: 12, boxShadow: '0 14px 34px rgba(0,0,0,.5)' }}>
+        <div style={{ position: 'fixed', top: 'calc(100vh - 78px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 999, background: 'oklch(var(--overlay-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a))', backdropFilter: 'blur(var(--glass-blur))', border: `1px solid ${accent(.7, .3)}`, color: ink(1), fontSize: 12, boxShadow: '0 14px 34px rgb(0 0 0 / calc(.5 * var(--shadow-k)))' }}>
           <ArrowUpRight size={13} strokeWidth={2} style={{ color: accent() }} />{jumpToast}
         </div>
       )}
@@ -2288,11 +2316,13 @@ export function App(): React.JSX.Element {
       {shotStudio && (
         <ScreenshotStudio
           dataUrl={shotStudio}
+          initialMode={shotStudioMode}
           onClose={() => { setShotStudio(null); island.capsuleClosed() }}
           llmReady={llmReady}
+          llmConfig={{ baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: llm.model }}
           onAskImage={(du: string) => { setShotStudio(null); setShotImg(du) }}
           onAIVision={(system: string, dataUrl2: string, prompt: string) => island.llmComplete({ baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: llm.model }, system, [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: dataUrl2 } }], false)}
-          onRetake={() => { shotToolRef.current = true; island.triggerScreenshot() }}
+          onRetake={() => { setShotStudioMode('image'); island.triggerScreenshot('studio') }}
           onCreateTodo={(text: string) => {
             const items = text.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+|[-*]\s*\[[ xX]\]\s*)/, '').trim()).filter(Boolean).slice(0, 30)
             todoBulkAdd((items.length ? items : [text.trim()]).map((item) => ({ text: item.slice(0, 200) })))
@@ -2351,18 +2381,34 @@ export function App(): React.JSX.Element {
       )}
       <ThemeDesigner
         open={themeDesignerOpen}
-        seed={(() => { const d = [...customThemes, ...THEMES].find((x) => x.key === (themeEditKey || theme)) || THEMES[0]; return { th: +d.th, th2: +d.th2, ths: +d.ths, cs: +d.cs, css: +d.css, pl: +(d.pl || '1') } as Tokens })()}
+        seed={(() => {
+          const d = normalizeThemeTokens([...customThemes, ...THEMES].find((x) => x.key === (themeEditKey || theme)) || THEMES[0])
+          return {
+            th: +d.th, th2: +d.th2, ths: +d.ths, cs: +d.cs, css: +d.css, pl: +d.pl,
+            mode: d.mode, bg: +d.bg, ga: +d.ga, fi: +d.fi, bl: +d.bl, sh: +d.sh,
+            c1: +d.c1, c2: +d.c2, sc: +d.sc, l1: +d.l1, l2: +d.l2, tx: +d.tx, gr: +d.gr
+          } as Tokens
+        })()}
         seedName={themeEditKey ? customThemes.find((x) => x.key === themeEditKey)?.label : undefined}
+        seedDescription={themeEditKey ? customThemes.find((x) => x.key === themeEditKey)?.desc : undefined}
+        seedTags={themeEditKey ? customThemes.find((x) => x.key === themeEditKey)?.tags : undefined}
         editKey={themeEditKey || undefined}
-        onSave={(name, tk, editKey) => {
-          const tokens = { th: String(Math.round(tk.th)), th2: String(Math.round(tk.th2)), ths: String(Math.round(tk.ths)), cs: String(Number(tk.cs.toFixed(2))), css: String(Number(tk.css.toFixed(2))), pl: String(Number(tk.pl.toFixed(2))) }
+        onSave={(name, tk, metadata, editKey) => {
+          const tokens = {
+            th: String(Math.round(tk.th)), th2: String(Math.round(tk.th2)), ths: String(Math.round(tk.ths)),
+            cs: String(Number(tk.cs.toFixed(2))), css: String(Number(tk.css.toFixed(2))), pl: String(Number(tk.pl.toFixed(2))),
+            mode: tk.mode, bg: String(Number(tk.bg.toFixed(2))), ga: String(Number(tk.ga.toFixed(2))),
+            fi: String(Number(tk.fi.toFixed(2))), bl: String(Math.round(tk.bl)), sh: String(Number(tk.sh.toFixed(2))),
+            c1: String(Number(tk.c1.toFixed(3))), c2: String(Number(tk.c2.toFixed(3))), sc: String(Number(tk.sc.toFixed(3))),
+            l1: String(Number(tk.l1.toFixed(2))), l2: String(Number(tk.l2.toFixed(2))), tx: String(Number(tk.tx.toFixed(2))), gr: String(Math.round(tk.gr))
+          }
           if (editKey) {
             // 二次编辑：原地更新（key 不变，历史引用/当前选中都不受影响）
-            setCustomThemes((l) => l.map((x) => (x.key === editKey ? makeCustomTheme(editKey, name, tokens) : x)))
+            setCustomThemes((l) => l.map((x) => (x.key === editKey ? makeCustomTheme(editKey, name, tokens, metadata) : x)))
             setTheme(editKey)
           } else {
             const key = 'custom-' + Date.now()
-            setCustomThemes((l) => [...l, makeCustomTheme(key, name, tokens)])
+            setCustomThemes((l) => [...l, makeCustomTheme(key, name, tokens, metadata)])
             setTheme(key)
           }
           setThemeEditKey(null)
@@ -2402,13 +2448,14 @@ const flareBase = (shown: boolean): React.CSSProperties => ({
 })
 const toastStyle: React.CSSProperties = {
   position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 10,
-  padding: '11px 16px', borderRadius: 999, background: 'oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.95)', backdropFilter: 'blur(22px) saturate(160%)',
-  border: '1px solid oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th) / 0.35)', boxShadow: '0 18px 40px rgba(0,0,0,.5)', animation: 'ai-toast .34s cubic-bezier(.34,1.3,.64,1)'
+  padding: '11px 16px', borderRadius: 999, background: 'oklch(var(--panel-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a))', backdropFilter: 'blur(var(--glass-blur)) saturate(160%)',
+  border: `1px solid ${accent(.7, .35)}`, boxShadow: '0 18px 40px rgb(0 0 0 / calc(.5 * var(--shadow-k)))', animation: 'ai-toast .34s cubic-bezier(.34,1.3,.64,1)'
 }
 function tabStyle(active: boolean): React.CSSProperties {
   return {
     position: 'relative',
-    padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: active ? 700 : 500, fontFamily: 'var(--font)', cursor: 'pointer',
+    appearance: 'none', border: 0, background: 'transparent',
+    padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 650, fontFamily: 'var(--font)', cursor: 'pointer',
     transition: 'color .18s ease',
     flex: 'none', whiteSpace: 'nowrap', // 窄屏下不许换行/压缩变形
     color: active ? gradient.onPrimary() : ink(2)
@@ -2427,7 +2474,7 @@ function HeaderBtn(props: { title: string; active?: boolean; onClick?: () => voi
       onClick={onClick}
       style={{
         width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-        background: active ? 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th) / .22)' : 'rgba(255,255,255,.05)',
+        background: active ? accent(0.78, .22) : fill(1),
         border: active ? `1px solid ${accent(0.7, 0.3)}` : '1px solid transparent',
         color: active ? accent(0.85) : ink(3),
         transition: 'background .18s ease, color .18s ease'

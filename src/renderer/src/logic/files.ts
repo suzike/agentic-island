@@ -15,19 +15,26 @@ export function selectLocalFiles(accept = '', multiple = false): Promise<File[]>
     input.type = 'file'
     input.multiple = multiple
     if (accept) input.accept = accept
+    input.tabIndex = -1
+    input.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;pointer-events:none'
+    document.body.appendChild(input)
 
     let settled = false
+    let focusTimer: number | undefined
     const finish = (files: File[]): void => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
+      if (focusTimer !== undefined) clearTimeout(focusTimer)
       window.removeEventListener('focus', onFocus)
+      input.remove()
       island.setNativeDialogOpen(false)
       resolve(files)
     }
     const onFocus = (): void => {
-      // change/cancel 通常先到；短暂延迟兼容 Windows 文件选择器的事件顺序。
-      setTimeout(() => finish(Array.from(input.files || [])), 80)
+      // Windows 可能先恢复窗口焦点、稍后才填充 input.files；给 change 事件充分时间。
+      if (focusTimer !== undefined) clearTimeout(focusTimer)
+      focusTimer = window.setTimeout(() => finish(Array.from(input.files || [])), 600)
     }
     const timeout = window.setTimeout(() => finish([]), 5 * 60_000)
     input.onchange = () => finish(Array.from(input.files || []))

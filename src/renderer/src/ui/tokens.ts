@@ -59,18 +59,19 @@ export const FS = {
 
 /* ---------------- 颜色（消费 OKLCH 主题变量） ---------------- */
 
-/** 强调色（主色相，饱和受 --cs 控制） */
+/** 强调色（主色相，浅色主题会自动压低明度以保持文字/控件对比） */
 export const accent = (lightness = 0.82, alpha = 1): string =>
-  `oklch(${lightness} calc(0.16 * var(--cs, 1)) var(--th) / ${alpha})`
+  `oklch(calc(${lightness} + var(--accent1-l-shift, var(--accent-l-shift, 0))) var(--accent-c, calc(0.16 * var(--cs, 1))) var(--th) / ${alpha})`
 
 /** 强调色渐变副色 */
 export const accent2 = (lightness = 0.82, alpha = 1): string =>
-  `oklch(${lightness} calc(0.15 * var(--cs, 1)) var(--th2) / ${alpha})`
+  `oklch(calc(${lightness} + var(--accent2-l-shift, var(--accent-l-shift, 0))) var(--accent2-c, calc(0.15 * var(--cs, 1))) var(--th2) / ${alpha})`
 
 /** 文字墨色：对齐 iOS label 四级（1=label → 4=quaternaryLabel），轻微染主题色 */
 export const ink = (level: 1 | 2 | 3 | 4 = 1): string => {
-  const alpha = [0, 1, 0.6, 0.32, 0.18][level]
-  return `oklch(0.96 0.005 var(--th) / ${alpha})`
+  const fallback = [0, 1, 0.6, 0.32, 0.18][level]
+  const alpha = level === 1 ? '1' : `var(--ink-${level}-a, ${fallback})`
+  return `oklch(var(--ink-l, 0.96) 0.008 var(--th) / ${alpha})`
 }
 
 /** 语义色（跨主题固定色相，与 AGENTS.md 约定一致） */
@@ -96,11 +97,22 @@ export const semBg = (color: string, alpha = 0.13): string =>
 /** iOS systemFill 四级填充（染一丝主题色），1 最弱 → 4 最强 */
 export const fill = (level: 1 | 2 | 3 | 4 = 2): string => {
   const alpha = [0, 0.05, 0.075, 0.11, 0.16][level]
-  return `oklch(0.96 0.006 var(--th) / ${alpha})`
+  return `oklch(var(--fill-l, 0.96) 0.008 var(--th) / calc(${alpha} * var(--fill-k, 1)))`
 }
 
 /** 发型线分隔（Apple separator）：层级分界一律用它，不用 1px 实边框 */
-export const hairline = (alpha = 0.09): string => `oklch(0.96 0.005 var(--th) / ${alpha})`
+export const hairline = (alpha = 0.09): string => `oklch(var(--line-l, 0.96) 0.006 var(--th) / ${alpha})`
+
+/** 跨明暗主题的色相染色表面。浅色主题生成浅色彩纸，深色主题生成暗色玻璃。 */
+export const tintSurface = (hue = 'var(--th)', alpha = 0.45, strong = false): string =>
+  `oklch(var(--tint-${strong ? 'low' : 'hi'}-l, ${strong ? '0.2' : '0.3'}) 0.045 ${hue} / ${alpha})`
+
+/** 任意色相上的可读强调色，避免浅色主题继续使用过亮文字。 */
+export const hueAccent = (hue = 'var(--th)', chroma = 0.12, alpha = 1): string =>
+  `oklch(var(--hue-accent-l, 0.84) ${chroma} ${hue} / ${alpha})`
+
+/** 终端、截图遮罩等始终为深底的局部表面使用，不随全局浅色主题反转。 */
+export const solidInk = (alpha = 1): string => `oklch(var(--solid-ink-l, 0.96) 0.008 var(--th) / ${alpha})`
 
 /** 发型线分隔行样式（iOS 分组列表行分隔，左侧缩进对齐文字） */
 export const separatorRow = (indent = 0): React.CSSProperties => ({
@@ -114,13 +126,13 @@ export const separatorRow = (indent = 0): React.CSSProperties => ({
 /* ---------------- 层级表面（Elevation，填充制） ---------------- */
 
 /** 柔和投影（Apple 式弥散阴影，无硬边） */
-const softShadow = '0 10px 28px -12px rgba(0, 0, 0, 0.4)'
+const softShadow = '0 10px 28px -12px rgb(0 0 0 / calc(0.4 * var(--shadow-k, 1)))'
 
 export const surface = {
   /** 面板本体（vibrancy 毛玻璃） */
   panel: (): React.CSSProperties => ({
-    background: 'oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / 0.97)',
-    backdropFilter: 'blur(30px) saturate(180%)',
+    background: 'oklch(var(--panel-l, 0.15) var(--surface-c, calc(0.02 * var(--css, 1))) var(--ths) / var(--glass-a, 0.97))',
+    backdropFilter: 'blur(var(--glass-blur, 30px)) saturate(180%)',
   }),
   /** 分区容器：最弱填充，圈定一组内容 */
   section: (): React.CSSProperties => ({
@@ -138,17 +150,17 @@ export const surface = {
   }),
   /** 内嵌井：输入框、代码块（比面板深，下凹感） */
   inset: (): React.CSSProperties => ({
-    background: 'oklch(0.1 calc(0.012 * var(--css, 1)) var(--ths) / 0.45)',
+    background: 'oklch(var(--inset-l, 0.1) calc(0.012 * var(--css, 1)) var(--ths) / calc(0.48 * var(--fill-k, 1)))',
     border: `0.5px solid ${hairline(0.06)}`,
     borderRadius: R.md,
   }),
   /** 浮层（弹层/下拉）：最实的玻璃 + 发型线描边 + 弥散深影 */
   overlay: (): React.CSSProperties => ({
-    background: 'oklch(calc(0.2 * var(--pl, 1)) calc(0.025 * var(--css, 1)) var(--ths) / 0.97)',
-    backdropFilter: 'blur(36px) saturate(180%)',
+    background: 'oklch(var(--overlay-l, 0.2) calc(0.025 * var(--css, 1)) var(--ths) / var(--glass-a, 0.97))',
+    backdropFilter: 'blur(calc(var(--glass-blur, 30px) + 6px)) saturate(180%)',
     border: `0.5px solid ${hairline(0.12)}`,
     borderRadius: R.overlay,
-    boxShadow: '0 28px 60px -18px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.25)',
+    boxShadow: '0 28px 60px -18px rgb(0 0 0 / calc(0.6 * var(--shadow-k, 1))), 0 2px 8px rgb(0 0 0 / calc(0.25 * var(--shadow-k, 1)))',
   }),
   /** iOS 分组列表（inset grouped）：容器填充 + 行内 hairline 分隔 */
   group: (): React.CSSProperties => ({
@@ -202,9 +214,9 @@ export const gradient = {
     `linear-gradient(180deg, ${accent(0.84)}, ${accent(0.72)})`,
   /** 品牌 logo 渐变（135° 主→副色相） */
   brand: (): string =>
-    `linear-gradient(135deg, ${accent(0.84)}, ${accent2(0.64)})`,
+    `linear-gradient(var(--gradient-angle, 135deg), ${accent(0.84)}, ${accent2(0.64)})`,
   /** 主按钮上的深色文字 */
-  onPrimary: (): string => 'oklch(0.16 0.02 var(--th))',
+  onPrimary: (): string => 'oklch(var(--on-primary-l, 0.16) 0.02 var(--th))',
 } as const
 
 /* ---------------- 动效令牌（CSS transition 用；framer-motion 预设在 motion.ts） ---------------- */

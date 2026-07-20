@@ -1,6 +1,6 @@
-# Agentic-Island v0.3 架构说明
+# Agentic-Island v0.5.1 架构说明
 
-本文档描述当前 `0.3.x` 实现。历史设计交付包只用于视觉参考，不代表运行时架构。
+本文档描述当前 `0.5.1` 实现，以工作区源码和自动化测试为准。
 
 ## 1. 设计目标
 
@@ -21,7 +21,7 @@
 - 创建透明、无边框、铺满工作区的最高层窗口，以及桌面挂件和便签窗口。
 - 启动本地 Bridge Server，维护 Agent 状态机并把快照通过 IPC 推送给渲染层。
 - 安装/卸载 Claude Code 与 Codex hooks，跟随 Codex rollout JSONL。
-- 运行 ConPTY、多媒体、截图、日历、RSS、Git/GitHub、LLM、embedding 和知识库能力。
+- 运行 ConPTY、多媒体、截图、录屏会话/工程/FFmpeg 导出、日历、RSS、Git/GitHub、LLM、embedding 和知识库能力。
 - 处理所有原生对话框、系统浏览器、Explorer 和外部文件打开。
 - 用 `safeStorage`、原子写和坏文件备份持久化配置。
 
@@ -121,7 +121,35 @@
 
 第二大脑先构建便签、问答、复盘、资讯和剪贴板语料，可使用关键词预筛或 embedding 余弦排序。
 
-## 7. 终端与快捷执行
+## 7. 专业录屏管线
+
+![录屏合成与交付管线](recording-pipeline.svg)
+
+录屏工作台入口为 `src/renderer/src/components/ScreenRecorderStudio.tsx`，几何与纯逻辑位于 `src/renderer/src/logic/recording.ts`。主进程负责来源枚举、光标坐标、分片会话、工程文件、音频转写和 FFmpeg 导出。
+
+### 来源与坐标
+
+- `desktopCapturer` 同时枚举显示器和窗口，并通过媒体来源 ID 与窗口句柄排除应用自身窗口。
+- 显示器元数据包含 DIP 边界、DPI、物理帧尺寸、旋转和工作区；窗口在媒体轨就绪后以真实 `videoWidth/videoHeight` 为准。
+- `recordingRegionCrop` 计算用户区域，`recordingFitComposition` 统一 `contain/cover`，`recordingFocusCrop` 负责动态运镜。
+- 定位框不再独立估算，而是直接读取该帧最终传给 Canvas `drawImage` 的源裁剪参数。
+
+### 合成与录制
+
+1. 来源视频、系统音频、麦克风和摄像头分别获取媒体轨。
+2. Canvas 合成来源裁剪、鼠标聚焦、光标效果、人物画中画、水印、时间和隐私遮挡。
+3. `canvas.captureStream(fps)` 与 Web Audio 混音轨组成最终 MediaStream。
+4. MediaRecorder 按时间片输出 WebM 分片，主进程 `RecordingSessionStore` 顺序落盘并维护 manifest。
+5. 暂停/恢复只影响有效录制时钟；控制条收起时 Canvas 保持挂载，保证长录制不中断。
+
+### 工程与导出
+
+- `RecordingProjectStore` 保存 `v2` 工程文档，引用磁盘录制会话而不复制视频。
+- 三轨时间线、片段启停/拆分、调色、音频、字幕和 AI 粗剪以非破坏参数保存。
+- `recording-export.ts` 生成 FFmpeg 参数，支持 MP4、WebM、GIF、MP3、字幕、分辨率/帧率和多档压缩。
+- 导出任务可取消并实时回报阶段进度；原始 WebM 且无编辑时使用磁盘素材快速直出。
+
+## 8. 终端与快捷执行
 
 终端基于 `@lydell/node-pty` N-API 预编译包和 Windows ConPTY。主进程持有 PTY 生命周期，渲染进程使用 xterm 展示和输入，多标签切换不会终止后台进程。
 
@@ -138,7 +166,7 @@
 
 危险分类器对删除、格式化、关机、进程终止、策略修改和破坏性 Git 命令强制确认；即使工作流被标记为 trusted，也不能绕过危险确认。
 
-## 8. 持久化与隐私
+## 9. 持久化与隐私
 
 `settings-store.ts` 提供：
 
@@ -149,9 +177,11 @@
 
 Bridge 发现、诊断和终端窗口句柄缓存位于 `~/.agentic-island/`。知识库索引位于 Electron `userData`，不进入仓库。
 
-## 9. 测试策略
+录屏素材与工程位于 Electron `userData/recordings` 和 `userData/recording-projects`。录制会话使用顺序分片和 manifest，异常中断后可以恢复；工程只保存编辑参数和素材引用。
 
-`npm test` 顺序执行全部离线 `scripts/test-*.ts`，排除必须依赖真实 Claude 登录的 `test-real-claude.ts`。直接被 raw Node 加载的主进程模块不得在顶层运行时导入 Electron，也不得使用 strip-types 不支持的 TypeScript enum 或参数属性。
+## 10. 测试策略
+
+`npm test` 当前顺序执行 31 个离线 `scripts/test-*.ts`，排除必须依赖真实 Claude 登录的 `test-real-claude.ts`。录屏测试覆盖几何合成、帧预算、暂停时钟、字幕、FFmpeg 参数、真实 FFmpeg 导出、分片会话与工程迁移。直接被 raw Node 加载的主进程模块不得在顶层运行时导入 Electron，也不得使用 strip-types 不支持的 TypeScript enum 或参数属性。
 
 发布门禁：
 

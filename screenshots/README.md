@@ -1,6 +1,6 @@
 # Screenshots
 
-`*-v030.png` 是 Agentic-Island `0.3.x` 的真实 Electron 界面截图。
+`*-v051.png` 是 Agentic-Island `0.5.1` 的真实 Electron 界面截图。
 
 这些图片由以下命令生成：
 
@@ -13,10 +13,11 @@ npm run docs:capture
 
 | 文件 | 页面 |
 |---|---|
-| `ask-v030.png` | 问答 |
-| `shortcuts-v030.png` | 快捷 |
-| `todos-v030.png` | 待办 |
-| `notes-v030.png` | 灵感便签 |
-| `news-v030.png` | 资讯 |
-| `review-v030.png` | 复盘 |
-| `settings-v030.png` | 设置 |
+| `ask-v051.png` | 问答 |
+| `shortcuts-v051.png` | 快捷 |
+| `todos-v051.png` | 待办 |
+| `notes-v051.png` | 灵感便签 |
+| `news-v051.png` | 资讯 |
+| `review-v051.png` | 复盘 |
+| `settings-v051.png` | 设置 |
+| `recording-v051.png` | 专业录屏工坊 |

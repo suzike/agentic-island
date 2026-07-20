@@ -5,6 +5,181 @@ export type Backend = 'claude-code' | 'codex'
 
 export type AgentStatus = 'running' | 'needs_approval' | 'done' | 'waiting'
 
+export type ScreenshotTarget = 'ask' | 'studio'
+export interface ScreenshotCapture {
+  dataUrl: string
+  target: ScreenshotTarget
+}
+
+export type RecordingSourceKind = 'screen' | 'window'
+export type RecordingAnimeModel = 'handdrawn' | 'portrait' | 'comic'
+export interface RecordingSource {
+  id: string
+  name: string
+  kind: RecordingSourceKind
+  displayId?: string
+  thumbnail: string
+  appIcon?: string
+  /** 当前是否有可用画面；最小化或受保护窗口可能没有缩略图。 */
+  available?: boolean
+  unavailableReason?: string
+  displayLabel?: string
+  aspectRatio?: number
+  bounds?: { x: number; y: number; width: number; height: number }
+  scaleFactor?: number
+  displayIndex?: number
+  isPrimary?: boolean
+  rotation?: number
+  workArea?: { x: number; y: number; width: number; height: number }
+  nativeSize?: { width: number; height: number }
+  sourceOrder?: number
+}
+
+export interface RecordingCursorPoint {
+  x: number
+  y: number
+  displayId: string
+  bounds: { x: number; y: number; width: number; height: number }
+  scaleFactor: number
+}
+
+export type RecordingExportFormat = 'webm' | 'mp4' | 'gif' | 'mp3'
+export type RecordingExportQuality = 'original' | 'compact' | 'balanced' | 'near-lossless' | 'lossless'
+export interface RecordingEditSegment {
+  id: string
+  startMs: number
+  endMs: number
+  enabled?: boolean
+  label?: string
+}
+export interface RecordingEditSettings {
+  segments?: RecordingEditSegment[]
+  speed?: number
+  crop?: { left: number; top: number; right: number; bottom: number }
+  rotation?: 0 | 90 | 180 | 270
+  flipHorizontal?: boolean
+  flipVertical?: boolean
+  brightness?: number
+  contrast?: number
+  saturation?: number
+  gamma?: number
+  sharpen?: number
+  denoise?: number
+  audioVolume?: number
+  muteAudio?: boolean
+  fadeInMs?: number
+  fadeOutMs?: number
+}
+export interface RecordingExportRequest {
+  jobId: string
+  name: string
+  format: RecordingExportFormat
+  quality: RecordingExportQuality
+  durationMs: number
+  trimStartMs?: number
+  trimEndMs?: number
+  width: number
+  height: number
+  fps: number
+  hasAudio?: boolean
+  outputWidth?: number
+  outputHeight?: number
+  outputFps?: number
+  subtitle?: { mode: 'none' | 'embedded'; language: 'auto' | 'zh' | 'en'; segments: RecordingTranscriptSegment[] }
+  /** 主进程生成的临时字幕路径，渲染层传入值会被忽略。 */
+  subtitleFilePath?: string
+  edit?: RecordingEditSettings
+}
+
+export interface RecordingExportProgress {
+  jobId: string
+  phase: 'preparing' | 'encoding' | 'done' | 'error' | 'canceled'
+  progress: number
+  message?: string
+}
+
+export type RecordingSessionStatus = 'recording' | 'interrupted' | 'ready'
+export interface RecordingSessionManifest {
+  id: string
+  name: string
+  mimeType: string
+  sourceName: string
+  sourceKind: RecordingSourceKind
+  width: number
+  height: number
+  fps: number
+  hasAudio: boolean
+  status: RecordingSessionStatus
+  createdAt: number
+  updatedAt: number
+  durationMs: number
+  bytes: number
+  chunks: number
+  fileName: string
+}
+export interface RecordingSessionCreateInput {
+  name: string
+  mimeType: string
+  sourceName: string
+  sourceKind: RecordingSourceKind
+  width: number
+  height: number
+  fps: number
+  hasAudio: boolean
+}
+export interface RecordingTranscriptSegment { startMs: number; endMs: number; text: string }
+
+export type RecordingTimelineEventType = 'start' | 'pause' | 'resume' | 'marker' | 'keyframe' | 'end'
+export interface RecordingProjectTimelineEvent {
+  at: number
+  type: RecordingTimelineEventType
+  label: string
+}
+export interface RecordingProjectAiResult {
+  id: number
+  label: string
+  text: string
+  error?: boolean
+}
+export interface RecordingProjectDocument {
+  schema: 'agentic-island-recording-project/v2'
+  id: string
+  sessionId: string
+  name: string
+  createdAt: number
+  updatedAt: number
+  source: { name: string; kind: RecordingSourceKind; displayId?: string } | null
+  durationMs: number
+  size: { width: number; height: number }
+  fps: number
+  hasAudio: boolean
+  edit: RecordingEditSettings & { segments: RecordingEditSegment[] }
+  timeline: RecordingProjectTimelineEvent[]
+  transcript: { model: string; language: 'auto' | 'zh' | 'en'; segments: RecordingTranscriptSegment[] }
+  workspace: {
+    timelineZoom: number
+    timelineSnap: boolean
+    videoTrackLocked: boolean
+    markerTrackLocked: boolean
+    aiEditMode: 'conservative' | 'tutorial' | 'dynamic'
+  }
+  aiResults: RecordingProjectAiResult[]
+}
+export type RecordingProjectSaveInput = Omit<RecordingProjectDocument, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+export interface RecordingProjectSummary {
+  id: string
+  sessionId: string
+  name: string
+  createdAt: number
+  updatedAt: number
+  durationMs: number
+  width: number
+  height: number
+  hasAudio: boolean
+  segmentCount: number
+  transcriptCount: number
+}
+
 /** 权限决定：与 Claude Code hook 的 permissionDecision 对齐 */
 export type Decision = 'allow' | 'deny' | 'ask'
 
@@ -248,8 +423,8 @@ export interface IslandBridgeApi {
   closeSticky: (id: number) => void
   /** 钉屏便利贴：接收便签数据（浮贴窗口用） */
   onStickyData: (cb: (note: Record<string, unknown>) => void) => () => void
-  /** 智能截图：框选完成后主进程把图片 dataURL 推给渲染层 */
-  onScreenshot: (cb: (dataUrl: string) => void) => () => void
+  /** 智能截图：框选完成后主进程把图片及明确去向推给渲染层 */
+  onScreenshot: (cb: (capture: ScreenshotCapture) => void) => () => void
   installHooks: () => Promise<{ ok: boolean; error?: string }>
   uninstallHooks: () => Promise<{ ok: boolean; error?: string }>
   // 真实 Q&A 后端（deep=深度思考；history=多轮上下文；user 可为多模态 parts 数组=带图提问）
@@ -301,7 +476,36 @@ export interface IslandBridgeApi {
   clipReadText: () => Promise<string>
   clipWriteText: (t: string) => void
   /** 截图工坊：主动拉起框选截图（结果仍走 onScreenshot 事件） */
-  triggerScreenshot: () => void
+  triggerScreenshot: (target?: ScreenshotTarget) => void
+  /** 录屏：枚举可捕获的显示器和窗口。 */
+  recordingSources: () => Promise<{ ok: boolean; sources?: RecordingSource[]; error?: string }>
+  /** 录屏智能运镜：读取当前鼠标与所在显示器坐标。 */
+  recordingCursor: () => Promise<RecordingCursorPoint>
+  /** 录屏期间禁止灵动岛被桌面采集器录入。 */
+  setRecordingProtection: (active: boolean) => void
+  /** 读取随安装包分发的本地人物动漫化 ONNX 模型。 */
+  recordingAnimeModel: (model?: RecordingAnimeModel) => Promise<{ ok: boolean; data?: ArrayBuffer; name?: string; error?: string }>
+  /** 将录制数据写入受控临时文件，避免 file:// 沙箱拒绝 blob: 预览。 */
+  prepareRecordingPreview: (data: ArrayBuffer) => Promise<{ ok: boolean; id?: string; url?: string; error?: string }>
+  releaseRecordingPreview: (id: string) => void
+  /** 创建持久录制会话；MediaRecorder 分片将直接写入主进程文件。 */
+  createRecordingSession: (input: RecordingSessionCreateInput) => Promise<{ ok: boolean; session?: RecordingSessionManifest; error?: string }>
+  appendRecordingChunk: (id: string, index: number, data: ArrayBuffer) => Promise<{ ok: boolean; session?: RecordingSessionManifest; error?: string }>
+  finalizeRecordingSession: (id: string, durationMs: number) => Promise<{ ok: boolean; session?: RecordingSessionManifest; url?: string; error?: string }>
+  listRecordingSessions: () => Promise<{ ok: boolean; sessions?: RecordingSessionManifest[]; error?: string }>
+  recoverRecordingSession: (id: string) => Promise<{ ok: boolean; session?: RecordingSessionManifest; url?: string; error?: string }>
+  discardRecordingSession: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /** 保存或用内置 FFmpeg 转码录制结果。 */
+  exportRecording: (data: ArrayBuffer, request: RecordingExportRequest) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
+  exportRecordingSession: (id: string, request: RecordingExportRequest) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
+  transcribeRecordingSession: (id: string, cfg: LlmRequestConfig, model: string, language: 'auto' | 'zh' | 'en') => Promise<{ ok: boolean; text?: string; segments?: RecordingTranscriptSegment[]; error?: string }>
+  saveRecordingProject: (input: RecordingProjectSaveInput) => Promise<{ ok: boolean; project?: RecordingProjectDocument; error?: string }>
+  listRecordingProjects: () => Promise<{ ok: boolean; projects?: RecordingProjectSummary[]; error?: string }>
+  loadRecordingProject: (id: string) => Promise<{ ok: boolean; project?: RecordingProjectDocument; error?: string }>
+  duplicateRecordingProject: (id: string) => Promise<{ ok: boolean; project?: RecordingProjectDocument; error?: string }>
+  deleteRecordingProject: (id: string) => Promise<{ ok: boolean; error?: string }>
+  cancelRecordingExport: (jobId: string) => void
+  onRecordingExportProgress: (cb: (progress: RecordingExportProgress) => void) => () => void
   /** 图片写剪贴板 */
   copyImage: (dataUrl: string) => Promise<{ ok: boolean; error?: string }>
   /** 图片存盘（PNG/JPEG/WebP，弹保存框） */

@@ -1,5 +1,7 @@
 # 快捷指令编排平台 · 第一阶段：图内核 Implementation Plan
 
+> **文档状态（2026-07-20）：历史实施基线。** 本文保留 2026-07-08 的阶段计划与决策过程，不作为 `v0.5.1` 当前能力清单。现行工程约束、模块边界和验证命令以 [开发指南](../../DEVELOPMENT.md) 与 [架构说明](../../ARCHITECTURE.md) 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为快捷指令建立一个纯逻辑、依赖注入、raw-node 可测的**编排图执行内核**（顺序/分支/循环/并行/命名变量/错误策略/dry-run/旧数据迁移），作为整个 AI 原生编排平台的地基。

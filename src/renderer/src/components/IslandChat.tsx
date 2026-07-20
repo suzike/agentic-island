@@ -82,7 +82,7 @@ function ThinkBlock({ text: thinkText, live, collapsed }: { text: string; live?:
         >
           <Markdown text={thinkText} />
           {!open && thinkText.length > 120 && (
-            <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 26, background: 'linear-gradient(180deg, transparent, oklch(calc(0.17 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / .95))', pointerEvents: 'none' }} />
+            <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 26, background: 'linear-gradient(180deg, transparent, oklch(var(--panel-hi-l) calc(0.02 * var(--css, 1)) var(--ths) / .95))', pointerEvents: 'none' }} />
           )}
         </div>
       )}

@@ -129,7 +129,7 @@ function AgentCard({
   return (
     <motion.div
       variants={fadeScaleIn}
-      initial="initial"
+      initial={false}
       animate="animate"
       className={highlight ? undefined : 'ai-card'}
       style={{
@@ -234,7 +234,7 @@ function AgentCard({
                 color: risk.level === 'danger' ? 'oklch(0.88 0.1 25)' : ink(1),
                 fontSize: FS.small,
                 fontFamily: "ui-monospace,'Cascadia Code',monospace",
-                background: risk.level === 'danger' ? semBg(sem.danger, 0.2) : 'rgba(0,0,0,.28)',
+                background: risk.level === 'danger' ? semBg(sem.danger, 0.2) : surface.inset().background,
                 padding: '6px 8px',
                 borderRadius: 7,
                 marginBottom: 9,
@@ -300,7 +300,7 @@ function AgentCard({
             <span style={{ color: sem.danger, fontSize: 10.5, fontFamily: 'ui-monospace,monospace' }}>−{a.summary.removed}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ flex: 1, color: ink(1), fontSize: 11, fontFamily: "ui-monospace,'Cascadia Code',monospace", background: 'rgba(0,0,0,.28)', padding: '6px 8px', borderRadius: 7, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ flex: 1, color: ink(1), fontSize: 11, fontFamily: "ui-monospace,'Cascadia Code',monospace", background: surface.inset().background, padding: '6px 8px', borderRadius: 7, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {a.summary.commit}
             </div>
             <Button sm variant="ghost" icon={Copy} onClick={() => onCopyCommit(a.id, a.summary!.commit)}>复制</Button>

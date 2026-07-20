@@ -425,7 +425,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
   // 明暗主题作用于整个工作台（暗色走设计令牌，亮色保留编辑器专属配色）
   const ui = light
     ? { card: '#faf9f6', fg: '#1a1a1a', sub: 'rgba(0,0,0,.55)', bd: 'rgba(0,0,0,.1)', btn: 'rgba(0,0,0,.05)', btnA: 'rgba(0,0,0,.13)', prev: '#ffffff', panel: 'rgba(0,0,0,.03)' }
-    : { card: 'oklch(calc(0.15 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / .98)', fg: ink(1), sub: ink(3), bd: hairline(0.07), btn: fill(2), btnA: semBg(accent(), 0.16), prev: fill(1), panel: fill(1) }
+    : { card: 'oklch(var(--panel-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a))', fg: ink(1), sub: ink(3), bd: hairline(0.07), btn: fill(2), btnA: semBg(accent(), 0.16), prev: fill(1), panel: fill(1) }
   // 工具栏图标按钮（lucide 图标，明暗自适应；填充制无描边，激活态 0.5px 语义描边）
   const tbtn = (Icon: LucideIcon, tip: string, on: () => void, active?: boolean): React.JSX.Element => (
     <button key={tip} type="button" className="hv" onClick={on} title={tip} style={{ width: 27, height: 27, padding: 0, borderRadius: R.sm, display: 'grid', placeItems: 'center', cursor: 'pointer', border: active ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: active ? ui.btnA : ui.btn, color: active ? (light ? '#111' : accent()) : ui.fg, opacity: active ? 1 : 0.85, transition: transition('background, border-color, color'), fontFamily: 'inherit', flex: 'none' }}>
@@ -594,7 +594,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
   )
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: zen ? 0 : '3vh 3vw', background: 'oklch(0.08 0.02 var(--ths) / .6)', backdropFilter: 'blur(6px)', animation: 'ai-fadein .15s ease' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: zen ? 0 : '3vh 3vw', background: 'oklch(var(--overlay-mask-l) 0.02 var(--ths) / .6)', backdropFilter: 'blur(6px)', animation: 'ai-fadein .15s ease' }}>
       <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', borderRadius: zen ? 0 : R.xl, overflow: 'hidden', ...(light ? { background: ui.card } : surface.panel()), border: zen ? 'none' : `0.5px solid ${ui.bd}`, boxShadow: zen ? 'none' : '0 30px 60px -20px rgba(0,0,0,.5)' }}>
         {/* 顶栏 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 14px', borderBottom: `0.5px solid ${ui.bd}`, flex: 'none', flexWrap: 'wrap' }}>

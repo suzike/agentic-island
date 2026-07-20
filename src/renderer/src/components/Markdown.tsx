@@ -4,6 +4,7 @@
 
 import { createContext, useContext, useRef, useState, useLayoutEffect } from 'react'
 import { island } from '../bridge'
+import { accent, fill, gradient, hairline, ink, surface } from '../ui/tokens'
 
 // 双向链接跳转回调（便签用）：Markdown 提供，Inline 消费；不提供时 [[..]] 按普通文字渲染
 const WikiCtx = createContext<((title: string) => void) | null>(null)
@@ -25,31 +26,31 @@ function Inline({ text }: { text: string }): React.JSX.Element {
         // [文字](链接)
         {
           const md = p.match(/^\[([^\]]+)\]\(((?:https?:\/\/|data:)[^)\s]+)\)$/)
-          if (md) return <span key={i} onClick={() => island.openExternal(md[2])} title="在浏览器打开" style={{ color: 'oklch(0.8 calc(0.1 * var(--cs, 1)) var(--th))', textDecoration: 'underline', cursor: 'pointer' }}>{md[1]}</span>
+          if (md) return <span key={i} onClick={() => island.openExternal(md[2])} title="在浏览器打开" style={{ color: accent(.76), textDecoration: 'underline', cursor: 'pointer' }}>{md[1]}</span>
         }
         if (p.startsWith('[[') && p.endsWith(']]')) {
           const title = p.slice(2, -2).trim()
           return (
-            <span key={i} onClick={() => onWiki?.(title)} title={onWiki ? '跳到该便签' : undefined} style={{ color: 'oklch(0.82 calc(0.12 * var(--cs, 1)) var(--th))', background: 'oklch(0.4 calc(0.08 * var(--cs, 1)) var(--th) / .25)', padding: '0 5px', borderRadius: 5, cursor: onWiki ? 'pointer' : 'default', fontWeight: 600, fontSize: '0.94em' }}>
+            <span key={i} onClick={() => onWiki?.(title)} title={onWiki ? '跳到该便签' : undefined} style={{ color: accent(.76), background: fill(3), padding: '0 5px', borderRadius: 5, cursor: onWiki ? 'pointer' : 'default', fontWeight: 600, fontSize: '0.94em' }}>
               🔗 {title}
             </span>
           )
         }
         if (p.startsWith('`') && p.endsWith('`'))
           return (
-            <code key={i} style={{ fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: '0.94em', color: lt ? '#b02a5b' : 'oklch(0.86 calc(0.1 * var(--cs, 1)) var(--th))', background: lt ? 'rgba(0,0,0,.06)' : 'rgba(0,0,0,.3)', padding: '1px 5px', borderRadius: 4 }}>
+            <code key={i} style={{ fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: '0.94em', color: lt ? '#b02a5b' : accent(.74), background: lt ? 'rgba(0,0,0,.06)' : surface.inset().background, padding: '1px 5px', borderRadius: 4 }}>
               {p.slice(1, -1)}
             </code>
           )
         if (p.startsWith('**') && p.endsWith('**'))
           return (
-            <b key={i} style={{ color: lt ? '#111' : 'oklch(0.93 0.02 var(--th))', fontWeight: 700 }}>
+            <b key={i} style={{ color: lt ? '#111' : ink(1), fontWeight: 700 }}>
               {p.slice(2, -2)}
             </b>
           )
         if (/^https?:\/\//.test(p))
           return (
-            <span key={i} onClick={() => island.openExternal(p)} title="在浏览器打开" style={{ color: 'oklch(0.8 calc(0.1 * var(--cs, 1)) var(--th))', textDecoration: 'underline', cursor: 'pointer', wordBreak: 'break-all' }}>
+            <span key={i} onClick={() => island.openExternal(p)} title="在浏览器打开" style={{ color: accent(.76), textDecoration: 'underline', cursor: 'pointer', wordBreak: 'break-all' }}>
               {p}
             </span>
           )
@@ -65,13 +66,13 @@ function CodeBlock({ code }: { code: string }): React.JSX.Element {
   const lt = useContext(LightCtx)
   return (
     <div style={{ position: 'relative', margin: '4px 0' }}>
-      <div className="ai-scroll" style={{ fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 11, lineHeight: 1.55, color: lt ? '#2f3b47' : 'oklch(0.86 calc(0.1 * var(--cs, 1)) var(--th))', background: lt ? 'rgba(0,0,0,.05)' : 'rgba(0,0,0,.32)', padding: '7px 9px', paddingRight: 46, borderRadius: 7, overflowX: 'auto', whiteSpace: 'pre' }}>
+      <div className="ai-scroll" style={{ fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 11, lineHeight: 1.55, color: lt ? '#2f3b47' : ink(2), background: lt ? 'rgba(0,0,0,.05)' : surface.inset().background, border: lt ? 'none' : `0.5px solid ${hairline(.06)}`, padding: '7px 9px', paddingRight: 46, borderRadius: 7, overflowX: 'auto', whiteSpace: 'pre' }}>
         {code}
       </div>
       <div
         className="hv"
         onClick={() => { navigator.clipboard?.writeText(code).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
-        style={{ position: 'absolute', top: 5, right: 6, padding: '2px 7px', borderRadius: 6, background: 'rgba(255,255,255,.08)', color: copied ? 'oklch(0.8 calc(0.14 * var(--cs, 1)) var(--th))' : 'oklch(0.7 0.02 var(--th) / .7)', fontSize: 9, fontWeight: 600, cursor: 'pointer' }}
+        style={{ position: 'absolute', top: 5, right: 6, padding: '2px 7px', borderRadius: 6, background: lt ? 'rgba(0,0,0,.06)' : fill(3), color: copied ? accent(.76) : ink(3), fontSize: 9, fontWeight: 600, cursor: 'pointer' }}
       >
         {copied ? '✓' : '⧉ 复制'}
       </div>
@@ -95,12 +96,12 @@ export function Markdown({ text, onWikiLink, reader, light }: { text: string; on
   const hFz = (lv: number): number => (reader ? [26, 21, 17.5, 15.5, 14, 13][lv - 1] : lv <= 2 ? 12.5 : 11.5)
   const hMargin = reader ? '20px 0 9px' : '6px 0 2px'
   // 明暗配色
-  const cBody = light ? '#2b2b2b' : 'oklch(0.85 0.02 var(--th) / .92)'
-  const cHead = light ? '#0f0f14' : 'oklch(0.95 0.02 var(--th))'
-  const cPara = light ? '#333' : 'oklch(0.84 0.02 var(--th) / .9)'
-  const cQuote = light ? '#555' : 'oklch(0.78 0.02 var(--th) / .8)'
-  const cTh = light ? '#111' : 'oklch(0.92 calc(0.05 * var(--cs, 1)) var(--th))'
-  const cTd = light ? '#333' : 'oklch(0.83 0.02 var(--th) / .9)'
+  const cBody = light ? '#2b2b2b' : ink(1)
+  const cHead = light ? '#0f0f14' : ink(1)
+  const cPara = light ? '#333' : ink(2)
+  const cQuote = light ? '#555' : ink(2)
+  const cTh = light ? '#111' : ink(1)
+  const cTd = light ? '#333' : ink(2)
 
   while (i < lines.length) {
     const line = lines[i]
@@ -136,8 +137,8 @@ export function Markdown({ text, onWikiLink, reader, light }: { text: string; on
             </thead>
             <tbody>
               {rows.map((r, ri) => (
-                <tr key={ri} style={{ background: ri % 2 ? 'rgba(255,255,255,.025)' : undefined }}>
-                  {r.map((c, j) => <td key={j} style={{ padding: reader ? '7px 11px' : '4px 8px', borderBottom: `1px solid ${light ? 'rgba(0,0,0,.08)' : 'rgba(255,255,255,.06)'}`, color: cTd, verticalAlign: 'top' }}><Inline text={c} /></td>)}
+                <tr key={ri} style={{ background: ri % 2 ? (light ? 'rgba(0,0,0,.025)' : fill(1)) : undefined }}>
+                  {r.map((c, j) => <td key={j} style={{ padding: reader ? '7px 11px' : '4px 8px', borderBottom: `1px solid ${light ? 'rgba(0,0,0,.08)' : hairline(.07)}`, color: cTd, verticalAlign: 'top' }}><Inline text={c} /></td>)}
                 </tr>
               ))}
             </tbody>
@@ -198,7 +199,7 @@ export function Markdown({ text, onWikiLink, reader, light }: { text: string; on
           {items.map((it, j) => (
             <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', paddingLeft: it.indent * (reader ? 20 : 14) }}>
               {it.task ? (
-                <span style={{ flex: 'none', width: reader ? 15 : 13, height: reader ? 15 : 13, marginTop: reader ? 3 : 2, borderRadius: 4, border: `1.5px solid oklch(0.7 calc(0.12 * var(--cs, 1)) var(--th) / .6)`, background: it.task === 2 ? 'oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th))' : 'transparent', color: 'oklch(0.14 0.02 var(--th))', fontSize: reader ? 11 : 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900 }}>{it.task === 2 ? '✓' : ''}</span>
+                <span style={{ flex: 'none', width: reader ? 15 : 13, height: reader ? 15 : 13, marginTop: reader ? 3 : 2, borderRadius: 4, border: `1.5px solid ${accent(.7, .6)}`, background: it.task === 2 ? accent(.72) : 'transparent', color: gradient.onPrimary(), fontSize: reader ? 11 : 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900 }}>{it.task === 2 ? '✓' : ''}</span>
               ) : (
                 <span style={{ color: 'oklch(0.78 calc(0.16 * var(--cs, 1)) var(--th))', lineHeight: lh, flex: 'none' }}>•</span>
               )}
@@ -259,7 +260,7 @@ export function Collapsible({ children, collapsedHeight = 120 }: { children: Rea
       >
         {children}
         {!open && overflowing && (
-          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 34, background: 'linear-gradient(180deg, transparent, oklch(calc(0.17 * var(--pl, 1)) calc(0.02 * var(--css, 1)) var(--ths) / .95))', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 34, background: 'linear-gradient(180deg, transparent, oklch(var(--panel-hi-l) calc(0.02 * var(--css, 1)) var(--ths) / .95))', pointerEvents: 'none' }} />
         )}
       </div>
       {overflowing && (

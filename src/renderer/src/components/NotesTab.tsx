@@ -15,7 +15,7 @@ import {
 import type { LucideIcon } from '../ui/icons'
 import { Button, Chip, EmptyState, IconButton, Input, Segmented } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
-import { accent, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accent, fill, FS, hairline, hueAccent, ink, R, sem, semBg, solidInk, SP, surface, text, tintSurface } from '../ui/tokens'
 import type { StickyNote } from '../types'
 import { NOTE_COLORS, colorOf } from '../logic/noteAi'
 import { imageToCompactDataUrl, selectLocalFiles } from '../logic/files'
@@ -122,8 +122,8 @@ const cardStyle = (h: number, pinned?: boolean): React.CSSProperties => ({
   padding: `${SP.md - 1}px ${SP.md}px`,
   borderRadius: R.lg,
   background: pinned
-    ? `linear-gradient(160deg, oklch(0.36 0.06 ${h} / .52), oklch(0.24 0.04 ${h} / .36))`
-    : `linear-gradient(160deg, oklch(0.33 0.055 ${h} / .4), oklch(0.22 0.035 ${h} / .28))`,
+    ? `linear-gradient(160deg, ${tintSurface(String(h), .78)}, ${tintSurface(String(h), .56, true)})`
+    : `linear-gradient(160deg, ${tintSurface(String(h), .6)}, ${tintSurface(String(h), .4, true)})`,
   display: 'flex',
   flexDirection: 'column',
   gap: 6
@@ -133,8 +133,8 @@ const cardStyle = (h: number, pinned?: boolean): React.CSSProperties => ({
 const chip = (h: number): React.CSSProperties => ({
   padding: '2px 8px',
   borderRadius: R.pill,
-  background: `oklch(0.4 0.07 ${h} / .35)`,
-  color: `oklch(0.85 0.08 ${h})`,
+  background: tintSurface(String(h), .55, true),
+  color: hueAccent(String(h), .1),
   fontSize: FS.tiny - 1,
   fontWeight: 600,
   cursor: 'pointer',
@@ -759,7 +759,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
 
       {/* AI 工具箱：全库级智能 */}
       {toolsOpen && (
-        <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={aiPanel}>
+        <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={aiPanel}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 5 }}>
             {NOTE_TOOLS.map((t) => (
               <div key={t.key} className="hv" title={t.hint} onClick={() => void runTool(t.key)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '9px 4px', borderRadius: R.md, cursor: 'pointer', background: toolBusy === t.key ? semBg(accent(), 0.16) : fill(2), border: toolBusy === t.key ? `0.5px solid ${accent(0.7, 0.3)}` : 'none' }}>
@@ -786,7 +786,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
 
       {/* 非 AI 高级工具：所有动作均可本地完成 */}
       {powerOpen && (
-        <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm - 1, padding: SP.md - 2, ...surface.section() }}>
+        <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm - 1, padding: SP.md - 2, ...surface.section() }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
             <Wrench size={12} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
             <span style={{ ...text.overline(), marginRight: 4 }}>便签库管理</span>
@@ -829,7 +829,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         const topTags = [...tagCnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)
         const maxTag = topTags[0]?.[1] || 1
         return (
-          <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm + 1, padding: SP.md - 1, ...surface.section() }}>
+          <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm + 1, padding: SP.md - 1, ...surface.section() }}>
             <div style={{ display: 'flex', gap: 14, ...text.dim(), fontSize: FS.tiny - 0.5 }}>
               <span>共 <b style={{ color: accent(0.85) }}>{live.length}</b> 条</span>
               <span>收藏 <b style={{ color: sem.warn }}>{live.filter((n) => n.starred).length}</b></span>
@@ -860,7 +860,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
 
       {/* 问便签：跨全部便签问答 */}
       {askOpen && (
-        <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={aiPanel}>
+        <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={aiPanel}>
           <div style={{ display: 'flex', gap: 6 }}>
             <Input value={askQ} onChange={setAskQ} onKeyDown={(e) => { if (e.key === 'Enter') void askNotes() }} icon={MessageSquare} placeholder="问你的便签库：我之前关于 X 记了什么？" style={{ flex: 1 }} />
             <Button sm variant="primary" onClick={() => void askNotes()}>问</Button>
@@ -871,9 +871,9 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
 
       {/* 模板选择 */}
       {tplOpen && (
-        <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: SP.sm + 1, ...surface.inset(), borderRadius: R.lg }}>
+        <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: SP.sm + 1, ...surface.inset(), borderRadius: R.lg }}>
           {TEMPLATES.map((t) => (
-            <div key={t.label} className="hv" onClick={() => useTemplate(t)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: R.md, cursor: 'pointer', background: `oklch(0.35 0.07 ${colorOf(t.color)} / .4)`, color: ink(1), fontSize: FS.small, fontWeight: 600 }}>
+            <div key={t.label} className="hv" onClick={() => useTemplate(t)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: R.md, cursor: 'pointer', background: tintSurface(String(colorOf(t.color)), .52), color: ink(1), fontSize: FS.small, fontWeight: 600 }}>
               <span>{t.emoji}</span>{t.label}
             </div>
           ))}
@@ -882,7 +882,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
 
       {/* 双链关系图 */}
       {graphOpen && (
-        <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ padding: SP.md - 2, ...surface.section() }}>
+        <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ padding: SP.md - 2, ...surface.section() }}>
           {graph.nodes.length ? (
             <svg viewBox="0 0 300 200" style={{ width: '100%', height: 190 }}>
               {(() => {
@@ -905,7 +905,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
                       return (
                         <g key={n.id} className="hv" onClick={() => jumpToTitle(n.title)} style={{ cursor: 'pointer' }}>
                           <circle cx={pt.x} cy={pt.y} r={r} style={{ fill: `oklch(0.7 0.13 ${h})` }} />
-                          <text x={pt.x} y={pt.y - r - 3} textAnchor="middle" style={{ fill: 'oklch(0.85 0.02 var(--th) / .85)', fontSize: 7.5 }}>{n.title.slice(0, 8)}</text>
+                          <text x={pt.x} y={pt.y - r - 3} textAnchor="middle" style={{ fill: ink(2), fontSize: 7.5 }}>{n.title.slice(0, 8)}</text>
                         </g>
                       )
                     })}
@@ -921,7 +921,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
 
       {/* AI 生成面板 */}
       {genOpen && (
-        <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={aiPanel}>
+        <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={aiPanel}>
           <textarea
             value={genInput}
             onChange={(e) => setGenInput(e.target.value)}
@@ -988,7 +988,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
 
       {/* 批量操作条 */}
       {selectMode && selected.size > 0 && (
-        <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', borderRadius: R.lg, background: semBg(accent(), 0.1), border: `0.5px solid ${accent(0.7, 0.3)}`, flexWrap: 'wrap' }}>
+        <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', borderRadius: R.lg, background: semBg(accent(), 0.1), border: `0.5px solid ${accent(0.7, 0.3)}`, flexWrap: 'wrap' }}>
           <span style={{ color: ink(1), fontSize: FS.small, fontWeight: 700 }}>已选 {selected.size}</span>
           <span style={{ flex: 1 }} />
           <span style={text.faint()}>改色</span>
@@ -1020,7 +1020,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
             : null
           if (editing) {
             return (
-              <motion.div key={n.id} variants={fadeScaleIn} initial="initial" animate="animate" style={{ ...cardStyle(h), boxShadow: `0 0 0 1.5px oklch(0.75 0.13 ${h} / .7)` }}>
+              <motion.div key={n.id} variants={fadeScaleIn} initial={false} animate="animate" style={{ ...cardStyle(h), boxShadow: `0 0 0 1.5px oklch(0.75 0.13 ${h} / .7)` }}>
                 <div style={{ display: 'flex', gap: 5 }}>
                   <input value={draft.emoji} onChange={(e) => setDraft((d) => d && { ...d, emoji: e.target.value })} style={{ ...inputBase, width: 38, textAlign: 'center', padding: '5px 2px' }} />
                   <input value={draft.title} onChange={(e) => setDraft((d) => d && { ...d, title: e.target.value })} placeholder="标题" style={{ ...inputBase, flex: 1, fontWeight: 700 }} />
@@ -1071,13 +1071,13 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
           const tasks = extractTasks(n.md)
           const cover = layout === 'gallery' ? firstImage(n.md) : null
           return (
-            <motion.div key={n.id} variants={fadeScaleIn} initial="initial" animate="animate" style={{ breakInside: 'avoid' }}>
+            <motion.div key={n.id} variants={fadeScaleIn} initial={false} animate="animate" style={{ breakInside: 'avoid' }}>
             {dayHead}
             <div id={'note-' + n.id} className="ai-card" onClick={selectMode ? () => toggleSel(n.id) : undefined} style={{ ...cardStyle(h, n.pinned), cursor: selectMode ? 'pointer' : undefined, ...(sel ? { boxShadow: `0 0 0 1.5px oklch(0.85 0.14 ${h}), 0 0 0 4px oklch(0.82 0.14 ${h} / .3)` } : focusId === n.id ? { boxShadow: `0 0 0 1.5px oklch(0.82 0.14 ${h} / .9), 0 0 0 4px oklch(0.8 0.14 ${h} / .28)` } : {}) }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
                 {selectMode && <span style={{ flex: 'none', width: 15, height: 15, borderRadius: 5, border: `1.5px solid oklch(0.7 0.1 ${h} / .6)`, background: sel ? `oklch(0.7 0.13 ${h})` : 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>{sel && <Check size={9} strokeWidth={3.5} />}</span>}
                 <span style={{ fontSize: 15, lineHeight: 1.2 }}>{n.emoji}</span>
-                <span style={{ flex: 1, color: `oklch(0.92 0.04 ${h})`, fontSize: FS.body - 0.5, fontWeight: 700, lineHeight: 1.35 }}>{n.pinned && <Pin size={10} strokeWidth={2.25} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 3, color: `oklch(0.8 0.12 ${h})` }} />}{n.title}</span>
+                <span style={{ flex: 1, color: ink(1), fontSize: FS.body - 0.5, fontWeight: 700, lineHeight: 1.35 }}>{n.pinned && <Pin size={10} strokeWidth={2.25} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 3, color: hueAccent(String(h)) }} />}{n.title}</span>
                 {!showTrash && <span className="hv" title={n.starred ? '取消收藏' : '收藏'} onClick={(e) => { e.stopPropagation(); p.onStar(n.id) }} style={{ flex: 'none', cursor: 'pointer', color: n.starred ? sem.warn : ink(4), display: 'inline-flex', marginTop: 1 }}><Star size={12.5} strokeWidth={2} fill={n.starred ? sem.warn : 'none'} /></span>}
               </div>
               {(layout === 'grid' || layout === 'timeline') && (
@@ -1093,7 +1093,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
               )}
               {/* 卡上任务直接勾选（便签即轻待办） */}
               {!showTrash && layout !== 'gallery' && tasks.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 8px', borderRadius: R.sm, background: 'rgba(0,0,0,.18)' }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 8px', borderRadius: R.sm, background: fill(2) }} onClick={(e) => e.stopPropagation()}>
                   {tasks.slice(0, 4).map((t) => (
                     <div key={t.line} className="hv" onClick={() => toggleTask(n, t.line)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                       <span style={{ flex: 'none', width: 12, height: 12, borderRadius: 4, border: `1.5px solid oklch(0.7 0.1 ${h} / .6)`, background: t.done ? `oklch(0.7 0.13 ${h})` : 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{t.done && <Check size={8} strokeWidth={3.5} />}</span>
@@ -1138,17 +1138,17 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
               </div>
               {/* AI 增强菜单 */}
               {aiMenuId === n.id && !showTrash && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4, padding: 7, borderRadius: R.md, background: 'rgba(0,0,0,.32)' }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4, padding: 7, borderRadius: R.md, background: fill(3) }} onClick={(e) => e.stopPropagation()}>
                   {NOTE_AI.map((a) => (
                     <div key={a.key} className="hv" title={a.hint} onClick={() => void runNoteAi(n, a.key)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 6px', borderRadius: R.sm, cursor: 'pointer', background: fill(1), color: ink(1), fontSize: FS.tiny - 1, fontWeight: 600 }}>
-                      <a.Icon size={11} strokeWidth={1.9} style={{ flex: 'none', color: `oklch(0.85 0.1 ${h} / .85)` }} />{a.label}
+                      <a.Icon size={11} strokeWidth={1.9} style={{ flex: 'none', color: hueAccent(String(h), .1, .85) }} />{a.label}
                     </div>
                   ))}
                 </div>
               )}
               {/* 灵感追加：直接追加 or AI 增强追加 */}
               {appendId === n.id && !showTrash && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: 7, borderRadius: R.md, background: 'rgba(0,0,0,.26)' }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: 7, borderRadius: R.md, background: fill(3) }} onClick={(e) => e.stopPropagation()}>
                   <textarea
                     autoFocus
                     value={appendText}
@@ -1173,8 +1173,8 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
 
       {/* 阅读模式浮层：大屏舒适排版（data-solid 保证命中检测放行点击） */}
       {readNote && (
-        <motion.div data-solid onMouseDown={() => setReadNote(null)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }} style={{ position: 'fixed', inset: 0, zIndex: 230, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(0.08 0.02 var(--ths) / .6)', backdropFilter: 'blur(5px)' }}>
-          <motion.div onMouseDown={(e) => e.stopPropagation()} variants={overlayPop} initial="initial" animate="animate" style={{ width: 'min(680px, 88vw)', maxHeight: '82vh', display: 'flex', flexDirection: 'column', borderRadius: R.overlay, overflow: 'hidden', background: `linear-gradient(165deg, oklch(0.24 0.045 ${colorOf(readNote.color)} / .98), oklch(0.16 0.03 ${colorOf(readNote.color)} / .99))`, border: `0.5px solid oklch(0.65 0.11 ${colorOf(readNote.color)} / .45)`, boxShadow: '0 24px 60px -18px rgba(0,0,0,.6)' }}>
+        <motion.div data-solid onMouseDown={() => setReadNote(null)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }} style={{ position: 'fixed', inset: 0, zIndex: 230, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(var(--overlay-mask-l) 0.02 var(--ths) / .6)', backdropFilter: 'blur(5px)' }}>
+          <motion.div onMouseDown={(e) => e.stopPropagation()} variants={overlayPop} initial="initial" animate="animate" style={{ width: 'min(680px, 88vw)', maxHeight: '82vh', display: 'flex', flexDirection: 'column', borderRadius: R.overlay, overflow: 'hidden', ...surface.overlay(), background: `linear-gradient(165deg, ${tintSurface(String(colorOf(readNote.color)), .82)}, oklch(var(--overlay-l) var(--surface-c) var(--ths) / .98))`, border: `0.5px solid ${hairline(.14)}` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 18px', borderBottom: `0.5px solid ${hairline(0.09)}` }}>
               <span style={{ fontSize: 19 }}>{readNote.emoji}</span>
               <span style={{ flex: 1, ...text.title(), fontWeight: 800 }}>{readNote.title}</span>
@@ -1200,8 +1200,8 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         if (!pool.length) return null
         const n = pool[flashIdx % pool.length]; const h = colorOf(n.color)
         return (
-          <motion.div data-solid onMouseDown={() => setFlashOpen(false)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }} style={{ position: 'fixed', inset: 0, zIndex: 230, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: 'oklch(0.08 0.02 var(--ths) / .7)', backdropFilter: 'blur(6px)' }}>
-            <motion.div onMouseDown={(e) => e.stopPropagation()} onClick={() => setFlashBack((v) => !v)} variants={overlayPop} initial="initial" animate="animate" style={{ width: 'min(520px, 86vw)', minHeight: 300, maxHeight: '62vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 12, padding: '30px 28px', borderRadius: R.overlay, cursor: 'pointer', background: `linear-gradient(165deg, oklch(0.3 0.06 ${h} / .96), oklch(0.17 0.035 ${h} / .99))`, border: `0.5px solid oklch(0.65 0.12 ${h} / .5)`, boxShadow: '0 24px 60px -18px rgba(0,0,0,.55)' }} className="ai-scroll">
+          <motion.div data-solid onMouseDown={() => setFlashOpen(false)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }} style={{ position: 'fixed', inset: 0, zIndex: 230, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: 'oklch(var(--overlay-mask-l) 0.02 var(--ths) / .7)', backdropFilter: 'blur(6px)' }}>
+            <motion.div onMouseDown={(e) => e.stopPropagation()} onClick={() => setFlashBack((v) => !v)} variants={overlayPop} initial="initial" animate="animate" style={{ width: 'min(520px, 86vw)', minHeight: 300, maxHeight: '62vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 12, padding: '30px 28px', borderRadius: R.overlay, cursor: 'pointer', ...surface.overlay(), background: `linear-gradient(165deg, ${tintSurface(String(h), .88, true)}, oklch(var(--overlay-l) var(--surface-c) var(--ths) / .98))`, border: `0.5px solid ${hairline(.16)}` }} className="ai-scroll">
               {!flashBack ? (
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 34 }}>{n.emoji}</div>
@@ -1229,9 +1229,9 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         if (!pool.length) return null
         const n = pool[showIdx % pool.length]; const h = colorOf(n.color)
         return (
-          <motion.div data-solid initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} style={{ position: 'fixed', inset: 0, zIndex: 231, display: 'flex', flexDirection: 'column', background: `radial-gradient(120% 90% at 50% 0%, oklch(0.28 0.06 ${h} / .5), oklch(0.06 0.02 var(--ths)) 70%)` }}>
+          <motion.div data-solid initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} style={{ position: 'fixed', inset: 0, zIndex: 231, display: 'flex', flexDirection: 'column', background: `radial-gradient(120% 90% at 50% 0%, oklch(0.28 0.06 ${h} / .5), oklch(0.06 0.02 var(--ths)) 70%)`, ...({ '--ink-l': '.96', '--line-l': '.96', '--fill-l': '.96', '--inset-l': '.1' } as React.CSSProperties) }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px' }}>
-              <span style={{ ...text.num(FS.small), color: ink(2) }}>{(showIdx % pool.length) + 1} / {pool.length}</span>
+              <span style={{ ...text.num(FS.small), color: solidInk(.72) }}>{(showIdx % pool.length) + 1} / {pool.length}</span>
               <Button sm icon={showAuto ? Pause : Play} onClick={() => setShowAuto((v) => !v)} style={showAuto ? { color: sem.calm } : undefined}>{showAuto ? '暂停' : '自动'}</Button>
               <span style={{ flex: 1 }} />
               <Button sm icon={X} onClick={() => setShowOpen(false)}>退出放映</Button>
@@ -1239,13 +1239,13 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
             <div className="ai-scroll" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '10px 8vw 40px' }}>
               <motion.div key={showIdx} variants={fadeScaleIn} initial="initial" animate="animate" style={{ maxWidth: 760, width: '100%' }}>
                 <div style={{ fontSize: 42, textAlign: 'center' }}>{n.emoji}</div>
-                <div style={{ color: ink(1), fontSize: 30, fontWeight: 900, textAlign: 'center', margin: '10px 0 26px', lineHeight: 1.3 }}>{n.title}</div>
+                <div style={{ color: solidInk(), fontSize: 30, fontWeight: 900, textAlign: 'center', margin: '10px 0 26px', lineHeight: 1.3 }}>{n.title}</div>
                 <div style={{ fontSize: 16, lineHeight: 1.85 }}><Markdown text={n.md} reader onWikiLink={(t) => { setShowOpen(false); jumpToTitle(t) }} /></div>
               </motion.div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 22, padding: '10px 0 20px' }}>
-              <IconButton icon={ChevronLeft} size={34} color={ink(1)} onClick={() => setShowIdx((i) => (i - 1 + pool.length) % pool.length)} />
-              <IconButton icon={ChevronRight} size={34} color={ink(1)} onClick={() => setShowIdx((i) => (i + 1) % pool.length)} />
+              <IconButton icon={ChevronLeft} size={34} color={solidInk()} onClick={() => setShowIdx((i) => (i - 1 + pool.length) % pool.length)} />
+              <IconButton icon={ChevronRight} size={34} color={solidInk()} onClick={() => setShowIdx((i) => (i + 1) % pool.length)} />
             </div>
           </motion.div>
         )
@@ -1255,7 +1255,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
       {poster && (() => {
         const url = renderPoster()
         return (
-          <motion.div data-solid onMouseDown={() => setPoster(null)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }} style={{ position: 'fixed', inset: 0, zIndex: 232, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: 'oklch(0.08 0.02 var(--ths) / .7)', backdropFilter: 'blur(6px)' }}>
+          <motion.div data-solid onMouseDown={() => setPoster(null)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }} style={{ position: 'fixed', inset: 0, zIndex: 232, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, background: 'oklch(var(--overlay-mask-l) 0.02 var(--ths) / .7)', backdropFilter: 'blur(6px)' }}>
             <motion.img onMouseDown={(e) => e.stopPropagation()} variants={overlayPop} initial="initial" animate="animate" src={url} alt="金句海报" style={{ maxWidth: 'min(620px, 84vw)', maxHeight: '64vh', borderRadius: R.lg, boxShadow: '0 16px 50px rgba(0,0,0,.5)' }} />
             <div onMouseDown={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 10 }}>
               <Button icon={Copy} onClick={() => { island.copyImage(url); flash('✓ 海报已复制') }}>复制</Button>

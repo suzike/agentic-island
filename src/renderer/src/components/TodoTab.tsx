@@ -79,7 +79,7 @@ const statPill = (color?: string): React.CSSProperties => ({
   color: color || ink(2), fontSize: FS.tiny, fontWeight: 600
 })
 const bulkBtn: React.CSSProperties = { height: 26, padding: '0 9px', borderRadius: R.sm, border: `0.5px solid ${hairline(0.09)}`, background: fill(2), color: ink(1), cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.tiny, fontWeight: 650 }
-const detailInput: React.CSSProperties = { boxSizing: 'border-box', borderRadius: R.sm, border: `0.5px solid ${hairline(0.08)}`, background: 'rgba(0,0,0,.24)', color: ink(1), padding: '6px 8px', outline: 'none', fontFamily: 'var(--font)', fontSize: FS.tiny }
+const detailInput: React.CSSProperties = { boxSizing: 'border-box', borderRadius: R.sm, border: `0.5px solid ${hairline(0.08)}`, background: surface.inset().background, color: ink(1), padding: '6px 8px', outline: 'none', fontFamily: 'var(--font)', fontSize: FS.tiny }
 const microBtn: React.CSSProperties = { height: 25, padding: '0 8px', borderRadius: R.sm, border: `0.5px solid ${hairline(0.07)}`, background: fill(1), color: ink(2), cursor: 'pointer', fontFamily: 'var(--font)', fontSize: FS.tiny, fontWeight: 650, display: 'inline-flex', alignItems: 'center', gap: 3 }
 
 /* ---------- 进度环 ---------- */
@@ -832,7 +832,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                       onKeyDown={(e) => { if (e.key === 'Enter' && addText.trim()) { p.onQuickAdd(addText.trim(), key); setAddText('') } else if (e.key === 'Escape') setAddingCol(null) }}
                       onBlur={() => { if (!addText.trim()) setAddingCol(null) }}
                       placeholder="回车添加 · Esc 取消"
-                      style={{ background: 'rgba(0,0,0,.3)', border: `0.5px solid ${semBg(col, 0.45)}`, borderRadius: R.sm, outline: 'none', color: ink(1), fontSize: 10.5, padding: '6px 9px' }}
+                      style={{ background: surface.inset().background, border: `0.5px solid ${semBg(col, 0.45)}`, borderRadius: R.sm, outline: 'none', color: ink(1), fontSize: 10.5, padding: '6px 9px' }}
                     />
                   )}
                   {/* 卡片 */}
@@ -946,7 +946,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                           value={edit.text}
                           onChange={(e) => setEdit((s) => s && { ...s, text: e.target.value })}
                           onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEdit(null) }}
-                          style={{ ...inputBase, fontSize: FS.body, background: 'rgba(0,0,0,.3)', border: `0.5px solid ${accent(0.7, 0.5)}`, borderRadius: R.sm, padding: '5px 8px' }}
+                          style={{ ...inputBase, fontSize: FS.body, background: surface.inset().background, border: `0.5px solid ${accent(0.7, 0.5)}`, borderRadius: R.sm, padding: '5px 8px' }}
                         />
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <input type="datetime-local" value={edit.due} onChange={(e) => setEdit((s) => s && { ...s, due: e.target.value })} style={{ background: fill(2), border: `0.5px solid ${hairline(0.1)}`, borderRadius: R.sm, color: ink(1), colorScheme: 'dark', fontSize: 10, padding: '3.5px 7px', outline: 'none', fontFamily: 'ui-monospace,monospace' }} />
@@ -998,7 +998,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                   <div style={{ padding: '2px 12px 11px 40px', display: 'flex', flexDirection: 'column', gap: 8, animation: 'ai-fadein .2s ease' }}>
                     {/* 子任务：进度条 + 列表 + 连续添加 + AI 拆解 */}
                     {subs.length > 0 && (
-                      <div style={{ height: 3.5, borderRadius: R.pill, background: 'rgba(0,0,0,.3)', overflow: 'hidden' }}>
+                      <div style={{ height: 3.5, borderRadius: R.pill, background: fill(3), overflow: 'hidden' }}>
                         <div style={{ height: '100%', width: `${subs.length ? (subsDone / subs.length) * 100 : 0}%`, borderRadius: R.pill, background: `linear-gradient(90deg, ${accent(0.7)}, ${accent(0.82)})`, transition: 'width .35s ease' }} />
                       </div>
                     )}
@@ -1018,7 +1018,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                         onChange={(e) => setSubDraft(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') addSub(t.id) }}
                         placeholder="添加子任务，Enter 连续添加…"
-                        style={{ ...inputBase, flex: 1, fontSize: FS.small, background: 'rgba(0,0,0,.25)', border: `0.5px solid ${hairline(0.09)}`, borderRadius: R.sm, padding: '5.5px 9px' }}
+                        style={{ ...inputBase, flex: 1, fontSize: FS.small, background: surface.inset().background, border: `0.5px solid ${hairline(0.09)}`, borderRadius: R.sm, padding: '5.5px 9px' }}
                       />
                       <span className="hv" onClick={() => breakdown(t.id)} title="AI 把这个任务拆解成子步骤" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 4, padding: '0 11px', borderRadius: R.sm, cursor: 'pointer', background: semBg(accent(), 0.18), border: `0.5px solid ${accent(0.7, 0.4)}`, color: accent(0.88), fontSize: 10.5, fontWeight: 700 }}>
                         <Ico.ai size={11} strokeWidth={2} />{breaking === t.id ? '拆解中…' : 'AI 拆解'}
@@ -1073,10 +1073,10 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                       placeholder="备注（支持 Markdown，失焦保存）…"
                       rows={2}
                       className="ai-scroll"
-                      style={{ ...inputBase, width: '100%', boxSizing: 'border-box', fontSize: FS.small, lineHeight: 1.5, background: 'rgba(0,0,0,.25)', border: `0.5px solid ${hairline(0.09)}`, borderRadius: R.sm, padding: '6px 9px', resize: 'none', maxHeight: 80 }}
+                      style={{ ...inputBase, width: '100%', boxSizing: 'border-box', fontSize: FS.small, lineHeight: 1.5, background: surface.inset().background, border: `0.5px solid ${hairline(0.09)}`, borderRadius: R.sm, padding: '6px 9px', resize: 'none', maxHeight: 80 }}
                     />
                     {t.note && (
-                      <div style={{ padding: '6px 9px', borderRadius: R.sm, background: 'rgba(0,0,0,.18)', fontSize: FS.small }}>
+                      <div style={{ padding: '6px 9px', borderRadius: R.sm, background: fill(2), fontSize: FS.small }}>
                         <Markdown text={t.note} />
                       </div>
                     )}

@@ -14,7 +14,7 @@ import { ProjectContextBar } from './ProjectContextBar'
 import { Ico, type LucideIcon } from '../ui/icons'
 import { Button, Chip, EmptyState, IconButton, Input } from '../ui/components'
 import { fadeScaleIn, overlayPop, staggerContainer, staggerItem } from '../ui/motion'
-import { accent, accent2, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accent, accent2, fill, FS, hairline, hueAccent, ink, R, sem, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface Props {
   projects: WorkbenchProject[]
@@ -282,7 +282,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
 
       {/* AI 造指令 */}
       {genOpen && (
-        <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: SP.md, ...surface.card(), border: `0.5px solid ${accent(0.7, 0.3)}` }}>
+        <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: SP.md, ...surface.card(), border: `0.5px solid ${accent(0.7, 0.3)}` }}>
           <textarea value={genText} onChange={(e) => setGenText(e.target.value)} placeholder={'大白话描述你想一键完成的重复操作，比如：\n· 把剪贴板里的报错发给 Codex 在我的项目里修\n· 选中的英文段落翻译成中文再存成便签\n· 生成今天的 git 提交并直接提交'} rows={3} className="ai-scroll" style={{ ...inp, width: '100%', resize: 'none', lineHeight: 1.55, maxHeight: 110 }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Button sm variant="primary" icon={genBusy ? undefined : Ico.ai} disabled={!genText.trim() || genBusy} onClick={() => void generate()}>{genBusy ? '生成中…' : '生成指令'}</Button>
@@ -311,13 +311,13 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
       )}
 
       {/* 指令网格 */}
-      <motion.div variants={staggerContainer} initial="initial" animate="animate" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: SP.sm }}>
+      <motion.div variants={staggerContainer} initial={false} animate="animate" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: SP.sm }}>
         {filtered.map((s) => {
           const meta = GROUP_META[s.group] || GROUP_META['自定义']
           return (
-          <motion.div key={s.id} variants={staggerItem} className="ai-card" onClick={() => void runIt(s)} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '11px 12px', ...surface.card(), background: `linear-gradient(145deg, oklch(0.27 0.035 ${meta.hue} / .15), ${fill(2)})`, cursor: 'pointer' }}>
+          <motion.div key={s.id} variants={staggerItem} className="ai-card" onClick={() => void runIt(s)} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '11px 12px', ...surface.card(), background: `linear-gradient(145deg, ${tintSurface(String(meta.hue), .38)}, ${fill(2)})`, cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 24, height: 24, borderRadius: R.sm, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 13, background: `oklch(0.38 0.08 ${meta.hue} / .35)`, color: `oklch(0.88 0.12 ${meta.hue})`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,.08)' }}>{s.icon}</span>
+              <span style={{ width: 24, height: 24, borderRadius: R.sm, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 13, background: tintSurface(String(meta.hue), .72, true), color: hueAccent(String(meta.hue), .12) }}>{s.icon}</span>
               <span style={{ flex: 1, minWidth: 0, ...text.subtitle(), fontSize: FS.body, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
               {s.steps.some((x) => x.kind === 'agent') && <span title="调用本地 Agent" style={{ display: 'inline-flex', color: sem.focus }}><Ico.agent size={11} strokeWidth={2} /></span>}
               {needsRepo(s) && <span title="需要选目标仓库" style={{ display: 'inline-flex', color: ink(3) }}><Ico.repos size={11} strokeWidth={2} /></span>}
@@ -338,7 +338,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
 
       {/* 运行浮层 */}
       {run && (
-        <div data-solid onMouseDown={() => { if (!run.active) setRun(null) }} style={{ position: 'fixed', inset: 0, zIndex: 226, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(0.08 0.02 var(--ths) / .55)', backdropFilter: 'blur(4px)', animation: 'ai-fadein .15s ease' }}>
+        <div data-solid onMouseDown={() => { if (!run.active) setRun(null) }} style={{ position: 'fixed', inset: 0, zIndex: 226, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(var(--overlay-mask-l) 0.02 var(--ths) / .55)', backdropFilter: 'blur(4px)', animation: 'ai-fadein .15s ease' }}>
           <motion.div variants={overlayPop} initial="initial" animate="animate" onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(580px, 90vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...surface.overlay(), borderRadius: R.xl }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '12px 15px', borderBottom: `0.5px solid ${hairline(0.08)}` }}>
               <span style={{ fontSize: 15 }}>{run.icon}</span>
@@ -449,7 +449,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
 
       {/* 编辑器浮层 */}
       {edit && (
-        <div data-solid onMouseDown={() => setEdit(null)} style={{ position: 'fixed', inset: 0, zIndex: 225, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(0.08 0.02 var(--ths) / .55)', backdropFilter: 'blur(4px)', animation: 'ai-fadein .15s ease' }}>
+        <div data-solid onMouseDown={() => setEdit(null)} style={{ position: 'fixed', inset: 0, zIndex: 225, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(var(--overlay-mask-l) 0.02 var(--ths) / .55)', backdropFilter: 'blur(4px)', animation: 'ai-fadein .15s ease' }}>
           <motion.div variants={overlayPop} initial="initial" animate="animate" onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(600px, 92vw)', maxHeight: '86vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...surface.overlay(), borderRadius: R.xl }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 15px', borderBottom: `0.5px solid ${hairline(0.08)}` }}>
               <Ico.shortcuts size={15} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />

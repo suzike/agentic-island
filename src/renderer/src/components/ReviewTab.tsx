@@ -17,7 +17,7 @@ import { InsightsPanel } from './InsightsPanel'
 import { PetPanel } from './PetPanel'
 import { Button, Chip, IconButton } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accent, accent2, FS, ink, R, sem, SP, surface, text } from '../ui/tokens'
+import { accent, FS, ink, R, sem, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface ReviewTabProps {
   todos: TodoItem[]
@@ -110,12 +110,12 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
       {/* 晨间简报：今日作战地图（聚合日程+待办+资讯+昨日复盘） */}
       <motion.div
         variants={fadeScaleIn}
-        initial="initial"
+        initial={false}
         animate="animate"
         style={{
           padding: `${SP.md + 1}px ${SP.md + 2}px`,
           borderRadius: R.xl,
-          background: `linear-gradient(135deg, ${accent(0.34, 0.5)}, ${accent2(0.26, 0.3)})`,
+          background: `linear-gradient(135deg, ${tintSurface('var(--th)', .72)}, ${tintSurface('var(--th2)', .5, true)})`,
           border: `0.5px solid ${accent(0.65, 0.3)}`,
           boxShadow: `0 8px 24px -12px ${accent(0.5, 0.4)}`,
           display: 'flex',
@@ -154,7 +154,7 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
       </div>
 
       {/* 事实卡 */}
-      <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', gap: 7 }}>
+      <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', gap: 7 }}>
         <Stat n={facts.doneTodos.length} label="完成待办" />
         <Stat n={facts.activities.length} label="编码会话" />
         <Stat n={facts.projects.length} label="涉及项目" />
@@ -162,7 +162,7 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
       </motion.div>
 
       {/* 今日复盘 */}
-      <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm }}>
+      <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <NotebookPen size={13} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
           <span style={{ ...text.subtitle(), fontSize: FS.body }}>{sel === todayKey ? '今日复盘' : '当日复盘'}</span>
@@ -210,7 +210,7 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
       </motion.div>
 
       {/* 周报 */}
-      <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm, marginTop: 2 }}>
+      <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm, marginTop: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <BarChart3 size={13} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
           <span style={{ ...text.subtitle(), fontSize: FS.body }}>本周周报</span>

@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img" aria-labelledby="title desc">
+  <title id="title">Agentic-Island 录屏合成与交付管线</title>
+  <desc id="desc">展示显示器和窗口来源、统一裁剪坐标、Canvas 合成、分片落盘、工程剪辑、AI 增强与 FFmpeg 导出的完整链路。</desc>
+  <defs>
+    <style>
+      .t{font-family:"Segoe UI","Microsoft YaHei",sans-serif;fill:#f6f2ff}.h{font-size:24px;font-weight:700}.l{font-size:15px;font-weight:650}.s{font-size:12px}.m{fill:#aaa2be}.b{rx:13;stroke-width:1.2}.p{fill:none;stroke:#d99a54;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#d99a54"/></marker>
+  </defs>
+  <rect width="1200" height="650" fill="#100d1a"/>
+  <text class="t h" x="45" y="48">专业录屏 · 从真实来源到可恢复工程与多格式成片</text>
+  <text class="t m s" x="45" y="73">预览、定位框和最终录制共享同一组源裁剪参数；素材分片落盘，剪辑保持非破坏</text>
+
+  <rect class="b" x="45" y="120" width="178" height="118" fill="#1e1836" stroke="#473b76"/>
+  <text class="t l" x="66" y="153">采集来源</text>
+  <text class="t m s" x="66" y="181">显示器 / 窗口</text>
+  <text class="t m s" x="66" y="202">系统音频 / 麦克风</text>
+  <text class="t m s" x="66" y="223">摄像头 / 人物形象</text>
+
+  <rect class="b" x="263" y="120" width="196" height="118" fill="#1f1a38" stroke="#c9884a"/>
+  <text class="t l" x="284" y="153">统一合成坐标</text>
+  <text class="t m s" x="284" y="181">真实媒体帧尺寸</text>
+  <text class="t m s" x="284" y="202">区域 + contain / cover</text>
+  <text class="t m s" x="284" y="223">动态聚焦 + 实时定位框</text>
+
+  <rect class="b" x="499" y="120" width="196" height="118" fill="#282414" stroke="#d9a441"/>
+  <text class="t l" x="520" y="153">Canvas 实时合成</text>
+  <text class="t m s" x="520" y="181">鼠标光效 / 运镜</text>
+  <text class="t m s" x="520" y="202">画中画 / 动漫化</text>
+  <text class="t m s" x="520" y="223">水印 / 时间 / 隐私遮挡</text>
+
+  <rect class="b" x="735" y="120" width="196" height="118" fill="#201b2d" stroke="#806bb0"/>
+  <text class="t l" x="756" y="153">MediaRecorder</text>
+  <text class="t m s" x="756" y="181">Canvas captureStream</text>
+  <text class="t m s" x="756" y="202">Web Audio 混音</text>
+  <text class="t m s" x="756" y="223">暂停 / 恢复 / 健康度</text>
+
+  <rect class="b" x="971" y="120" width="184" height="118" fill="#302019" stroke="#a96549"/>
+  <text class="t l" x="992" y="153">顺序分片落盘</text>
+  <text class="t m s" x="992" y="181">RecordingSessionStore</text>
+  <text class="t m s" x="992" y="202">manifest + chunk index</text>
+  <text class="t m s" x="992" y="223">异常中断可恢复</text>
+
+  <path class="p" d="M223 179H255"/><path class="p" d="M459 179H491"/><path class="p" d="M695 179H727"/><path class="p" d="M931 179H963"/>
+
+  <rect class="b" x="150" y="330" width="250" height="136" fill="#1e1836" stroke="#473b76"/>
+  <text class="t l" x="174" y="364">非破坏剪辑工程 v2</text>
+  <text class="t m s" x="174" y="393">视频 / 音频 / 章节三轨</text>
+  <text class="t m s" x="174" y="416">拆分 / 修剪 / 调色 / 字幕</text>
+  <text class="t m s" x="174" y="439">自动保存 / 副本 / 跨重启续编</text>
+
+  <rect class="b" x="475" y="330" width="250" height="136" fill="#282414" stroke="#d9a441"/>
+  <text class="t l" x="499" y="364">AI 辅助层</text>
+  <text class="t m s" x="499" y="393">音频转写 / SRT / VTT</text>
+  <text class="t m s" x="499" y="416">结构化粗剪 / 章节 / 质检</text>
+  <text class="t m s" x="499" y="439">隐私审查 / 发布资产建议</text>
+
+  <rect class="b" x="800" y="330" width="250" height="136" fill="#201b2d" stroke="#806bb0"/>
+  <text class="t l" x="824" y="364">内置 FFmpeg 导出</text>
+  <text class="t m s" x="824" y="393">MP4 / WebM / GIF / MP3</text>
+  <text class="t m s" x="824" y="416">分辨率 / 帧率 / 字幕轨</text>
+  <text class="t m s" x="824" y="439">小体积 / 视觉无损 / 无损归档</text>
+
+  <path class="p" d="M1063 246V285H275V322"/>
+  <path class="p" d="M400 398H467"/><path class="p" d="M725 398H792"/>
+
+  <rect x="150" y="535" width="900" height="66" rx="14" fill="#181430" stroke="#332a52"/>
+  <text class="t l" x="180" y="564">可靠性约束</text>
+  <text class="t m s" x="180" y="588">应用自身窗口过滤 · Canvas 收起不卸载 · 分片严格顺序 · 导出可取消 · 临时目录清理 · 双显示器/DPI 实机回归</text>
+</svg>

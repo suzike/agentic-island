@@ -48,7 +48,7 @@ export function CalcSheet({ open, value, onChange, onClose }: { open: boolean; v
             spellCheck={false}
             placeholder={'# 直接写表达式，回车换行\n2 + 3 * 4\nr = 0.05\narea = PI * r**2\ncToK(90)\navg(23, 25, 27)'}
             className="ai-scroll"
-            style={{ flex: 2, minWidth: 0, resize: 'none', background: 'rgba(0,0,0,.24)', border: 'none', outline: 'none', color: ink(1), fontSize: FS.body + 0.5, lineHeight: `${LH}px`, fontFamily: "'Cascadia Code', Consolas, ui-monospace, monospace", padding: `${SP.md}px ${SP.md + 2}px`, whiteSpace: 'pre', overflow: 'auto' }}
+            style={{ flex: 2, minWidth: 0, resize: 'none', background: surface.inset().background, border: 'none', outline: 'none', color: ink(1), fontSize: FS.body + 0.5, lineHeight: `${LH}px`, fontFamily: "'Cascadia Code', Consolas, ui-monospace, monospace", padding: `${SP.md}px ${SP.md + 2}px`, whiteSpace: 'pre', overflow: 'auto' }}
           />
           {/* 结果 */}
           <div ref={resRef} className="ai-scroll" style={{ flex: 1, minWidth: 130, overflow: 'hidden', borderLeft: `0.5px solid ${hairline(0.1)}`, padding: `${SP.md}px ${SP.md + 2}px`, background: fill(1) }}>

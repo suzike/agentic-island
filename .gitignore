@@ -2,6 +2,7 @@
 node_modules/
 out/
 dist/
+.tmp-electron-dist/
 build/*.exe
 *.tsbuildinfo
 

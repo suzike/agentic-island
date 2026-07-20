@@ -6,14 +6,14 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 这**已经不是设计交付包**，而是一个功能完整、可打包安装的 Windows 桌面应用 **Agentic-Island（灵动岛）**：常驻屏幕顶部的 AI 编码 Agent 监控/审批/协作面板 + 个人工作台。技术栈 **Electron 39 + React 19 + TypeScript**（electron-vite 构建，Vite 锁在 5.x）。已产出 NSIS 安装包（`dist/Agentic-Island-Setup-*.exe`）。
 
-`Vibeisland Windows 端复刻-handoff/` 是最初的 Codex Design 设计交付包（PRD + 高保真原型），**只作历史设计参考，勿改动**；视觉规范（OKLCH 主题、动效、字体栈）源于其中。
+历史设计交付包不属于当前运行时源码；当前行为以 `src/`、`scripts/`、`docs/` 和自动化测试为准。
 
 ## 常用命令
 
 ```bash
 npm run dev          # 开发运行（app ready 会自动安装全局 hooks；AIISLAND_SKIP_HOOKS=1 可跳过）
 npm run typecheck    # 两套 tsconfig（node=main/preload+shared, web=renderer+shared）
-npm test             # 顺序执行 23 个离线 test-*.ts（排除真实 Claude 登录探针）
+npm test             # 顺序执行 31 个离线 test-*.ts（排除真实 Claude 登录探针）
 npm run build        # electron-vite 三端构建
 npm run package      # NSIS 安装包（原生模块经 asarUnpack **/*.node）
 npm run docs:capture # 隔离演示数据启动 Electron，重建 README 真实截图
@@ -31,22 +31,27 @@ node --experimental-strip-types scripts/test-quote.ts       # 问答引用组装
 node --experimental-strip-types scripts/test-external-yield.ts # 外部应用让位
 node --experimental-strip-types scripts/test-shortcuts.ts   # 快捷编排与安全闸
 node --experimental-strip-types scripts/test-todo.ts        # 待办规划/统计/导入导出
+node --experimental-strip-types scripts/test-recording.ts   # 录屏几何、时钟、字幕与 FFmpeg 参数
+node --experimental-strip-types scripts/test-recording-session.ts # 分片落盘与异常恢复
+node --experimental-strip-types scripts/test-recording-project.ts # v2 工程保存、复制与迁移
+node --experimental-strip-types scripts/test-recording-export-e2e.ts # 真实 FFmpeg 导出
 ```
 
 ## 架构总览
 
 ```
-Codex (CLI/桌面端) ──hooks──► src/hooks-bin/cc-forward.mjs ──HTTP 127.0.0.1──►┐
+Claude Code (CLI/桌面端) ──hooks──► src/hooks-bin/cc-forward.mjs ──HTTP 127.0.0.1──►┐
 Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts（轮询跟随）──────────►│
                                                                                     ▼
               ┌────────────────────── Electron 主进程 (src/main) ──────────────────────┐
               │ bridge-server  本地桥(随机端口+token→~/.agentic-island/bridge.json,    │
               │                15s 自愈防覆盖)；permission 事件阻塞至用户裁决           │
-              │ agents-store   Agent 状态机(会话键=backend:sessionId；done 3min 自动隐藏)│
+              │ agents-store   Agent 状态机(会话键=backend:sessionId；SessionEnd 即移除)│
               │ hook-installer 合并式安装/卸载 ~/.Codex settings.json + ~/.codex hooks │
               │ term-pty       真 PTY 终端(@lydell/node-pty N-API, ConPTY, 多会话)      │
               │ calendar-ics / calendar-caldav  飞书日历(CalDAV multiget 两段式)        │
               │ rss / media(SMTC) / clipboard-watch / sound / llm-proxy / git-summary  │
+              │ recording-session / project / export  分片落盘、工程与 FFmpeg 导出    │
               │ terminal-jump(HWND/UIA 切 WT 标签页) / settings-store(DPAPI 加密)      │
               └───────────────────────────┬── Electron IPC ────────────────────────────┘
                                           ▼
@@ -65,6 +70,7 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 - **协议契约**：`src/shared/protocol.ts`（三端共用；`IslandBridgeApi` 是 preload 暴露的全部能力面）。
 - **Codex 接入**：全生命周期 hooks（SessionStart/UserPromptSubmit/PreToolUse/Stop/Notification/SessionEnd）。PreToolUse 对非只读工具**阻塞审批**（stdout 返回 permissionDecision）；deny 理由回传实现接力 steer；ExitPlanMode→计划审阅；Stop→"等待回复"+ transcript 尾部提取最后回复 + turnEnd 触发 git 小结。
 - **Codex 接入**：rollout 日志跟随为主（`~/.codex/sessions/**/rollout-*.jsonl`，只监控无审批，15min 空闲自动归档）；hooks 桌面端实测会触发（审批可用），CLI 不触发。**CLI/桌面端无法区分**（originator 恒为 codex-tui），统一标 "Codex"。
+- **专业录屏**：`ScreenRecorderStudio.tsx` 负责采集、Canvas 合成与工作台；`logic/recording.ts` 是坐标/时钟/字幕纯逻辑；主进程 `recording-session-store.ts`、`recording-project-store.ts`、`recording-export.ts` 负责磁盘会话、工程和 FFmpeg。
 
 ## 关键工程约束（踩过的坑，勿重蹈）
 
@@ -80,11 +86,13 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 10. **视觉体系**：OKLCH 色相令牌（`--th/--th2/--ths` + `--cs/--css` 饱和倍率、`--pl` 面板明度倍率），主题在 `logic/themes.ts`；语义色（琥珀警示 75 / 红危险 / 紫专注）跨主题固定。组件样式一律走 `ui/tokens.ts` + `ui/components.tsx`（见上方"设计系统"），动效用 `ui/motion.ts`（framer-motion）+ `src/renderer/index.html` 的全局 keyframes/class（.hv/.ai-card/.ai-scroll/.row-acts 仍保留使用）。
 11. **原生依赖只用 N-API 预编译包**（@lydell/node-pty）——避免依赖用户机 node-gyp、Python 与 Visual Studio 构建链。
 12. **外网请求走 electron `net.fetch`**（继承系统代理）；Node 全局 fetch 不认代理（GitHub API 等会连不上）。
+13. **录屏定位框与成片必须共用源裁剪参数**：显示器/窗口先以实际媒体轨尺寸为准，区域、`contain/cover` 和运镜统一走 `recordingFitComposition` / `recordingFocusCrop`；控制条收起只能隐藏工作台，不能卸载 Canvas。
 
 ## 数据与持久化
 
 - 渲染层状态经 `save-state` IPC 持久化到 `userData/config.json`（DPAPI 加密，含 API Key/CalDAV 密码）。**水合只执行一次且覆盖式**（StrictMode 双调用曾致待办翻倍）。
 - 运行时发现文件/缓存：`~/.agentic-island/`（bridge.json、events.log、sound.log、tc-*.json 终端句柄缓存）。
+- 录屏素材与工程：Electron `userData/recordings`、`userData/recording-projects`（分片 manifest + 非破坏编辑参数）。
 - AI 能力统一走 `llm-proxy`（OpenAI 兼容 /chat/completions，多轮 history，deep 模式 3000 tokens，reasoning_content 捕获，多模态 parts 带图）。
 
 ## 工作约定

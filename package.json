@@ -1,6 +1,6 @@
 {
   "name": "agentic-island",
-  "version": "0.3.0",
+  "version": "0.5.1",
   "description": "常驻 Windows 屏幕顶部的 AI 编码 Agent 状态监控、审批与协作面板",
   "main": "./out/main/index.js",
   "author": "Agentic-Island",
@@ -21,9 +21,11 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "electron-store": "^10.0.0",
+    "ffmpeg-static": "^5.2.0",
     "framer-motion": "^12.42.2",
     "lucide-react": "^0.468.0",
     "mammoth": "^1.12.0",
+    "onnxruntime-web": "^1.27.0",
     "pdf-parse": "^2.4.5"
   },
   "build": {
@@ -36,7 +38,8 @@
       "out/**/*"
     ],
     "asarUnpack": [
-      "**/*.node"
+      "**/*.node",
+      "node_modules/ffmpeg-static/**"
     ],
     "extraResources": [
       {
@@ -46,6 +49,10 @@
       {
         "from": "build/icon-256.png",
         "to": "icon-256.png"
+      },
+      {
+        "from": "resources/models",
+        "to": "models"
       }
     ],
     "win": {

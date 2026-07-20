@@ -121,7 +121,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
   const repoCard = (repo: GitHubRepo): React.JSX.Element => {
     const saved = bookmarks.some((b) => b.fullName === repo.fullName)
     return (
-      <motion.div key={repo.fullName} variants={fadeScaleIn} initial="initial" animate="animate" className="ai-card"
+      <motion.div key={repo.fullName} variants={fadeScaleIn} initial={false} animate="animate" className="ai-card"
         style={{ padding: `${SP.md}px ${SP.md + 1}px`, ...surface.card(), display: 'flex', flexDirection: 'column', gap: SP.sm - 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {repo.avatar && <img src={repo.avatar} alt="" style={{ width: 20, height: 20, borderRadius: R.sm - 1, flex: 'none', border: `0.5px solid ${hairline(0.12)}` }} />}
@@ -244,7 +244,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
       {view === 'github' && (
         <>
           {!myUser ? (
-            <motion.div variants={fadeScaleIn} initial="initial" animate="animate" className="ai-card"
+            <motion.div variants={fadeScaleIn} initial={false} animate="animate" className="ai-card"
               style={{ display: 'flex', flexDirection: 'column', gap: SP.sm + 1, padding: SP.lg - 2, ...surface.card() }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                 <Github size={14} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
@@ -271,7 +271,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
             </motion.div>
           ) : (
             <>
-              <motion.div variants={fadeScaleIn} initial="initial" animate="animate" className="ai-card"
+              <motion.div variants={fadeScaleIn} initial={false} animate="animate" className="ai-card"
                 style={{ display: 'flex', alignItems: 'center', gap: 10, padding: `${SP.md - 1}px ${SP.md + 1}px`, ...surface.card(true) }}>
                 {myUser.avatar && <img src={myUser.avatar} alt="" style={{ width: 40, height: 40, borderRadius: R.md, border: `0.5px solid ${hairline(0.12)}` }} />}
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -312,7 +312,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
             const s = status[r.path]
             const dot = s?.ok ? (s.dirty ? sem.warn : sem.calm) : ink(3)
             return (
-              <motion.div key={r.path} variants={fadeScaleIn} initial="initial" animate="animate" className="ai-card"
+              <motion.div key={r.path} variants={fadeScaleIn} initial={false} animate="animate" className="ai-card"
                 style={{ padding: `${SP.md - 1}px ${SP.md}px`, ...surface.card(), display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ flex: 'none', width: 8, height: 8, borderRadius: R.pill, background: dot }} />

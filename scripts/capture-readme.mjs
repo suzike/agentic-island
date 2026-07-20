@@ -25,16 +25,16 @@ const demoState = {
     ruleMeetingNote: true, desktopWidget: false
   },
   workbenchProjects: [{
-    id: 'docs-project', name: 'Agentic-Island v0.2', repoPath: 'C:\\Work\\Agentic-Island',
+    id: 'docs-project', name: 'Agentic-Island v0.5.1', repoPath: 'C:\\Work\\Agentic-Island',
     objective: '完成桌面 Agent 工作台的产品化发布', status: 'active', colorHue: 155,
     createdAt: now - 12 * day, updatedAt: now
   }],
   activeProjectId: 'docs-project',
   todos: [
-    { id: 1, text: '完成 Release 候选版本回归', done: false, status: 'doing', priority: 1, projectId: 'docs-project', project: 'Agentic-Island v0.2', tags: ['发布', '回归'], energy: 'deep', acceptance: '类型检查、测试、构建与安装包全部通过', estimate: 90, spent: 35, due: now + 3_600_000, createdAt: now - day },
-    { id: 2, text: '核对 Agent 审批与外部窗口让位', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.2', tags: ['Agent', '交互'], energy: 'normal', acceptance: '审批闭环和外部打开流程可重复验证', estimate: 45, createdAt: now - day },
-    { id: 3, text: '更新架构图与功能矩阵', done: true, status: 'done', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.2', tags: ['文档'], estimate: 60, spent: 52, doneAt: now - 2_000_000, createdAt: now - 2 * day },
-    { id: 4, text: '整理下个迭代的性能指标', done: false, status: 'todo', priority: 3, projectId: 'docs-project', project: 'Agentic-Island v0.2', tags: ['规划'], energy: 'light', estimate: 25, createdAt: now }
+    { id: 1, text: '完成录屏工坊发布回归', done: false, status: 'doing', priority: 1, projectId: 'docs-project', project: 'Agentic-Island v0.5.1', tags: ['发布', '录屏'], energy: 'deep', acceptance: '双显示器、区域定位、录制预览和导出全部通过', estimate: 90, spent: 58, due: now + 3_600_000, createdAt: now - day },
+    { id: 2, text: '核对 Agent 审批与外部窗口让位', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.5.1', tags: ['Agent', '交互'], energy: 'normal', acceptance: '审批闭环和外部打开流程可重复验证', estimate: 45, createdAt: now - day },
+    { id: 3, text: '更新架构图、截图与功能矩阵', done: true, status: 'done', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.5.1', tags: ['文档'], estimate: 60, spent: 52, doneAt: now - 2_000_000, createdAt: now - 2 * day },
+    { id: 4, text: '验证 NSIS 安装包与 SHA-256', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.5.1', tags: ['发布'], energy: 'light', estimate: 25, createdAt: now }
   ],
   notes: [
     { id: 11, emoji: '🧭', title: '产品原则', md: '## 不打断，但始终可控\n\n- Agent 状态必须实时可见\n- 外部操作时主动让出桌面焦点\n- 数据默认留在本机', color: 'sky', tags: ['产品', '原则'], pinned: true, createdAt: now - 4 * day, updatedAt: now },
@@ -153,14 +153,21 @@ try {
   await sleep(300)
 
   const capture = async (tab, filename) => {
-    await evaluate(`(() => {
-      const tab = [...document.querySelectorAll('.noscrollbar > div')].find((el) => el.textContent?.trim().startsWith(${JSON.stringify(tab)}))
-      tab?.click()
+    const switched = await evaluate(`(() => {
+      const tab = [...document.querySelectorAll('[role="tab"][data-main-tab]')].find((el) => el.textContent?.trim().startsWith(${JSON.stringify(tab)}))
+      if (!tab) return false
+      tab.click()
       const scroller = [...document.querySelectorAll('.ai-scroll')].find((el) => el.closest('[data-solid]'))
       if (scroller) scroller.scrollTop = 0
-      return Boolean(tab)
+      return true
     })()`)
+    if (!switched) throw new Error(`No main tab found for ${tab}`)
     await sleep(tab === '终端' ? 1_000 : 450)
+    const active = await evaluate(`(() => {
+      const tab = document.querySelector('[role="tab"][aria-selected="true"]')
+      return Boolean(tab?.textContent?.trim().startsWith(${JSON.stringify(tab)}))
+    })()`)
+    if (!active) throw new Error(`Main tab did not switch to ${tab}`)
     const rect = await evaluate(`(() => {
       const candidates = [...document.querySelectorAll('[data-solid]')].map((el) => ({ el, r: el.getBoundingClientRect() }))
       const hit = candidates.filter((x) => x.r.width > 500 && x.r.height > 200).sort((a, b) => b.r.width * b.r.height - a.r.width * a.r.height)[0]
@@ -176,13 +183,33 @@ try {
     process.stdout.write(`captured ${filename}\n`)
   }
 
-  await capture('问答', 'ask-v030.png')
-  await capture('快捷', 'shortcuts-v030.png')
-  await capture('待办', 'todos-v030.png')
-  await capture('灵感便签', 'notes-v030.png')
-  await capture('资讯', 'news-v030.png')
-  await capture('复盘', 'review-v030.png')
-  await capture('设置', 'settings-v030.png')
+  await capture('问答', 'ask-v051.png')
+  await capture('快捷', 'shortcuts-v051.png')
+  await capture('待办', 'todos-v051.png')
+  await capture('灵感便签', 'notes-v051.png')
+  await capture('资讯', 'news-v051.png')
+  await capture('复盘', 'review-v051.png')
+  await capture('设置', 'settings-v051.png')
+
+  await evaluate(`(() => {
+    const button = [...document.querySelectorAll('[title]')].find((item) => item.title?.includes('录屏工坊'))
+    button?.click()
+    return Boolean(button)
+  })()`)
+  await sleep(1_800)
+  const recordingRect = await evaluate(`(() => {
+    const panel = document.querySelector('[data-recording-studio] > div')
+    if (!panel) return null
+    const r = panel.getBoundingClientRect()
+    return { x: r.x, y: r.y, width: r.width, height: r.height }
+  })()`)
+  if (!recordingRect) throw new Error('No recording studio found')
+  const recordingShot = await cdp.send('Page.captureScreenshot', {
+    format: 'png', fromSurface: true, captureBeyondViewport: false,
+    clip: { ...recordingRect, scale: 1 }
+  })
+  await writeFile(join(outputDir, 'recording-v051.png'), Buffer.from(recordingShot.data, 'base64'))
+  process.stdout.write('captured recording-v051.png\n')
 } finally {
   cdp?.close()
   child.kill()

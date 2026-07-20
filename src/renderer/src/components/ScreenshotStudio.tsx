@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, Languages, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Redo2, RotateCcw, RotateCw, Save, ScanLine, ScanText, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, Languages, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Redo2, RotateCcw, RotateCw, Save, ScanLine, ScanText, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, Video, X, ZoomIn, ZoomOut } from 'lucide-react'
 import type { LucideIcon } from '../ui/icons'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
@@ -12,11 +12,15 @@ import { accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../
 import { island } from '../bridge'
 import { clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, sanitizeScreenshotName } from '../logic/screenshot'
 import type { Point as Pt, Rect, ScreenshotFormat } from '../logic/screenshot'
+import { ScreenRecorderStudio } from './ScreenRecorderStudio'
+import type { LlmRequestConfig } from '../../../shared/protocol'
 
 interface Props {
   dataUrl: string
+  initialMode?: 'image' | 'record'
   onClose: () => void
   llmReady: boolean
+  llmConfig: LlmRequestConfig
   onAskImage: (dataUrl: string) => void
   onAIVision: (system: string, dataUrl: string, prompt: string) => Promise<{ ok: boolean; text?: string; error?: string }>
   onRetake: () => void
@@ -365,7 +369,8 @@ const AI_ACTIONS: AIAction[] = [
 ]
 
 // ────────────────────────────── 组件 ──────────────────────────────
-export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIVision, onRetake, onCreateTodo, onCreateNote }: Props): React.JSX.Element {
+export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmReady, llmConfig, onAskImage, onAIVision, onRetake, onCreateTodo, onCreateNote }: Props): React.JSX.Element {
+  const [workspace, setWorkspace] = useState<'image' | 'record'>(initialMode)
   const [sourceData, setSourceData] = useState(dataUrl)
   const [sourceVersion, setSourceVersion] = useState(0)
   const [sourceName, setSourceName] = useState(() => {
@@ -721,6 +726,21 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
 
   const drawing = tool !== 'none' || cropMode
 
+  if (workspace === 'record') {
+    return (
+      <ScreenRecorderStudio
+        contextDataUrl={final}
+        llmReady={llmReady}
+        llmConfig={llmConfig}
+        onBack={() => setWorkspace('image')}
+        onClose={onClose}
+        onAIVision={onAIVision}
+        onCreateTodo={onCreateTodo}
+        onCreateNote={onCreateNote}
+      />
+    )
+  }
+
   return (
     <div onMouseDown={onClose} style={{ position: 'fixed', inset: 0, zIndex: 210, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(8px)', animation: 'ai-fadein .15s ease' }}>
       <motion.div variants={overlayPop} initial="initial" animate="animate" onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(1000px, 72vw)', height: 'min(680px, 68vh)', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...surface.overlay(), borderRadius: R.panel }}>
@@ -737,6 +757,7 @@ export function ScreenshotStudio({ dataUrl, onClose, llmReady, onAskImage, onAIV
             { key: 'annotate', label: '标注', icon: PenTool },
             { key: 'ai', label: 'AI', icon: Sparkles }
           ]} />
+          <Button sm variant="ghost" icon={Video} onClick={() => setWorkspace('record')} title="打开专业录屏工作台">录屏</Button>
           <Button sm variant="ghost" icon={FileImage} onClick={openImage} title="打开本地图片">打开</Button>
           <Button sm variant="ghost" icon={ClipboardPaste} onClick={pasteImage} title="从剪贴板粘贴图片 (Ctrl+V)">粘贴</Button>
           <Button sm variant="ghost" icon={Monitor} onClick={captureDisplay} title="捕获鼠标所在显示器">整屏</Button>

@@ -9,7 +9,7 @@ import type { AgentVM } from '../types'
 import { Markdown, Collapsible } from './Markdown'
 import { Button, EmptyState } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accent, fill, FS, ink, R, semBg, SP, surface, text } from '../ui/tokens'
+import { accent, fill, FS, ink, R, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface PlanTabProps {
   /** 待审阅的计划（agents 里 isPlan 的待审批项） */
@@ -45,12 +45,12 @@ export function PlanTab(p: PlanTabProps): React.JSX.Element {
           <motion.div
             key={a.id}
             variants={fadeScaleIn}
-            initial="initial"
+            initial={false}
             animate="animate"
             style={{
               display: 'flex', flexDirection: 'column', gap: 8, padding: `${SP.md}px ${SP.md + 1}px`,
               borderRadius: R.lg,
-              background: 'linear-gradient(180deg, oklch(0.26 0.035 var(--th) / .55), oklch(0.22 0.03 var(--th) / .45))',
+              background: `linear-gradient(180deg, ${tintSurface('var(--th)', .55)}, ${tintSurface('var(--th2)', .42, true)})`,
               border: `0.5px solid ${accent(0.7, 0.35)}`,
               boxShadow: `0 8px 24px -10px ${accent(0.5, 0.3)}`
             }}
@@ -59,7 +59,7 @@ export function PlanTab(p: PlanTabProps): React.JSX.Element {
               <div style={{ width: 24, height: 24, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accent(), flex: 'none' }}>
                 <ClipboardList size={13} strokeWidth={1.75} />
               </div>
-              <span style={{ color: accent(0.92, 0.95), fontSize: FS.body, fontWeight: 700 }}>实施计划待审阅</span>
+              <span style={{ color: ink(1), fontSize: FS.body, fontWeight: 700 }}>实施计划待审阅</span>
               <span style={{ ...text.mono(10), background: fill(2), padding: '1px 7px', borderRadius: R.sm }}>{a.tool} · {a.proj}</span>
               {wait > 0 && (
                 <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: ink(3), fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>

@@ -5,14 +5,14 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Activity, CalendarClock, ChevronDown, GlassWater, MessageSquare, Minus, PanelTop, Palette,
-  Pencil, Play, Plug, Plus, Power, Settings2, Sparkles, Terminal, TimerReset, TriangleAlert,
+  Moon, Pencil, Play, Plug, Plus, Power, Settings2, Sparkles, Sun, Terminal, TimerReset, TriangleAlert,
   Waves, Wind, Wrench, X, Zap
 } from 'lucide-react'
 import type { DisplayInfo, RuntimeInfo } from '../../../shared/protocol'
 import type { BarConfig } from '../types'
 import { SOUNDS, SOUND_TYPES, type SoundMap } from '../logic/sounds'
 import { PROVIDERS } from '../logic/providers'
-import { THEMES, type ThemeDef } from '../logic/themes'
+import { normalizeThemeTokens, THEMES, type ThemeDef } from '../logic/themes'
 import { Badge, Button, Chip, Group, IconButton, Input, SectionHeader, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
 import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, separatorRow, SP, surface, text } from '../ui/tokens'
@@ -185,12 +185,12 @@ const TOOLS: { key: keyof SettingsFlags; label: string }[] = [
   { key: 'codexApp', label: 'Codex 桌面端' }
 ]
 
-/** 分区卡片：surface.section 容器 + fadeScaleIn 入场（无位移） */
+/** 分区卡片：主页面切换时直接显示，避免内部图标随透明度入场闪烁。 */
 function Section(props: { icon?: LucideIcon; title: React.ReactNode; extra?: React.ReactNode; children?: React.ReactNode }) {
   return (
     <motion.section
       variants={fadeScaleIn}
-      initial="initial"
+      initial={false}
       animate="animate"
       style={{ ...surface.section(), padding: `${SP.md}px ${SP.md + 2}px` }}
     >
@@ -212,7 +212,7 @@ function CollapsibleSection(props: {
   return (
     <motion.section
       variants={fadeScaleIn}
-      initial="initial"
+      initial={false}
       animate="animate"
       style={{ ...surface.section(), padding: `${SP.md}px ${SP.md + 2}px` }}
     >
@@ -327,26 +327,36 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
           {[...p.customThemes, ...THEMES].map((t) => {
             const sel = p.theme === t.key
             const custom = t.key.startsWith('custom-')
+            const tk = normalizeThemeTokens(t)
+            const light = tk.mode === 'light'
             return (
               <div
                 key={t.key}
                 className="hv"
                 onClick={() => p.onSetTheme(t.key)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: R.lg, cursor: 'pointer', position: 'relative',
+                  display: 'flex', alignItems: 'center', gap: 9, minHeight: t.tags?.length ? 68 : 54, padding: '8px 9px', borderRadius: R.lg, cursor: 'pointer', position: 'relative',
                   transition: 'background .18s, box-shadow .18s',
                   background: sel ? semBg(accent(), 0.13) : fill(2),
                   boxShadow: sel ? `0 4px 14px -8px ${accent(0.7, 0.4)}` : 'none'
                 }}
               >
-                <div style={{ width: 16, height: 16, flex: 'none', borderRadius: 999, background: t.dot, boxShadow: `0 0 8px ${t.dot}` }} />
+                <div style={{ width: 48, height: 38, padding: 4, boxSizing: 'border-box', flex: 'none', borderRadius: R.sm, background: `linear-gradient(${tk.gr}deg, oklch(${Math.min(.96, +tk.bg + .07)} ${tk.sc} ${tk.ths} / ${tk.ga}), oklch(${tk.bg} ${tk.sc} ${tk.ths} / ${tk.ga}))`, border: `0.5px solid ${light ? 'rgba(20,35,65,.12)' : 'rgba(255,255,255,.12)'}`, boxShadow: `0 5px 12px -7px rgba(0,0,0,${Math.min(.5, +tk.sh * .35)})` }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3, height: '100%' }}>
+                    <span style={{ borderRadius: 4, background: `oklch(${light ? '.99' : '.96'} .008 ${tk.th} / ${light ? '.58' : '.12'})` }} />
+                    <span style={{ borderRadius: 4, background: `oklch(${light ? '.99' : '.96'} .008 ${tk.th2} / ${light ? '.46' : '.1'})` }} />
+                    <span style={{ gridColumn: '1 / -1', height: 5, alignSelf: 'end', borderRadius: R.pill, background: `linear-gradient(90deg, oklch(${tk.l1} ${tk.c1} ${tk.th}), oklch(${tk.l2} ${tk.c2} ${tk.th2}))` }} />
+                  </div>
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: sel ? ink(1) : ink(2), fontSize: FS.body, fontWeight: sel ? 700 : 500 }}>
                     {custom && <Sparkles size={10} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />}
                     {t.label}
+                    <span title={light ? '浅色主题' : '深色主题'} style={{ display: 'inline-flex', color: ink(3) }}>{light ? <Sun size={9} /> : <Moon size={9} />}</span>
                     {sel && <span style={{ marginLeft: 2, fontSize: 9.5, fontWeight: 700, color: accent() }}>使用中</span>}
                   </span>
-                  <span style={{ color: ink(3), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.desc}</span>
+                  {!!t.tags?.length && <span title={t.tags.join(' · ')} style={{ display: 'flex', gap: 4, minWidth: 0, overflow: 'hidden' }}>{t.tags.slice(0, 4).map((tag) => <span key={tag} style={{ color: accent(), fontSize: 8.5, fontWeight: 650, whiteSpace: 'nowrap' }}>#{tag}</span>)}</span>}
+                  <span title={`${t.desc} · 透明度 ${Math.round(+tk.ga * 100)}%`} style={{ color: ink(3), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.desc} · {Math.round(+tk.ga * 100)}%</span>
                 </div>
                 {custom && (
                   <span style={{ flex: 'none', display: 'flex', gap: 3 }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>

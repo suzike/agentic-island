@@ -1,7 +1,10 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, screen, shell, Tray } from 'electron'
-import { spawn } from 'child_process'
-import { readFile, writeFile } from 'fs/promises'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, screen, shell, Tray, type IpcMainInvokeEvent } from 'electron'
+import { spawn, type ChildProcess } from 'child_process'
+import { copyFile, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
 import { basename, join } from 'path'
+import { pathToFileURL } from 'url'
+import ffmpegStatic from 'ffmpeg-static'
 import { AgentsStore } from './agents-store'
 import { BridgeServer } from './bridge-server'
 import { CodexTail } from './codex-tail'
@@ -29,7 +32,13 @@ import { setPtySink, ptyEnsure, ptyInput, ptyResize, ptyKill, ptyKillAll } from 
 import { startClipboardWatch } from './clipboard-watch'
 import { startDndWatch } from './dnd-watch'
 import { createExternalYieldController, type ExternalYieldController } from './external-yield'
-import type { DecisionMessage, LlmRequestConfig } from '../shared/protocol'
+import { createScreenshotPoller } from './screenshot-poller'
+import { recordingExportSubtitleSegments, recordingHasEdits, startRecordingFfmpeg } from './recording-export'
+import { RecordingSessionStore } from './recording-session-store'
+import { RecordingProjectStore } from './recording-project-store'
+import { transcribeRecordingFile } from './recording-transcription'
+import type { DecisionMessage, LlmRequestConfig, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotTarget } from '../shared/protocol'
+import { recordingWindowHandle } from '../shared/recording-source'
 
 // 允许 WebAudio 无需用户手势即可播放（提示音/试听）
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
@@ -46,6 +55,10 @@ const store = new AgentsStore()
 const bridge = new BridgeServer(store, gitSummary)
 // Codex 实时接入：跟随其 rollout 会话日志（Windows 上 hooks/notify 都不通，这是唯一可靠通道）
 const codexTail = new CodexTail(store, gitSummary)
+const recordingExportJobs = new Map<string, ChildProcess>()
+const recordingPreviewDirs = new Map<string, string>()
+let recordingSessions: RecordingSessionStore
+let recordingProjects: RecordingProjectStore
 
 function yieldToExternalApp(): void {
   externalYield?.yieldWindow()
@@ -319,29 +332,61 @@ function createWindow(): void {
   })
 }
 
-// 智能截图：拉起 Windows 原生框选截图（ms-screenclip），图进剪贴板后轮询取到 → 交给渲染层问 AI
-let shotPolling = false
-function openScreenshot(): void {
-  if (!win || shotPolling) return
-  shotPolling = true
+// 智能截图：拉起 Windows 原生框选截图（ms-screenclip），图进剪贴板后轮询取到。
+// 重复触发会替换旧轮询；框选期间持续降低岛层级，避免取消后锁死或中途重新盖住系统截图层。
+let screenshotTarget: ScreenshotTarget = 'ask'
+let screenshotTopmostRelease: (() => void) | undefined
+const finishScreenshotFlow = (): void => {
+  const release = screenshotTopmostRelease
+  screenshotTopmostRelease = undefined
+  release?.()
+}
+const screenshotPoller = createScreenshotPoller({
+  readImage: () => {
+    const image = clipboard.readImage()
+    return image.isEmpty() ? '' : image.toDataURL()
+  },
+  onCapture: (dataUrl) => {
+    const target = screenshotTarget
+    screenshotTarget = 'ask'
+    finishScreenshotFlow()
+    win?.setAlwaysOnTop(true, 'screen-saver')
+    win?.setIgnoreMouseEvents(false)
+    win?.show()
+    win?.focus()
+    win?.webContents.send('screenshot-captured', { dataUrl, target })
+  },
+  onTimeout: () => {
+    screenshotTarget = 'ask'
+    finishScreenshotFlow()
+  }
+})
+
+function openScreenshot(target: ScreenshotTarget = 'ask'): void {
+  if (!win) return
   yieldToExternalApp()
-  const before = clipboard.readImage().isEmpty() ? '' : clipboard.readImage().toDataURL()
-  try { spawn('explorer.exe', ['ms-screenclip:'], { detached: true, windowsHide: true }).unref() } catch { /* */ }
-  let tries = 0
-  const timer = setInterval(() => {
-    tries++
-    const img = clipboard.readImage()
-    if (!img.isEmpty()) {
-      const url = img.toDataURL()
-      if (url && url !== before) {
-        clearInterval(timer); shotPolling = false
-        win?.setAlwaysOnTop(true, 'screen-saver'); win?.setIgnoreMouseEvents(false); win?.show(); win?.focus()
-        win?.webContents.send('screenshot-captured', url)
-        return
-      }
-    }
-    if (tries > 120) { clearInterval(timer); shotPolling = false } // 60s 未截 → 放弃
-  }, 500)
+  // 先取得新 hold，再释放旧 hold；重试瞬间不会闪回最高层。
+  const nextRelease = externalYield?.suspendTopmost()
+  screenshotPoller.stop()
+  finishScreenshotFlow()
+  screenshotTopmostRelease = nextRelease
+  screenshotTarget = target
+
+  const image = clipboard.readImage()
+  const baseline = image.isEmpty() ? '' : image.toDataURL()
+  try {
+    const child = spawn('explorer.exe', ['ms-screenclip:'], { detached: true, windowsHide: true })
+    child.once('error', () => {
+      screenshotPoller.stop()
+      screenshotTarget = 'ask'
+      finishScreenshotFlow()
+    })
+    child.unref()
+    screenshotPoller.start(baseline)
+  } catch {
+    screenshotTarget = 'ask'
+    finishScreenshotFlow()
+  }
 }
 
 // 屏幕理解：截取主屏（先藏岛避免拍到自己），返回 dataURL 交给视觉模型
@@ -375,7 +420,7 @@ async function openScreenAnalyze(): Promise<void> {
   win.setIgnoreMouseEvents(false)
   win.show()
   win.focus()
-  win.webContents.send('screenshot-captured', url)
+  win.webContents.send('screenshot-captured', { dataUrl: url, target: 'ask' })
 }
 
 // 闪念胶囊：全局热键唤出居中输入框（临时让常驻窗口可聚焦，输完/取消后还原点击穿透）
@@ -948,7 +993,300 @@ function wireIpc(): void {
   })
   ipcMain.handle('llm-test', (_e, cfg: LlmRequestConfig) => llmTest(cfg))
   // 截图工坊：渲染层主动触发框选截图（复用 ms-screenclip 流程，事件仍走 screenshot-captured）
-  ipcMain.on('trigger-screenshot', () => openScreenshot())
+  ipcMain.on('trigger-screenshot', (_e, target: ScreenshotTarget) => openScreenshot(target === 'studio' ? 'studio' : 'ask'))
+
+  ipcMain.handle('recording-sources', async () => {
+    try {
+      const displayList = screen.getAllDisplays().sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y)
+      const displays = new Map(displayList.map((display) => [String(display.id), display]))
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 360, height: 203 },
+        fetchWindowIcons: true
+      })
+      const ownSourceIds = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed()).map((window) => window.getMediaSourceId())
+      const ownWindowHandles = new Set(ownSourceIds.map(recordingWindowHandle).filter((handle): handle is string => Boolean(handle)))
+      const items: RecordingSource[] = sources.filter((source) => {
+        const handle = recordingWindowHandle(source.id)
+        return !ownSourceIds.includes(source.id) && (!handle || !ownWindowHandles.has(handle))
+      }).map((source, sourceOrder) => {
+        const display = displays.get(source.display_id)
+        const kind: RecordingSource['kind'] = source.id.startsWith('screen:') ? 'screen' : 'window'
+        const thumbnail = source.thumbnail.isEmpty() ? '' : source.thumbnail.toDataURL()
+        const displayIndex = display ? displayList.findIndex((item) => item.id === display.id) : -1
+        const physicalWidth = display ? Math.max(2, Math.round(display.bounds.width * display.scaleFactor)) : 0
+        const physicalHeight = display ? Math.max(2, Math.round(display.bounds.height * display.scaleFactor)) : 0
+        const nativeSize = display ? { width: physicalWidth - (physicalWidth % 2), height: physicalHeight - (physicalHeight % 2) } : undefined
+        return {
+          id: source.id,
+          name: source.name,
+          kind,
+          displayId: source.display_id || undefined,
+          thumbnail,
+          appIcon: source.appIcon && !source.appIcon.isEmpty() ? source.appIcon.toDataURL() : undefined,
+          available: Boolean(thumbnail),
+          unavailableReason: thumbnail ? undefined : (kind === 'window' ? '窗口可能已最小化、关闭或禁止捕获' : '显示器画面暂不可用'),
+          displayLabel: kind === 'screen' && displayIndex >= 0 ? `${display?.id === screen.getPrimaryDisplay().id ? '主显示器' : `显示器 ${displayIndex + 1}`} · ${nativeSize?.width}×${nativeSize?.height}` : undefined,
+          aspectRatio: source.thumbnail.isEmpty() ? undefined : source.thumbnail.getAspectRatio(),
+          bounds: kind === 'screen' && display ? { ...display.bounds } : undefined,
+          scaleFactor: kind === 'screen' ? display?.scaleFactor : undefined,
+          displayIndex: kind === 'screen' && displayIndex >= 0 ? displayIndex : undefined,
+          isPrimary: kind === 'screen' ? display?.id === screen.getPrimaryDisplay().id : undefined,
+          rotation: kind === 'screen' ? display?.rotation : undefined,
+          workArea: kind === 'screen' && display ? { ...display.workArea } : undefined,
+          nativeSize: kind === 'screen' ? nativeSize : undefined,
+          sourceOrder
+        }
+      }).sort((a, b) => a.kind === b.kind ? Number(b.available) - Number(a.available) || a.name.localeCompare(b.name, 'zh-CN') : a.kind === 'screen' ? -1 : 1)
+      return { ok: true, sources: items }
+    } catch (e) {
+      return { ok: false, error: String(e instanceof Error ? e.message : e) }
+    }
+  })
+  ipcMain.handle('recording-cursor', () => {
+    const point = screen.getCursorScreenPoint()
+    const display = screen.getDisplayNearestPoint(point)
+    return {
+      x: point.x,
+      y: point.y,
+      displayId: String(display.id),
+      bounds: { ...display.bounds },
+      scaleFactor: display.scaleFactor
+    }
+  })
+  ipcMain.on('recording-protection', (_e, active: boolean) => {
+    for (const window of BrowserWindow.getAllWindows()) window.setContentProtection(Boolean(active))
+  })
+  ipcMain.handle('recording-anime-model', async (_event, requested: RecordingAnimeModel = 'handdrawn') => {
+    try {
+      const model = requested === 'portrait' || requested === 'comic' ? requested : 'handdrawn'
+      const files: Record<RecordingAnimeModel, string> = {
+        handdrawn: 'recording-anime-handdrawn.onnx',
+        portrait: 'recording-anime-face-v2.onnx',
+        comic: 'recording-anime-comic.onnx'
+      }
+      const names: Record<RecordingAnimeModel, string> = {
+        handdrawn: '日系手绘动画',
+        portrait: '柔和动画人像',
+        comic: '漫画人物'
+      }
+      const path = app.isPackaged
+        ? join(process.resourcesPath, 'models', files[model])
+        : join(app.getAppPath(), 'resources', 'models', files[model])
+      const data = await readFile(path)
+      return {
+        ok: true,
+        name: names[model],
+        data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+      }
+    } catch (error) {
+      return { ok: false, error: String(error instanceof Error ? error.message : error) }
+    }
+  })
+  ipcMain.handle('recording-preview', async (_event, input: ArrayBuffer | Uint8Array) => {
+    let previewDir = ''
+    try {
+      const data = input instanceof ArrayBuffer
+        ? Buffer.from(input)
+        : ArrayBuffer.isView(input)
+          ? Buffer.from(input.buffer, input.byteOffset, input.byteLength)
+          : null
+      if (!data || data.length < 1024) return { ok: false, error: '录制数据为空' }
+      if (data.length > 1_600_000_000) return { ok: false, error: '单次预览不能超过 1.6GB' }
+      const id = `preview-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      previewDir = await mkdtemp(join(tmpdir(), 'agentic-island-recording-preview-'))
+      const filePath = join(previewDir, 'capture.webm')
+      await writeFile(filePath, data)
+      recordingPreviewDirs.set(id, previewDir)
+      return { ok: true, id, url: pathToFileURL(filePath).href }
+    } catch (e) {
+      if (previewDir) await rm(previewDir, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }).catch(() => {})
+      return { ok: false, error: String(e instanceof Error ? e.message : e) }
+    }
+  })
+  ipcMain.on('recording-preview-release', (_event, id: string) => {
+    const previewDir = recordingPreviewDirs.get(String(id || ''))
+    if (!previewDir) return
+    recordingPreviewDirs.delete(String(id || ''))
+    void rm(previewDir, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 }).catch(() => {})
+  })
+  ipcMain.on('recording-export-cancel', (_e, jobId: string) => {
+    recordingExportJobs.get(String(jobId || ''))?.kill()
+  })
+  const exportRecordingPath = async (event: IpcMainInvokeEvent, inputPath: string, rawRequest: RecordingExportRequest) => {
+    const jobId = String(rawRequest?.jobId || `recording-${Date.now()}`)
+    const sendProgress = (phase: RecordingExportProgress['phase'], progress: number, message?: string): void => {
+      event.sender.send('recording-export-progress', { jobId, phase, progress, message } satisfies RecordingExportProgress)
+    }
+    let outputPath = ''
+    let exportTempDir = ''
+    try {
+      const format = rawRequest.format === 'mp4' || rawRequest.format === 'gif' || rawRequest.format === 'mp3' ? rawRequest.format : 'webm'
+      const request: RecordingExportRequest = {
+        ...rawRequest,
+        jobId,
+        format,
+        quality: rawRequest.quality || 'balanced',
+        durationMs: Math.max(1, Number(rawRequest.durationMs) || 1),
+        trimStartMs: Math.max(0, Number(rawRequest.trimStartMs) || 0),
+        trimEndMs: Math.max(1, Number(rawRequest.trimEndMs) || Number(rawRequest.durationMs) || 1),
+        width: Math.max(1, Number(rawRequest.width) || 1920),
+        height: Math.max(1, Number(rawRequest.height) || 1080),
+        fps: Math.max(1, Number(rawRequest.fps) || 30),
+        outputWidth: Math.max(2, Math.min(7680, Number(rawRequest.outputWidth) || Number(rawRequest.width) || 1920)),
+        outputHeight: Math.max(2, Math.min(4320, Number(rawRequest.outputHeight) || Number(rawRequest.height) || 1080)),
+        outputFps: Math.max(1, Math.min(120, Number(rawRequest.outputFps) || Number(rawRequest.fps) || 30)),
+        subtitleFilePath: undefined
+      }
+      if (format === 'mp3' && !request.hasAudio) return { ok: false, error: '该录制没有音轨，无法导出 MP3' }
+      const label = format === 'gif' ? 'GIF 动图' : format === 'mp4' ? 'MP4 视频' : format === 'mp3' ? 'MP3 音频' : 'WebM 视频'
+      const save = await showOwnedSaveDialog({
+        title: '导出录屏',
+        defaultPath: `${safeName(request.name, 'recording')}.${format}`,
+        filters: [{ name: label, extensions: [format] }]
+      })
+      if (save.canceled || !save.filePath) return { ok: false, canceled: true }
+      outputPath = save.filePath
+      sendProgress('preparing', 0.02, '正在准备录制数据')
+
+      if ((format === 'mp4' || format === 'webm') && request.subtitle?.mode === 'embedded' && request.subtitle.segments.length) {
+        const timecode = (value: number): string => {
+          const total = Math.max(0, Math.round(value))
+          const hours = Math.floor(total / 3_600_000)
+          const minutes = Math.floor(total % 3_600_000 / 60_000)
+          const seconds = Math.floor(total % 60_000 / 1000)
+          const millis = total % 1000
+          return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')},${String(millis).padStart(3, '0')}`
+        }
+        const segments = recordingExportSubtitleSegments(request).slice(0, 20_000)
+        if (segments.length) {
+          exportTempDir = await mkdtemp(join(tmpdir(), 'agentic-island-subtitle-'))
+          const subtitlePath = join(exportTempDir, 'subtitle.srt')
+          const body = segments.map((item, index) => `${index + 1}\n${timecode(item.startMs)} --> ${timecode(item.endMs)}\n${item.text.replace(/\r?\n/g, ' ')}\n`).join('\n')
+          await writeFile(subtitlePath, body, 'utf8')
+          request.subtitleFilePath = subtitlePath
+        }
+      }
+
+      const fullRange = request.trimStartMs === 0 && request.trimEndMs === request.durationMs
+      if (format === 'webm' && request.quality === 'original' && fullRange && !recordingHasEdits(request)) {
+        await copyFile(inputPath, outputPath)
+        sendProgress('done', 1, '原始录制已保存')
+        return { ok: true, path: outputPath }
+      }
+
+      const configured = String(ffmpegStatic || '')
+      const executable = app.isPackaged ? configured.replace('app.asar', 'app.asar.unpacked') : configured
+      if (!executable) return { ok: false, error: '内置 FFmpeg 不可用，请改用原始 WebM 导出' }
+      sendProgress('encoding', 0.05, format === 'gif' ? '正在生成 GIF 调色板' : format === 'mp3' ? '正在编码音频' : '正在压缩视频')
+      const running = startRecordingFfmpeg(executable, inputPath, outputPath, request, (value) => {
+        sendProgress('encoding', 0.05 + value * 0.94)
+      })
+      recordingExportJobs.set(jobId, running.child)
+      await running.done
+      sendProgress('done', 1, '导出完成')
+      return { ok: true, path: outputPath }
+    } catch (e) {
+      const canceled = String(e instanceof Error ? e.message : e).includes('取消')
+      if (outputPath && canceled) await rm(outputPath, { force: true }).catch(() => {})
+      sendProgress(canceled ? 'canceled' : 'error', 0, canceled ? '已取消导出' : String(e instanceof Error ? e.message : e))
+      return { ok: false, canceled, error: canceled ? undefined : String(e instanceof Error ? e.message : e) }
+    } finally {
+      recordingExportJobs.delete(jobId)
+      if (exportTempDir) await rm(exportTempDir, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+  ipcMain.handle('recording-session-create', async (_event, input: RecordingSessionCreateInput) => {
+    try { return { ok: true, session: await recordingSessions.create(input) } }
+    catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-session-append', async (_event, id: string, index: number, input: ArrayBuffer | Uint8Array) => {
+    try { return { ok: true, session: await recordingSessions.append(String(id || ''), Number(index), input) } }
+    catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-session-finalize', async (_event, id: string, durationMs: number) => {
+    try {
+      const result = await recordingSessions.finalize(String(id || ''), durationMs)
+      return { ok: true, session: result.manifest, url: pathToFileURL(result.filePath).href }
+    } catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-session-list', () => {
+    try { return { ok: true, sessions: recordingSessions.list() } }
+    catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-session-recover', async (_event, id: string) => {
+    try {
+      const result = await recordingSessions.recover(String(id || ''))
+      return { ok: true, session: result.manifest, url: pathToFileURL(result.filePath).href }
+    } catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-session-discard', async (_event, id: string) => {
+    try {
+      const sessionId = String(id || '')
+      await recordingSessions.discard(sessionId)
+      await recordingProjects.deleteBySession(sessionId)
+      return { ok: true }
+    }
+    catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-export-session', async (event, id: string, request: RecordingExportRequest) => {
+    const session = recordingSessions.getFile(String(id || ''))
+    if (!session) return { ok: false, error: '录制会话不存在或已清理' }
+    return exportRecordingPath(event, session.filePath, request)
+  })
+  ipcMain.handle('recording-transcribe-session', async (_event, id: string, cfg: LlmRequestConfig, model: string, language: 'auto' | 'zh' | 'en') => {
+    const session = recordingSessions.getFile(String(id || ''))
+    if (!session) return { ok: false, error: '录制会话不存在或已清理' }
+    if (!session.manifest.hasAudio) return { ok: false, error: '该录制没有音轨' }
+    const configured = String(ffmpegStatic || '')
+    const executable = app.isPackaged ? configured.replace('app.asar', 'app.asar.unpacked') : configured
+    if (!executable) return { ok: false, error: '内置 FFmpeg 不可用' }
+    return transcribeRecordingFile(executable, session.filePath, cfg, model, language)
+  })
+  ipcMain.handle('recording-project-save', async (_event, input: RecordingProjectSaveInput) => {
+    try {
+      if (!recordingSessions.getFile(String(input?.sessionId || ''))) return { ok: false, error: '工程关联的录屏素材不存在或已清理' }
+      return { ok: true, project: await recordingProjects.save(input) }
+    } catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-project-list', async () => {
+    try { return { ok: true, projects: recordingProjects.list() } }
+    catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-project-load', async (_event, id: string) => {
+    try {
+      const project = recordingProjects.load(String(id || ''))
+      if (!project) return { ok: false, error: '录屏工程不存在' }
+      if (!recordingSessions.getFile(project.sessionId)) return { ok: false, error: '工程素材已被清理，无法继续编辑' }
+      return { ok: true, project }
+    } catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-project-duplicate', async (_event, id: string) => {
+    try { return { ok: true, project: await recordingProjects.duplicate(String(id || '')) } }
+    catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-project-delete', async (_event, id: string) => {
+    try { await recordingProjects.delete(String(id || '')); return { ok: true } }
+    catch (error) { return { ok: false, error: String(error instanceof Error ? error.message : error) } }
+  })
+  ipcMain.handle('recording-export', async (event, input: ArrayBuffer | Uint8Array, rawRequest: RecordingExportRequest) => {
+    let tempDir = ''
+    try {
+      const data = input instanceof ArrayBuffer
+        ? Buffer.from(input)
+        : ArrayBuffer.isView(input)
+          ? Buffer.from(input.buffer, input.byteOffset, input.byteLength)
+          : null
+      if (!data?.length) return { ok: false, error: '录制数据为空' }
+      if (data.length > 1_600_000_000) return { ok: false, error: '内存录制导出不能超过 1.6GB，请使用分块录制' }
+      tempDir = await mkdtemp(join(tmpdir(), 'agentic-island-recording-'))
+      const inputPath = join(tempDir, 'capture.webm')
+      await writeFile(inputPath, data)
+      return await exportRecordingPath(event, inputPath, rawRequest)
+    } finally {
+      if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
   const imageDataLimit = 160_000_000
   const validImageData = (value: string): boolean => /^data:image\/(?:png|jpe?g|webp);base64,/i.test(value) && value.length <= imageDataLimit
   // 图片写剪贴板。返回结果，避免渲染层在失败时仍提示成功。
@@ -1084,10 +1422,13 @@ function wireIpc(): void {
   })
 }
 
-// 单实例锁：避免多开导致 bridge 端口/发现文件错乱，破坏实时连接
-if (!app.requestSingleInstanceLock()) {
+// 单实例锁：隔离运行审计可显式放行多实例，但生产环境始终保持单实例。
+const auditUserData = process.env['AIISLAND_AUDIT_USER_DATA']?.trim()
+const allowAuditInstance = process.env['AIISLAND_ALLOW_AUDIT_INSTANCE'] === '1' && Boolean(auditUserData)
+if (allowAuditInstance) app.setPath('userData', auditUserData!)
+if (!allowAuditInstance && !app.requestSingleInstanceLock()) {
   app.quit()
-} else {
+} else if (!allowAuditInstance) {
   app.on('second-instance', () => {
     if (win) { if (!externalYield?.isLowered()) win.setAlwaysOnTop(true, 'screen-saver'); win.moveTop(); win.showInactive() }
   })
@@ -1097,6 +1438,10 @@ app.whenReady().then(async () => {
   await bridge.start()
   codexTail.start() // Codex 实时接入：跟随 rollout 日志
   kb.initKb(app.getPath('userData')) // 知识库索引存放于 userData/kb-index.json
+  recordingSessions = new RecordingSessionStore(join(app.getPath('userData'), 'recordings'))
+  await recordingSessions.initialize()
+  recordingProjects = new RecordingProjectStore(join(app.getPath('userData'), 'recording-projects'))
+  await recordingProjects.initialize()
   wireIpc()
 
   // 应用持久化的开机自启与显示器偏好，并按需自动接入所有 CLI/终端
@@ -1147,6 +1492,12 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  for (const process of recordingExportJobs.values()) process.kill()
+  recordingExportJobs.clear()
+  for (const previewDir of recordingPreviewDirs.values()) void rm(previewDir, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 }).catch(() => {})
+  recordingPreviewDirs.clear()
+  screenshotPoller.stop()
+  finishScreenshotFlow()
   externalYield?.dispose()
   bridge.stop()
   if (process.platform !== 'darwin') app.quit()

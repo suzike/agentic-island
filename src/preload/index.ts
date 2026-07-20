@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig } from '../shared/protocol'
+import type { DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget } from '../shared/protocol'
 
 const api: IslandBridgeApi = {
   getRuntimeInfo: () => ipcRenderer.invoke('runtime-info'),
@@ -70,8 +70,8 @@ const api: IslandBridgeApi = {
     ipcRenderer.on('sticky-data', handler)
     return () => ipcRenderer.removeListener('sticky-data', handler)
   },
-  onScreenshot: (cb: (dataUrl: string) => void): (() => void) => {
-    const handler = (_e: unknown, url: string): void => cb(url)
+  onScreenshot: (cb: (capture: ScreenshotCapture) => void): (() => void) => {
+    const handler = (_e: unknown, capture: ScreenshotCapture): void => cb(capture)
     ipcRenderer.on('screenshot-captured', handler)
     return () => ipcRenderer.removeListener('screenshot-captured', handler)
   },
@@ -104,7 +104,33 @@ const api: IslandBridgeApi = {
   shortcutOpen: (target: string) => ipcRenderer.invoke('shortcut-open', target),
   clipReadText: () => ipcRenderer.invoke('clip-read-text'),
   clipWriteText: (t: string): void => ipcRenderer.send('clip-write-text', t),
-  triggerScreenshot: (): void => ipcRenderer.send('trigger-screenshot'),
+  triggerScreenshot: (target: ScreenshotTarget = 'ask'): void => ipcRenderer.send('trigger-screenshot', target),
+  recordingSources: () => ipcRenderer.invoke('recording-sources'),
+  recordingCursor: () => ipcRenderer.invoke('recording-cursor'),
+  setRecordingProtection: (active: boolean): void => ipcRenderer.send('recording-protection', active),
+  recordingAnimeModel: (model) => ipcRenderer.invoke('recording-anime-model', model),
+  prepareRecordingPreview: (data: ArrayBuffer) => ipcRenderer.invoke('recording-preview', data),
+  releaseRecordingPreview: (id: string): void => ipcRenderer.send('recording-preview-release', id),
+  createRecordingSession: (input: RecordingSessionCreateInput) => ipcRenderer.invoke('recording-session-create', input),
+  appendRecordingChunk: (id: string, index: number, data: ArrayBuffer) => ipcRenderer.invoke('recording-session-append', id, index, data),
+  finalizeRecordingSession: (id: string, durationMs: number) => ipcRenderer.invoke('recording-session-finalize', id, durationMs),
+  listRecordingSessions: () => ipcRenderer.invoke('recording-session-list'),
+  recoverRecordingSession: (id: string) => ipcRenderer.invoke('recording-session-recover', id),
+  discardRecordingSession: (id: string) => ipcRenderer.invoke('recording-session-discard', id),
+  exportRecording: (data: ArrayBuffer, request: RecordingExportRequest) => ipcRenderer.invoke('recording-export', data, request),
+  exportRecordingSession: (id: string, request: RecordingExportRequest) => ipcRenderer.invoke('recording-export-session', id, request),
+  transcribeRecordingSession: (id, cfg, model, language) => ipcRenderer.invoke('recording-transcribe-session', id, cfg, model, language),
+  saveRecordingProject: (input: RecordingProjectSaveInput) => ipcRenderer.invoke('recording-project-save', input),
+  listRecordingProjects: () => ipcRenderer.invoke('recording-project-list'),
+  loadRecordingProject: (id: string) => ipcRenderer.invoke('recording-project-load', id),
+  duplicateRecordingProject: (id: string) => ipcRenderer.invoke('recording-project-duplicate', id),
+  deleteRecordingProject: (id: string) => ipcRenderer.invoke('recording-project-delete', id),
+  cancelRecordingExport: (jobId: string): void => ipcRenderer.send('recording-export-cancel', jobId),
+  onRecordingExportProgress: (cb: (progress: RecordingExportProgress) => void): (() => void) => {
+    const handler = (_e: unknown, progress: RecordingExportProgress): void => cb(progress)
+    ipcRenderer.on('recording-export-progress', handler)
+    return () => ipcRenderer.removeListener('recording-export-progress', handler)
+  },
   copyImage: (dataUrl: string) => ipcRenderer.invoke('copy-image', dataUrl),
   saveImage: (dataUrl: string, name: string) => ipcRenderer.invoke('save-image', dataUrl, name),
   openImageFile: () => ipcRenderer.invoke('open-image-file'),

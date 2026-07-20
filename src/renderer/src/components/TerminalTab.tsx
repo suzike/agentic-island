@@ -17,7 +17,7 @@ import type { AgentVM } from '../types'
 import { island } from '../bridge'
 import { consumeTerminalInput, extractPowerShellCwd, setLocationCommand, TERMINAL_COMMANDS, type TerminalCommandGroup, type TerminalHistoryEntry } from '../logic/terminal'
 import { Badge, Button, Chip, IconButton, Input, Segmented } from '../ui/components'
-import { fadeScaleIn } from '../ui/motion'
+import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
 
 interface TermTab {
@@ -153,7 +153,7 @@ function AgentCard({ a, now }: { a: AgentVM; now: number }): React.JSX.Element {
   return (
     <motion.div
       variants={fadeScaleIn}
-      initial="initial"
+      initial={false}
       animate="animate"
       className="ai-card"
       style={{ ...surface.card(), padding: `${SP.md}px ${SP.md + 1}px`, display: 'flex', flexDirection: 'column', gap: SP.sm }}
@@ -227,7 +227,7 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
   const [renaming, setRenaming] = useState<string | null>(null)
   const [ptyOk, setPtyOk] = useState(true)
   const [now, setNow] = useState(Date.now())
-  const [showAgents, setShowAgents] = useState(true)
+  const [workspacePanel, setWorkspacePanel] = useState<'tools' | 'agents' | null>(null)
   const [dims, setDims] = useState({ cols: 0, rows: 0 })
   const [commandGroup, setCommandGroup] = useState<TerminalCommandGroup>('项目')
   const [commandDraft, setCommandDraft] = useState('')
@@ -283,6 +283,7 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
     inputBuffers.set(active, '')
     island.ptyInput(active, clean + '\r')
     getSession(active).term.focus()
+    setWorkspacePanel(null)
   }, [active, recordCommand])
 
   const changeDirectory = (): void => {
@@ -360,7 +361,7 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
     ro.observe(host)
     s.term.focus()
     return () => { cancelAnimationFrame(raf); ro.disconnect() }
-  }, [active, tall])
+  }, [active, tall, full, searchOpen])
 
   const addTab = (): void => {
     const id = 't' + Date.now()
@@ -379,163 +380,110 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
     if (active === id) setActive(next[0].id)
   }
 
+  const terminalHeight = full
+    ? `calc(100vh - ${searchOpen ? 273 : 235}px)`
+    : tall
+      ? searchOpen ? 650 : 690
+      : searchOpen ? 345 : 385
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: SP.sm }}>
-      {/* 标签栏 */}
-      <div className="ai-scroll" style={{ display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
-        {tabs.map((t) => {
-          const sel = t.id === active
-          return (
-            <div
-              key={t.id}
-              onClick={() => setActive(t.id)}
-              onDoubleClick={() => setRenaming(t.id)}
-              className="hv"
-              style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6, padding: '5px 11px', borderRadius: R.md, cursor: 'pointer', transition: transition('background, border-color'), background: sel ? semBg(accent(), 0.16) : fill(2), border: sel ? `0.5px solid ${accent(0.7, 0.35)}` : 'none' }}
-            >
-              <TerminalIcon size={11} strokeWidth={2} style={{ color: sel ? accent() : ink(3), flex: 'none' }} />
-              {renaming === t.id ? (
-                <input
-                  autoFocus
-                  defaultValue={t.name}
-                  onBlur={(e) => { const v = e.target.value.trim(); setTabs((l) => l.map((x) => (x.id === t.id ? { ...x, name: v || x.name } : x))); setRenaming(null) }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setRenaming(null) }}
-                  style={{ width: 80, background: 'rgba(0,0,0,.4)', border: `0.5px solid ${accent(0.7, 0.35)}`, borderRadius: R.sm, outline: 'none', color: ink(1), fontSize: 11, padding: '2px 6px', fontFamily: 'inherit' }}
-                />
-              ) : (
-                <span title={t.cwd ? `${t.cwd}\n双击重命名` : '双击重命名'} style={{ color: sel ? ink(1) : ink(2), fontSize: FS.small, fontWeight: 600, whiteSpace: 'nowrap' }}>{t.name}</span>
-              )}
-              {!!t.commandCount && <span title="本会话执行命令数" style={{ ...text.faint(), fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>{t.commandCount}</span>}
-              <X size={11} strokeWidth={2} className="hv" onClick={(e) => { e.stopPropagation(); closeTab(t.id) }} style={{ color: ink(3), cursor: 'pointer', flex: 'none' }} aria-label="关闭标签（结束该会话）" />
+    <div data-terminal-workspace style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: SP.sm }}>
+      {/* 默认只保留会话切换和两个低频工具入口，让 PTY 成为首屏主体。 */}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6, minHeight: 28 }}>
+        <div className="noscrollbar" role="tablist" aria-label="PowerShell 会话" style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 5, overflowX: 'auto' }}>
+          {tabs.map((t) => {
+            const sel = t.id === active
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={sel}
+                onClick={() => setActive(t.id)}
+                onDoubleClick={() => setRenaming(t.id)}
+                className="hv"
+                style={{ appearance: 'none', border: sel ? `0.5px solid ${accent(0.7, 0.35)}` : '0.5px solid transparent', flex: 'none', display: 'flex', alignItems: 'center', gap: 5, height: 27, padding: '0 8px', borderRadius: R.sm, cursor: 'pointer', transition: transition('background, border-color'), background: sel ? semBg(accent(), 0.16) : fill(1), color: sel ? ink(1) : ink(2), fontFamily: 'inherit' }}
+              >
+                <TerminalIcon size={11} strokeWidth={2} style={{ color: sel ? accent() : ink(3), flex: 'none' }} />
+                {renaming === t.id ? (
+                  <input autoFocus defaultValue={t.name} onClick={(e) => e.stopPropagation()} onBlur={(e) => { const v = e.target.value.trim(); setTabs((l) => l.map((x) => x.id === t.id ? { ...x, name: v || x.name } : x)); setRenaming(null) }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setRenaming(null) }} style={{ width: 78, background: 'rgba(0,0,0,.35)', border: `0.5px solid ${accent(0.7, 0.35)}`, borderRadius: 5, outline: 'none', color: ink(1), fontSize: 10.5, padding: '1px 5px', fontFamily: 'inherit' }} />
+                ) : <span title={t.cwd ? `${t.cwd}\n双击重命名` : '双击重命名'} style={{ fontSize: 10.5, fontWeight: 650, whiteSpace: 'nowrap' }}>{t.name}</span>}
+                {!!t.commandCount && <span title="本会话执行命令数" style={{ ...text.faint(), fontSize: 8.5, fontVariantNumeric: 'tabular-nums' }}>{t.commandCount}</span>}
+                <X size={10} strokeWidth={2} className="hv" onClick={(e) => { e.stopPropagation(); closeTab(t.id) }} style={{ color: ink(3), cursor: 'pointer', flex: 'none' }} aria-label="关闭标签（结束该会话）" />
+              </button>
+            )
+          })}
+          <IconButton icon={Plus} onClick={addTab} title="新建终端标签（Ctrl+Shift+T）" size={27} style={{ flex: 'none' }} />
+        </div>
+        <IconButton icon={TerminalIcon} title="命令工具、历史与收藏" size={27} active={workspacePanel === 'tools'} onClick={() => setWorkspacePanel((value) => value === 'tools' ? null : 'tools')} />
+        {liveAgents.length > 0 && <Button sm variant={workspacePanel === 'agents' ? 'tinted' : 'ghost'} icon={Bot} onClick={() => setWorkspacePanel((value) => value === 'agents' ? null : 'agents')} title="查看正在运行的 Agent">{liveAgents.length}</Button>}
+
+        {workspacePanel && (
+          <motion.div
+            data-solid
+            variants={overlayPop}
+            initial="initial"
+            animate="animate"
+            style={{ position: 'absolute', top: 34, left: 0, right: 0, zIndex: 40, maxHeight: tall ? 330 : 245, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: SP.sm, padding: SP.md, borderRadius: R.lg, ...surface.overlay(), border: `0.5px solid ${hairline(0.12)}`, boxShadow: '0 18px 45px rgba(0,0,0,.5)' }}
+            className="ai-scroll"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              {workspacePanel === 'tools' ? <TerminalIcon size={13} color={accent()} /> : <Bot size={13} color={sem.run} />}
+              <span style={text.subtitle()}>{workspacePanel === 'tools' ? 'PowerShell 工具' : '活跃 Agent 会话'}</span>
+              {workspacePanel === 'tools' && <span style={{ ...text.faint(), fontSize: 9 }}>{tabs.length} 会话 · {history.length} 命令 · {favorites.length} 收藏</span>}
+              {workspacePanel === 'agents' && <Badge color={sem.run}>{liveAgents.length}</Badge>}
+              <span style={{ flex: 1 }} />
+              <IconButton icon={X} title="关闭面板" size={25} onClick={() => setWorkspacePanel(null)} />
             </div>
-          )
-        })}
-        <IconButton icon={Plus} onClick={addTab} title="新建终端标签" size={26} style={{ flex: 'none' }} />
-        <span style={{ flex: 1 }} />
-        <span style={{ ...text.faint(), flex: 'none' }}>PowerShell 工作台 · 真 ConPTY</span>
-      </div>
 
-      {/* PowerShell 工作台概览 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr repeat(4, 1fr)', gap: 0.5, overflow: 'hidden', borderRadius: R.lg, border: `0.5px solid ${hairline(0.05)}`, background: hairline(0.07) }}>
-        <div style={{ padding: '10px 12px', background: fill(2), minWidth: 0 }}>
-          <div style={{ ...text.subtitle(), fontSize: FS.body }}>PowerShell 控制台</div>
-          <div title={activeTab?.cwd || '当前目录由 PowerShell 会话维护'} style={{ marginTop: 2, ...text.mono(9.5), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTab?.cwd || '会话目录未锁定'}</div>
-        </div>
-        {[
-          { n: tabs.length, l: '会话' },
-          { n: history.length, l: '命令' },
-          { n: favorites.length, l: '收藏' },
-          { n: liveAgents.length, l: 'Agent' }
-        ].map((item) => (
-          <div key={item.l} style={{ padding: '8px 10px', background: fill(2), display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <span style={{ ...text.num(16), lineHeight: 1 }}>{item.n}</span>
-            <span style={{ marginTop: 3, ...text.faint(), fontSize: 9 }}>{item.l}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* 工作目录 + 命令编排 */}
-      <div style={{ ...surface.section(), display: 'flex', flexDirection: 'column', gap: SP.sm, padding: `${SP.md - 2}px ${SP.md - 1}px` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <span style={{ ...text.overline(), flex: 'none' }}>目录</span>
-          <Input value={cwdDraft} onChange={setCwdDraft} onKeyDown={(e) => { if (e.key === 'Enter') changeDirectory() }} placeholder={activeTab?.cwd || '输入项目路径，例如 E:\\work\\repo'} icon={Folder} style={{ flex: 1, minWidth: 0 }} />
-          <Button sm icon={CornerDownRight} onClick={changeDirectory} disabled={!cwdDraft.trim()} title="切换 PowerShell 当前目录">切换</Button>
-          <IconButton icon={FolderOpen} onClick={() => activeTab?.cwd && island.openFolder(activeTab.cwd)} disabled={!activeTab?.cwd} title="在资源管理器打开当前目录" size={28} />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <Segmented
-            options={[
-              { key: 'commands' as const, label: '命令工具', icon: TerminalIcon },
-              { key: 'history' as const, label: `历史 ${history.length}`, icon: History },
-              { key: 'favorites' as const, label: `收藏 ${favorites.length}`, icon: Star }
-            ]}
-            value={toolView}
-            onChange={(k) => setToolView(k)}
-          />
-          {toolView === 'commands' && (
-            <Segmented
-              options={(['项目', 'Git', 'Node', '系统'] as TerminalCommandGroup[]).map((group) => ({ key: group, label: group }))}
-              value={commandGroup}
-              onChange={(k) => setCommandGroup(k)}
-            />
-          )}
-        </div>
-        {toolView === 'commands' && (
-          <div className="ai-scroll" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
-            {groupCommands.map((preset) => (
-              <Chip key={preset.id} icon={Play} onClick={() => runCommand(preset.command)} title={`${preset.description}\n${preset.command}`} style={{ flex: 'none' }}>{preset.label}</Chip>
-            ))}
-          </div>
-        )}
-        {toolView === 'history' && (
-          <div className="ai-scroll" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
-            {history.length === 0 && <span style={text.faint()}>本次运行还没有命令记录</span>}
-            {history.slice(0, 16).map((entry) => (
-              <div key={entry.id} style={{ flex: 'none', maxWidth: 260, display: 'flex', alignItems: 'center', gap: 5, padding: '4px 8px', borderRadius: R.md, background: fill(1) }}>
-                <span className="hv" onClick={() => runCommand(entry.command)} title={`${entry.sessionName} · ${new Date(entry.ts).toLocaleTimeString()}\n${entry.command}`} style={{ maxWidth: 190, ...text.mono(10), color: ink(1), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{entry.command}</span>
-                <Star size={11} strokeWidth={2} className="hv" onClick={() => toggleFavorite(entry.command)} style={{ color: favorites.includes(entry.command) ? sem.warn : ink(3), fill: favorites.includes(entry.command) ? sem.warn : 'none', cursor: 'pointer', flex: 'none' }} aria-label="收藏命令" />
+            {workspacePanel === 'tools' ? <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <Input value={cwdDraft} onChange={setCwdDraft} onKeyDown={(e) => { if (e.key === 'Enter') changeDirectory() }} placeholder={activeTab?.cwd || '输入项目路径，例如 E:\\work\\repo'} icon={Folder} style={{ flex: 1, minWidth: 0 }} />
+                <Button sm icon={CornerDownRight} onClick={changeDirectory} disabled={!cwdDraft.trim()} title="切换 PowerShell 当前目录">切换</Button>
+                <IconButton icon={FolderOpen} onClick={() => activeTab?.cwd && island.openFolder(activeTab.cwd)} disabled={!activeTab?.cwd} title="在资源管理器打开当前目录" size={28} />
               </div>
-            ))}
-          </div>
-        )}
-        {toolView === 'favorites' && (
-          <div className="ai-scroll" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
-            {favorites.length === 0 && <span style={text.faint()}>收藏的命令会显示在这里</span>}
-            {favorites.map((command) => (
-              <div key={command} style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <Chip icon={Play} onClick={() => runCommand(command)} title={command} style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}>{command}</Chip>
-                <IconButton icon={Star} size={24} color={sem.warn} onClick={() => toggleFavorite(command)} title="取消收藏" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Segmented options={[{ key: 'commands' as const, label: '命令', icon: TerminalIcon }, { key: 'history' as const, label: `历史 ${history.length}`, icon: History }, { key: 'favorites' as const, label: `收藏 ${favorites.length}`, icon: Star }]} value={toolView} onChange={setToolView} />
+                {toolView === 'commands' && <Segmented options={(['项目', 'Git', 'Node', '系统'] as TerminalCommandGroup[]).map((group) => ({ key: group, label: group }))} value={commandGroup} onChange={setCommandGroup} />}
               </div>
-            ))}
-          </div>
+              {toolView === 'commands' && <div className="noscrollbar" style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>{groupCommands.map((preset) => <Chip key={preset.id} icon={Play} onClick={() => runCommand(preset.command)} title={`${preset.description}\n${preset.command}`} style={{ flex: 'none' }}>{preset.label}</Chip>)}</div>}
+              {toolView === 'history' && <div className="noscrollbar" style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
+                {history.length === 0 && <span style={text.faint()}>本次运行还没有命令记录</span>}
+                {history.slice(0, 16).map((entry) => <div key={entry.id} style={{ flex: 'none', maxWidth: 260, display: 'flex', alignItems: 'center', gap: 5, padding: '4px 8px', borderRadius: R.md, background: fill(1) }}><span className="hv" onClick={() => runCommand(entry.command)} title={`${entry.sessionName} · ${new Date(entry.ts).toLocaleTimeString()}\n${entry.command}`} style={{ maxWidth: 190, ...text.mono(10), color: ink(1), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{entry.command}</span><Star size={11} strokeWidth={2} className="hv" onClick={() => toggleFavorite(entry.command)} style={{ color: favorites.includes(entry.command) ? sem.warn : ink(3), fill: favorites.includes(entry.command) ? sem.warn : 'none', cursor: 'pointer', flex: 'none' }} aria-label="收藏命令" /></div>)}
+              </div>}
+              {toolView === 'favorites' && <div className="noscrollbar" style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
+                {favorites.length === 0 && <span style={text.faint()}>收藏的命令会显示在这里</span>}
+                {favorites.map((command) => <div key={command} style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 5 }}><Chip icon={Play} onClick={() => runCommand(command)} title={command} style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}>{command}</Chip><IconButton icon={Star} size={24} color={sem.warn} onClick={() => toggleFavorite(command)} title="取消收藏" /></div>)}
+              </div>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 1, flex: 'none', color: sem.calm, fontFamily: MONO, fontSize: 11, fontWeight: 700 }}>PS<ChevronRight size={12} strokeWidth={2.5} /></span>
+                <Input value={commandDraft} onChange={setCommandDraft} onKeyDown={(e) => { if (e.key === 'Enter') { runCommand(commandDraft); setCommandDraft('') } }} placeholder="输入 PowerShell 命令，Enter 执行" style={{ flex: 1, minWidth: 0 }} />
+                <IconButton icon={Star} onClick={() => toggleFavorite(commandDraft)} disabled={!commandDraft.trim()} title="收藏当前命令" size={28} active={favorites.includes(commandDraft.trim())} color={favorites.includes(commandDraft.trim()) ? sem.warn : undefined} />
+                <Button sm variant="primary" icon={Play} onClick={() => { runCommand(commandDraft); setCommandDraft('') }} disabled={!commandDraft.trim()}>运行</Button>
+              </div>
+            </> : (
+              <div className="ai-scroll" style={{ display: 'grid', gridTemplateColumns: liveAgents.length > 1 ? 'repeat(2, minmax(0, 1fr))' : '1fr', gap: 7, maxHeight: tall ? 260 : 185, overflowY: 'auto' }}>
+                {liveAgents.map((agent) => <AgentCard key={agent.id} a={agent} now={now} />)}
+              </div>
+            )}
+          </motion.div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 1, flex: 'none', color: sem.calm, fontFamily: MONO, fontSize: 11, fontWeight: 700 }}>PS<ChevronRight size={12} strokeWidth={2.5} /></span>
-          <Input value={commandDraft} onChange={setCommandDraft} onKeyDown={(e) => { if (e.key === 'Enter') { runCommand(commandDraft); setCommandDraft('') } }} placeholder="输入 PowerShell 命令，Enter 执行" style={{ flex: 1, minWidth: 0 }} />
-          <IconButton icon={Star} onClick={() => toggleFavorite(commandDraft)} disabled={!commandDraft.trim()} title="收藏当前命令" size={28} active={favorites.includes(commandDraft.trim())} color={favorites.includes(commandDraft.trim()) ? sem.warn : undefined} />
-          <Button sm variant="primary" icon={Play} onClick={() => { runCommand(commandDraft); setCommandDraft('') }} disabled={!commandDraft.trim()}>运行</Button>
-        </div>
       </div>
 
-      {!ptyOk && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 12px', borderRadius: R.md, background: semBg(sem.danger, 0.14), border: `0.5px solid ${semBg(sem.danger, 0.4)}`, color: sem.danger, fontSize: FS.small, fontWeight: 600 }}>
-          <ShieldAlert size={13} strokeWidth={2} style={{ flex: 'none' }} />
-          PTY 原生模块加载失败（@lydell/node-pty）。请重新 npm install 后重启。
-        </div>
-      )}
+      {!ptyOk && <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px', borderRadius: R.sm, background: semBg(sem.danger, 0.14), color: sem.danger, fontSize: FS.small, fontWeight: 600 }}><ShieldAlert size={13} strokeWidth={2} />PTY 原生模块加载失败，请重新安装依赖后重启。</div>}
 
-      {/* Coding Agent 会话可视化 */}
-      {liveAgents.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div className="hv" onClick={() => setShowAgents((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '0 2px' }}>
-            <Bot size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
-            <span style={text.subtitle()}>活跃 Agent 会话</span>
-            <Badge color={sem.run}>{liveAgents.length}</Badge>
-            <span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} />
-            <ChevronDown size={13} strokeWidth={2} style={{ color: ink(3), transform: showAgents ? 'none' : 'rotate(-90deg)', transition: transition('transform') }} />
-          </div>
-          {showAgents && (
-            liveAgents.length === 1
-              ? <AgentCard a={liveAgents[0]} now={now} />
-              : <div className="ai-scroll" style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 5, scrollSnapType: 'x proximity' }}>
-                  {liveAgents.map((a) => <div key={a.id} style={{ flex: 'none', width: 'calc((100% - 21px) / 4)', minWidth: 205, scrollSnapAlign: 'start' }}><AgentCard a={a} now={now} /></div>)}
-                </div>
-          )}
-        </div>
-      )}
-
-      {/* xterm 宿主：真实终端渲染区（玻璃质感 + 顶栏 + 底部状态栏） */}
-      <div style={{ borderRadius: R.lg, overflow: 'hidden', border: `0.5px solid ${accent(0.6, 0.22)}`, background: 'radial-gradient(120% 100% at 50% 0%, oklch(0.22 0.03 var(--th) / .5), rgba(0,0,0,.6) 60%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.05), 0 6px 22px rgba(0,0,0,.28)' }}>
-        {/* 顶栏：交通灯 + 标题 + 工具 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderBottom: `0.5px solid ${hairline(0.07)}`, background: fill(1) }}>
-          <span style={{ display: 'flex', gap: 5 }}>{['#ff5f57', '#febc2e', '#28c840'].map((c) => <span key={c} style={{ width: 10, height: 10, borderRadius: 999, background: c, boxShadow: `0 0 5px ${c}88` }} />)}</span>
-          <span style={{ marginLeft: 5, display: 'flex', alignItems: 'center', gap: 5, color: ink(2), fontSize: 10, fontFamily: MONO, fontWeight: 600 }}><TerminalIcon size={11} strokeWidth={2} style={{ color: sem.calm }} />PowerShell · {tabs.find((t) => t.id === active)?.name}</span>
-          {activeTab?.lastCommand && <span title={activeTab.lastCommand} style={{ maxWidth: 220, ...text.mono(9), opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTab.lastCommand}</span>}
+      {/* xterm 宿主：默认占据绝大多数可用高度。 */}
+      <div data-terminal-frame style={{ borderRadius: R.lg, overflow: 'hidden', border: `0.5px solid ${accent(0.6, 0.22)}`, background: 'radial-gradient(120% 100% at 50% 0%, oklch(0.22 0.03 var(--th) / .5), rgba(0,0,0,.6) 60%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.05), 0 6px 22px rgba(0,0,0,.28)', ...({ '--ink-l': '.96', '--line-l': '.96', '--fill-l': '.96', '--accent1-l-shift': '0', '--accent2-l-shift': '0', '--on-primary-l': '.16' } as React.CSSProperties) }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 34, padding: '4px 8px 4px 10px', borderBottom: `0.5px solid ${hairline(0.07)}`, background: fill(1) }}>
+          <span style={{ display: 'flex', gap: 5 }}>{['#ff5f57', '#febc2e', '#28c840'].map((color) => <span key={color} style={{ width: 9, height: 9, borderRadius: 999, background: color }} />)}</span>
+          <TerminalIcon size={11} strokeWidth={2} style={{ marginLeft: 4, color: sem.calm, flex: 'none' }} />
+          <span style={{ color: ink(2), fontSize: 10, fontFamily: MONO, fontWeight: 650, whiteSpace: 'nowrap' }}>{activeTab?.name}</span>
+          <span title={activeTab?.cwd || '当前目录由 PowerShell 会话维护'} style={{ minWidth: 0, maxWidth: tall ? 420 : 190, ...text.mono(9), color: ink(3), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTab?.cwd || 'PowerShell'}</span>
           <span style={{ flex: 1 }} />
-          <Button sm variant="danger" icon={Square} onClick={() => island.ptyInput(active, '\x03')} title="中断当前命令（Ctrl+C）">中断</Button>
-          <Button sm variant="ghost" icon={Search} onClick={() => setSearchOpen((v) => !v)} title="搜索终端输出（Ctrl+Shift+F）" style={searchOpen ? { background: semBg(accent(), 0.16), color: accent(), border: `0.5px solid ${accent(0.7, 0.35)}` } : undefined}>查找</Button>
-          <Button sm variant="ghost" icon={Eraser} onClick={() => getSession(active).term.clear()} title="清屏（保留会话）">清屏</Button>
-          <Button sm variant="ghost" icon={ArrowDownToLine} onClick={() => getSession(active).term.scrollToBottom()} title="滚到底">底部</Button>
+          <IconButton icon={Square} color={sem.danger} onClick={() => island.ptyInput(active, '\x03')} title="中断当前命令（Ctrl+C）" size={25} />
+          <IconButton icon={Search} active={searchOpen} onClick={() => setSearchOpen((value) => !value)} title="搜索终端输出（Ctrl+Shift+F）" size={25} />
+          <IconButton icon={Eraser} onClick={() => getSession(active).term.clear()} title="清屏（保留会话）" size={25} />
+          <IconButton icon={ArrowDownToLine} onClick={() => getSession(active).term.scrollToBottom()} title="滚动到底部" size={25} />
         </div>
         {searchOpen && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: `0.5px solid ${hairline(0.06)}`, background: 'rgba(0,0,0,.22)' }}>
@@ -547,16 +495,15 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
             <IconButton icon={X} size={24} onClick={() => { getSession(active).term.clearSelection(); setSearchOpen(false) }} title="关闭搜索" />
           </div>
         )}
-        {/* 大尺寸固定 660px；仅真全屏绑 100vh（覆盖层会把窗口铺满显示器，100vh 突变会让终端高度跳动） */}
-        <div ref={hostRef} style={{ height: full ? 'calc(100vh - 500px)' : tall ? 590 : 330, minHeight: 250, padding: '8px 4px 8px 10px', boxSizing: 'border-box', overflow: 'hidden' }} />
+        <div ref={hostRef} data-terminal-host style={{ height: terminalHeight, minHeight: 250, padding: '8px 4px 8px 10px', boxSizing: 'border-box', overflow: 'hidden' }} />
         {/* 底部状态栏 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 11px', borderTop: `0.5px solid ${hairline(0.06)}`, background: `linear-gradient(180deg, ${semBg(sem.run, 0.1)}, rgba(0,0,0,.3))`, fontFamily: MONO, fontSize: 9, color: ink(3) }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: ptyOk ? sem.run : sem.danger }}><span style={{ width: 5, height: 5, borderRadius: 999, background: ptyOk ? sem.run : sem.danger, boxShadow: ptyOk ? `0 0 5px ${sem.run}` : undefined }} />{ptyOk ? 'ConPTY 已连接' : 'PTY 未就绪'}</span>
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>{dims.cols}×{dims.rows}</span>
           <span>UTF-8</span>
-          <span>回滚 8000 行</span>
+          <span>{tabs.length} 会话 · {history.length} 命令</span>
           <span style={{ flex: 1 }} />
-          <span style={{ opacity: 0.75 }}>PowerShell · xterm-256color</span>
+          <span style={{ opacity: 0.75 }}>UTF-8 · 8000 行回滚</span>
         </div>
       </div>
     </div>

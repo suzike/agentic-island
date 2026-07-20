@@ -279,7 +279,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
         key={it.id}
         id={'feed-' + it.id}
         variants={fadeScaleIn}
-        initial="initial"
+        initial={false}
         animate="animate"
         className={open ? undefined : 'msg ai-card'}
         style={{
@@ -618,7 +618,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
             <motion.div
               key={it.id}
               variants={fadeScaleIn}
-              initial="initial"
+              initial={false}
               animate="animate"
               className="hv ai-card"
               onClick={() => toggleExpand(it)}

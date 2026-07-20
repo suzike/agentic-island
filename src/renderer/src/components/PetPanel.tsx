@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import type { ActivityEntry, TodoItem } from '../types'
 import { computeXp, petFrom, STAGES } from '../logic/pet'
 import { dayKey } from '../logic/review'
+import { accent, accent2, fill, hairline, ink, tintSurface } from '../ui/tokens'
 
 export function PetPanel({ pomoDone, todos, activities }: { pomoDone: Record<string, number>; todos: TodoItem[]; activities: ActivityEntry[] }): React.JSX.Element {
   const [pat, setPat] = useState(0)
@@ -18,7 +19,7 @@ export function PetPanel({ pomoDone, todos, activities }: { pomoDone: Record<str
     activities.filter((a) => dayKey(a.ts) === today).length * 3
 
   return (
-    <div style={{ padding: '13px 14px', borderRadius: 15, background: 'linear-gradient(160deg, oklch(0.3 calc(0.06 * var(--cs, 1)) var(--th) / .4), oklch(0.2 calc(0.04 * var(--cs, 1)) var(--th2) / .28))', border: '1px solid oklch(0.65 calc(0.12 * var(--cs, 1)) var(--th) / .3)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ padding: '13px 14px', borderRadius: 15, background: `linear-gradient(160deg, ${tintSurface('var(--th)', .62)}, ${tintSurface('var(--th2)', .46, true)})`, border: `0.5px solid ${hairline(.12)}`, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div
           className="hv"
@@ -29,16 +30,16 @@ export function PetPanel({ pomoDone, todos, activities }: { pomoDone: Record<str
         >{pet.emoji}</div>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
-            <span style={{ color: 'oklch(0.96 0.02 var(--th))', fontSize: 14, fontWeight: 800 }}>{pet.name}</span>
-            <span style={{ color: 'oklch(0.82 calc(0.14 * var(--cs, 1)) var(--th))', fontSize: 11, fontWeight: 700 }}>Lv.{pet.level}</span>
+            <span style={{ color: ink(1), fontSize: 14, fontWeight: 800 }}>{pet.name}</span>
+            <span style={{ color: accent(.78), fontSize: 11, fontWeight: 700 }}>Lv.{pet.level}</span>
             <span style={{ flex: 1 }} />
             {todayXp > 0 && <span style={{ color: 'oklch(0.8 0.13 145)', fontSize: 10.5, fontWeight: 700 }}>今日 +{todayXp} XP</span>}
           </div>
           {/* 经验条 */}
-          <div style={{ height: 9, borderRadius: 999, background: 'rgba(255,255,255,.08)', overflow: 'hidden' }}>
-            <div style={{ width: `${Math.max(3, Math.min(100, pet.progress * 100))}%`, height: '100%', borderRadius: 999, background: 'linear-gradient(90deg, oklch(0.7 calc(0.14 * var(--cs, 1)) var(--th2)), oklch(0.84 calc(0.16 * var(--cs, 1)) var(--th)))', transition: 'width .4s' }} />
+          <div style={{ height: 9, borderRadius: 999, background: fill(3), overflow: 'hidden' }}>
+            <div style={{ width: `${Math.max(3, Math.min(100, pet.progress * 100))}%`, height: '100%', borderRadius: 999, background: `linear-gradient(90deg, ${accent2(.72)}, ${accent(.82)})`, transition: 'width .4s' }} />
           </div>
-          <span style={{ color: 'oklch(0.66 0.02 var(--th) / .6)', fontSize: 9.5 }}>共 {pet.xp} XP · 距下一级还差 {pet.toNext} XP（专注1个番茄=+10）</span>
+          <span style={{ color: ink(3), fontSize: 9.5 }}>共 {pet.xp} XP · 距下一级还差 {pet.toNext} XP（专注1个番茄=+10）</span>
         </div>
       </div>
 
@@ -47,7 +48,7 @@ export function PetPanel({ pomoDone, todos, activities }: { pomoDone: Record<str
         {STAGES.map((s, i) => (
           <div key={i} title={i <= pet.stage ? `${s.name} · Lv.${s.min}+（已解锁）` : `${s.name} · Lv.${s.min}+ 解锁`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: i <= pet.stage ? 1 : 0.3, filter: i <= pet.stage ? undefined : 'grayscale(1)' }}>
             <span style={{ fontSize: i === pet.stage ? 18 : 14, lineHeight: 1, transition: 'all .3s' }}>{s.emoji}</span>
-            {i === pet.stage && <span style={{ width: 4, height: 4, borderRadius: 999, background: 'oklch(0.82 calc(0.16 * var(--cs, 1)) var(--th))' }} />}
+            {i === pet.stage && <span style={{ width: 4, height: 4, borderRadius: 999, background: accent(.78) }} />}
           </div>
         ))}
       </div>

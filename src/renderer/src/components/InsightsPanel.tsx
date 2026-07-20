@@ -52,7 +52,7 @@ export function InsightsPanel({ todos, activities, pomoDone }: { todos: TodoItem
     return (
       <motion.div
         variants={fadeScaleIn}
-        initial="initial"
+        initial={false}
         animate="animate"
         className="ai-card"
         style={{ ...surface.card(), padding: `${SP.md}px ${SP.md + 1}px` }}
@@ -70,7 +70,7 @@ export function InsightsPanel({ todos, activities, pomoDone }: { todos: TodoItem
   return (
     <motion.div
       variants={fadeScaleIn}
-      initial="initial"
+      initial={false}
       animate="animate"
       className="ai-card"
       style={{

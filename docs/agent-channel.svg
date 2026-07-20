@@ -13,5 +13,5 @@
   <rect class="b" x="276" y="325" width="185" height="92" fill="#1f1a38" stroke="#c9884a"/><text class="t l" x="298" y="358">codex-tail</text><text class="t m s" x="298" y="384">增量轮询与去重</text><text class="t m s" x="298" y="404">15 分钟空闲归档</text>
   <path class="p" d="M230 371H276"/><path class="p dash" d="M461 371H830V218"/>
   <text class="t m s" x="507" y="354">只监控，不伪造审批能力</text>
-  <rect x="738" y="325" width="416" height="92" rx="12" fill="#181430" stroke="#332a52"/><text class="t l" x="760" y="356">统一呈现</text><text class="t m s" x="760" y="382">运行中 · 等待回复 · 审批中 · 已完成 · git 变更小结</text><text class="t m s" x="760" y="404">会话键 backend:sessionId，结束后延迟隐藏</text>
+<rect x="738" y="325" width="416" height="92" rx="12" fill="#181430" stroke="#332a52"/><text class="t l" x="760" y="356">统一呈现</text><text class="t m s" x="760" y="382">运行中 · 等待回复 · 审批中 · 已完成 · git 变更小结</text><text class="t m s" x="760" y="404">会话键 backend:sessionId，SessionEnd 后立即移除</text>
 </svg>
