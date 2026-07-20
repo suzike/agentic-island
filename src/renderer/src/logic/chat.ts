@@ -36,16 +36,94 @@ export function blocksToText(blocks: Block[]): string {
     .join('\n\n')
 }
 
-/** 从对话线程构建多轮上下文（最近 N 条，剔除 typing 占位） */
-export function historyFromThread(msgs: ChatMessage[], limit = 12): { role: 'user' | 'assistant'; content: string }[] {
+/** 单条消息可进入模型/知识库的文本；文本附件在后续轮次继续作为上下文。 */
+export function chatMessageText(message: ChatMessage): string {
+  const body = message.role === 'user' ? message.text || '' : blocksToText(message.blocks || [])
+  const files = (message.attachments || [])
+    .filter((item) => item.content?.trim())
+    .map((item) => `【附件：${item.name}】\n${item.content!.trim()}`)
+  return [body.trim(), ...files].filter(Boolean).join('\n\n')
+}
+
+/** 对话转为可索引 Markdown；排除流式占位与思考链，但保留上下文策略标记。 */
+export function conversationToMarkdown(msgs: ChatMessage[], throughIndex = msgs.length - 1): string {
   return msgs
-    .filter((m) => !m.typing)
-    .map((m) => ({
-      role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-      content: m.role === 'user' ? m.text || '' : blocksToText(m.blocks || [])
-    }))
-    .filter((m) => m.content.trim())
-    .slice(-limit)
+    .slice(0, Math.max(-1, throughIndex) + 1)
+    .filter((message) => !message.typing && !message.live)
+    .map((message) => {
+      const label = message.role === 'user' ? '用户' : 'AI'
+      const context = message.contextMode === 'pinned' ? ' · 长期上下文' : message.contextMode === 'excluded' ? ' · 已排除上下文' : ''
+      return `## ${label}${context}\n\n${chatMessageText(message)}`
+    })
+    .filter((part) => !part.endsWith('\n\n'))
+    .join('\n\n')
+}
+
+/** Fork 截止点标准化：不携带进行中占位，并避免从一条 AI 回答后再多带下一轮。 */
+export function forkConversation(msgs: ChatMessage[], msgIndex: number): ChatMessage[] {
+  const end = Math.max(0, Math.min(msgIndex, msgs.length - 1))
+  return msgs.slice(0, end + 1).filter((message) => !message.typing && !message.live).map((message) => ({ ...message }))
+}
+
+export function conversationTitle(msgs: ChatMessage[], fallback = '新会话'): string {
+  const first = msgs.find((message) => message.role === 'user' && message.text?.trim())
+  return (first?.text?.trim() || fallback).replace(/\s+/g, ' ').slice(0, 28)
+}
+
+export interface ConversationContextStats {
+  total: number
+  included: number
+  pinned: number
+  excluded: number
+  attachments: number
+  chars: number
+  estimatedTokens: number
+}
+
+export function conversationContextStats(msgs: ChatMessage[], memory = '', limit = 12): ConversationContextStats {
+  const eligible = msgs.filter((message) => !message.typing && !message.live && message.contextMode !== 'excluded' && chatMessageText(message).trim())
+  const pinned = eligible.filter((message) => message.contextMode === 'pinned')
+  const recent = eligible.filter((message) => message.contextMode !== 'pinned').slice(-limit)
+  const included = [...pinned, ...recent]
+  const chars = included.reduce((sum, message) => sum + chatMessageText(message).length, memory.trim().length)
+  return {
+    total: msgs.filter((message) => !message.typing && !message.live).length,
+    included: included.length,
+    pinned: pinned.length,
+    excluded: msgs.filter((message) => message.contextMode === 'excluded').length,
+    attachments: included.reduce((sum, message) => sum + (message.attachments?.length || 0), 0),
+    chars,
+    estimatedTokens: Math.ceil(chars / 2.4)
+  }
+}
+
+/** 从对话线程构建多轮上下文（最近 N 条，剔除 typing 占位） */
+export function historyFromThread(msgs: ChatMessage[], limit = 12, memory = ''): { role: 'user' | 'assistant'; content: string }[] {
+  const eligible = msgs.filter((message) => !message.typing && !message.live && message.contextMode !== 'excluded' && chatMessageText(message).trim())
+  const pinned = eligible.filter((message) => message.contextMode === 'pinned')
+  const pinnedSet = new Set(pinned)
+  const recent = eligible.filter((message) => !pinnedSet.has(message)).slice(-limit)
+  const ordered = eligible.filter((message) => pinnedSet.has(message) || recent.includes(message))
+  const history = ordered.map((message) => ({
+    role: (message.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+    content: chatMessageText(message)
+  }))
+  if (memory.trim()) history.unshift({ role: 'assistant', content: `【本会话长期记忆】\n${memory.trim()}` })
+  return history
+}
+
+export const ADVANCE_PROMPTS = {
+  critique: '请严格审查你上一条回答：找出逻辑漏洞、遗漏、错误前提和不够可执行之处，然后给出修正后的结论。',
+  assumptions: '请把上一条回答中的显式假设、隐含假设、不确定信息和主要风险逐项列出，并说明如何验证。',
+  alternatives: '请不要重复上一条方案，提出至少三条原理不同的替代路径，比较适用条件、代价和失败模式。',
+  decompose: '请把上一条回答拆成可独立讨论的子问题，标出依赖关系，并先处理最关键的一个。',
+  socratic: '请切换为苏格拉底式协作：不要直接下结论，先提出能显著改变方案选择的关键问题。',
+  ground: '请结合当前已接入知识库重新核验上一条回答，只保留有知识依据的结论，明确指出无法证实的部分。',
+  suggest: '请基于当前完整会话生成 4 个高价值的下一问。问题要推动决策或实施，不重复已回答内容。只输出 JSON 字符串数组。'
+} as const
+
+export function branchMergePrompt(title: string, msgs: ChatMessage[]): string {
+  return `请把分支「${title}」压缩成可合并进另一条会话的长期上下文。保留已确认事实、关键推理、分歧、约束和未解决问题；删除寒暄与重复。\n\n${conversationToMarkdown(msgs).slice(0, 30000)}`
 }
 
 export function systemFor(key: string, deep = false): string {

@@ -3,12 +3,12 @@
 // 消息时间戳、悬停浮现复制（用户/AI 均可）。
 // v3：视觉层重做至 ui/tokens 设计系统（层级表面 + 语义色 + lucide 图标 + framer-motion 入场），交互零改动。
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowUp, Brain, Camera, Check, ChevronDown, Copy, CornerDownRight, Image as ImageIcon, Paperclip, Quote, Settings, Sparkles, Square, Wrench, X } from 'lucide-react'
+import { ArrowUp, Brain, Camera, Check, ChevronDown, Copy, CornerDownRight, Database, EyeOff, GitFork, GitMerge, Image as ImageIcon, Library, ListTree, MoreHorizontal, Paperclip, Pin, Quote, RefreshCw, Settings, ShieldCheck, Sparkles, Square, Users, WandSparkles, Wrench, X } from 'lucide-react'
 import type { Block, ChatMessage, ChatProps, QuoteRef } from '../types'
 import { Markdown, Collapsible } from './Markdown'
-import { blocksToText } from '../logic/chat'
+import { blocksToText, conversationContextStats } from '../logic/chat'
 import { readAttachment, downscaleDataUrl, selectLocalFiles } from '../logic/files'
 import { island } from '../bridge'
 import { Button, Chip, IconButton } from '../ui/components'
@@ -173,6 +173,28 @@ function AnswerBody({ blocks }: { blocks?: Block[] }): React.JSX.Element {
   )
 }
 
+/** 多模型候选保持在同一条会话消息内，切换不会复制或污染主上下文。 */
+function AnswerVariants({ variants, onAdopt }: { variants: NonNullable<ChatMessage['variants']>; onAdopt?: (id: string) => void }): React.JSX.Element {
+  const [active, setActive] = useState(variants[0]?.id || '')
+  const current = variants.find((variant) => variant.id === active) || variants[0]
+  if (!current) return <></>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 3, paddingTop: 7, borderTop: `0.5px solid ${hairline(0.09)}` }}>
+      <div className="ai-scroll" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 1 }}>
+        {variants.map((variant) => (
+          <Chip key={variant.id} active={variant.id === current.id} onClick={() => setActive(variant.id)} style={{ flex: 'none', maxWidth: 170 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{variant.label}</span>
+          </Chip>
+        ))}
+        {onAdopt && <Chip icon={Check} onClick={() => onAdopt(current.id)} style={{ flex: 'none' }}>采用</Chip>}
+      </div>
+      <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <AnswerBody blocks={current.blocks} />
+      </div>
+    </div>
+  )
+}
+
 /** 引用卡片：左侧主题色条 + 引用原文 + 可选疑问；输入区可删除，气泡内只读展示 */
 function QuoteCard({ q, onRemove, compact }: { q: QuoteRef; onRemove?: () => void; compact?: boolean }): React.JSX.Element {
   return (
@@ -267,10 +289,60 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
   // 就地追问：记录哪条回答下展开了输入框 + 其草稿文本
   const [fuIdx, setFuIdx] = useState<number | null>(null)
   const [fuText, setFuText] = useState('')
+  const [panel, setPanel] = useState<'branches' | 'context' | 'council' | null>(null)
+  const [advanceIdx, setAdvanceIdx] = useState<number | null>(null)
+  const [rename, setRename] = useState('')
+  const [notice, setNotice] = useState('')
+  const [knowledgeBusy, setKnowledgeBusy] = useState(false)
+  const [councilMode, setCouncilMode] = useState<'parallel' | 'consensus' | 'debate'>('consensus')
+  const [councilIds, setCouncilIds] = useState<string[]>([])
   const boxRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const fuRef = useRef<HTMLTextAreaElement>(null)
+
+  const contextStats = useMemo(() => conversationContextStats(p.messages, p.memory || ''), [p.messages, p.memory])
+  const orderedBranches = useMemo(() => {
+    const branches = p.branch?.branches || []
+    const children = new Map<number | undefined, typeof branches>()
+    for (const branch of branches) {
+      const list = children.get(branch.parentId) || []
+      list.push(branch)
+      children.set(branch.parentId, list)
+    }
+    const result: Array<(typeof branches)[number] & { depth: number }> = []
+    const seen = new Set<number>()
+    const walk = (parentId: number | undefined, depth: number): void => {
+      for (const branch of children.get(parentId) || []) {
+        if (seen.has(branch.id)) continue
+        seen.add(branch.id); result.push({ ...branch, depth }); walk(branch.id, depth + 1)
+      }
+    }
+    walk(undefined, 0)
+    for (const branch of branches) if (!seen.has(branch.id)) result.push({ ...branch, depth: 0 })
+    return result
+  }, [p.branch?.branches])
+
+  useEffect(() => {
+    const ids = (p.councilModels || []).slice(0, 3).map((model) => model.id)
+    setCouncilIds((current) => current.filter((id) => ids.includes(id)).length >= 2 ? current.filter((id) => (p.councilModels || []).some((model) => model.id === id)) : ids)
+  }, [p.councilModels])
+
+  useEffect(() => { setRename(p.branch?.title || '') }, [p.branch?.activeId, p.branch?.title])
+
+  const flash = (message: string): void => {
+    setNotice(message)
+    window.setTimeout(() => setNotice(''), 3200)
+  }
+
+  const saveKnowledge = async (scope: 'message' | 'conversation' | 'selection', msgIndex?: number, value?: string): Promise<void> => {
+    if (!p.onSaveKnowledge || knowledgeBusy) return
+    setKnowledgeBusy(true)
+    try {
+      const result = await p.onSaveKnowledge(scope, msgIndex, value)
+      flash(result.message)
+    } finally { setKnowledgeBusy(false) }
+  }
 
   const sendFollowUp = (): void => {
     const t = fuText.trim()
@@ -340,6 +412,106 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', boxSizing: 'border-box' }}>
+      {p.messages.length > 0 && p.branch && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', padding: '5px 7px', ...surface.inset(), borderRadius: R.md }}>
+            <Chip icon={ListTree} active={panel === 'branches'} onClick={() => setPanel((value) => value === 'branches' ? null : 'branches')} title="会话分支树">
+              分支 {p.branch.branches.length}
+            </Chip>
+            <Chip icon={Brain} active={panel === 'context'} onClick={() => setPanel((value) => value === 'context' ? null : 'context')} title="管理真正送入模型的上下文">
+              上下文 {contextStats.included}
+            </Chip>
+            {p.onSaveKnowledge && (
+              <Chip icon={Library} onClick={() => void saveKnowledge('conversation')} title="将当前完整分支写入本地向量知识库">
+                {knowledgeBusy ? '写入中' : '存知识库'}
+              </Chip>
+            )}
+            {(p.councilModels?.length || 0) >= 2 && (
+              <Chip icon={Users} active={panel === 'council'} onClick={() => setPanel((value) => value === 'council' ? null : 'council')} title="让多个已配置模型并行讨论当前问题">
+                模型会诊
+              </Chip>
+            )}
+            <span style={{ flex: 1, minWidth: 4 }} />
+            <span style={{ ...text.faint(), fontSize: 9, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.branch.title}</span>
+          </div>
+
+          {notice && <div style={{ padding: '6px 10px', borderRadius: R.md, background: semBg(notice.includes('失败') || notice.includes('请先') ? sem.danger : sem.calm, 0.12), color: notice.includes('失败') || notice.includes('请先') ? sem.danger : sem.calm, fontSize: FS.tiny }}>{notice}</div>}
+
+          {panel === 'branches' && (
+            <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ ...surface.inset(), borderRadius: R.lg, padding: 9, display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <GitFork size={13} strokeWidth={1.8} style={{ color: accent(), flex: 'none' }} />
+                <input
+                  value={rename}
+                  onChange={(event) => setRename(event.target.value)}
+                  onBlur={() => p.onRenameBranch?.(rename)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') { p.onRenameBranch?.(rename); event.currentTarget.blur() } }}
+                  style={{ flex: 1, minWidth: 0, background: fill(1), border: 'none', outline: 'none', borderRadius: R.sm, color: ink(1), padding: '5px 8px', fontSize: FS.small, fontWeight: 600, fontFamily: 'var(--font)' }}
+                  title="重命名当前分支"
+                />
+                {p.branch.parentId && <span style={{ ...text.faint(), fontSize: 9 }}>Fork 分支</span>}
+              </div>
+              <div className="ai-scroll" style={{ maxHeight: 190, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                {orderedBranches.map((branch) => (
+                  <div key={branch.id} style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 30, paddingLeft: Math.min(branch.depth, 4) * 15 }}>
+                    <span style={{ width: 12, height: 12, display: 'inline-flex', alignItems: 'center', color: branch.active ? accent() : ink(4), flex: 'none' }}>
+                      {branch.parentId ? <GitFork size={11} strokeWidth={1.8} /> : <Database size={11} strokeWidth={1.8} />}
+                    </span>
+                    <button onClick={() => p.onSwitchBranch?.(branch.id)} disabled={branch.active} style={{ flex: 1, minWidth: 0, border: 'none', background: branch.active ? semBg(accent(), 0.13) : 'transparent', color: branch.active ? accent() : ink(2), borderRadius: R.sm, padding: '5px 8px', textAlign: 'left', fontSize: FS.tiny, fontWeight: branch.active ? 700 : 500, cursor: branch.active ? 'default' : 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {branch.title}
+                    </button>
+                    {!branch.active && <IconButton icon={GitMerge} onClick={() => p.onMergeBranch?.(branch.id)} title="压缩该分支并合并进当前会话记忆" size={24} />}
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {panel === 'context' && (
+            <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ ...surface.inset(), borderRadius: R.lg, padding: 9, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                <Chip active>送入 {contextStats.included}</Chip>
+                <Chip icon={Pin}>钉选 {contextStats.pinned}</Chip>
+                <Chip icon={EyeOff}>排除 {contextStats.excluded}</Chip>
+                <Chip icon={Paperclip}>附件 {contextStats.attachments}</Chip>
+                <span style={{ flex: 1 }} />
+                <span style={{ ...text.faint(), alignSelf: 'center', fontVariantNumeric: 'tabular-nums' }}>约 {contextStats.estimatedTokens.toLocaleString()} tokens</span>
+              </div>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ ...text.overline() }}>会话指令 · 每轮持续生效</span>
+                <textarea value={p.instruction || ''} onChange={(event) => p.onSetInstruction?.(event.target.value)} rows={2} placeholder="例如：始终以资深 TypeScript 架构师视角回答，先指出风险再给方案。" className="ai-scroll" style={{ ...surface.card(), border: 'none', outline: 'none', resize: 'vertical', minHeight: 42, maxHeight: 100, padding: '7px 9px', color: ink(1), fontSize: FS.small, lineHeight: 1.5, fontFamily: 'var(--font)' }} />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ ...text.overline() }}>长期记忆 · 跨轮次与 Fork 保留</span>
+                <textarea value={p.memory || ''} onChange={(event) => p.onSetMemory?.(event.target.value)} rows={3} placeholder="记录稳定事实、偏好、约束与已确认结论；也可以让 AI 从完整会话自动压缩。" className="ai-scroll" style={{ ...surface.card(), border: 'none', outline: 'none', resize: 'vertical', minHeight: 54, maxHeight: 150, padding: '7px 9px', color: ink(1), fontSize: FS.small, lineHeight: 1.5, fontFamily: 'var(--font)' }} />
+              </label>
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                {!!p.memory && <Button variant="ghost" sm onClick={() => p.onSetMemory?.('')}>清空记忆</Button>}
+                <Button variant="tinted" sm onClick={p.onCompressContext}><RefreshCw size={11} strokeWidth={2} />AI 压缩会话</Button>
+              </div>
+            </motion.div>
+          )}
+
+          {panel === 'council' && (
+            <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ ...surface.inset(), borderRadius: R.lg, padding: 9, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {(p.councilModels || []).map((model) => (
+                  <Chip key={model.id} active={councilIds.includes(model.id)} onClick={() => setCouncilIds((ids) => ids.includes(model.id) ? ids.filter((id) => id !== model.id) : [...ids, model.id].slice(0, 4))} style={{ maxWidth: 180 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{model.label}</span>
+                  </Chip>
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {([
+                  ['parallel', '并行回答'], ['consensus', '提炼共识'], ['debate', '分歧辩论']
+                ] as const).map(([mode, label]) => <Chip key={mode} active={councilMode === mode} onClick={() => setCouncilMode(mode)}>{label}</Chip>)}
+                <span style={{ flex: 1 }} />
+                <Button variant="primary" sm disabled={councilIds.length < 2} onClick={() => { p.onCouncil?.(councilMode, councilIds); setPanel(null) }}><Users size={11} strokeWidth={2} />启动会诊</Button>
+              </div>
+            </motion.div>
+          )}
+        </>
+      )}
       {p.messages.length > 0 && (
         <div
           ref={boxRef}
@@ -385,6 +557,9 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                 {/* 悬停浮现：时间 + 复制我的提问 */}
                 <div className="row-acts" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {m.ts && <span style={{ ...text.faint(), fontSize: 9 }}>{fmtTs(m.ts)}</span>}
+                  {p.onSetContextMode && <IconButton icon={Pin} active={m.contextMode === 'pinned'} onClick={() => p.onSetContextMode?.(mi, m.contextMode === 'pinned' ? 'normal' : 'pinned')} title={m.contextMode === 'pinned' ? '取消长期上下文钉选' : '始终放入后续模型上下文'} size={20} />}
+                  {p.onSetContextMode && <IconButton icon={EyeOff} active={m.contextMode === 'excluded'} onClick={() => p.onSetContextMode?.(mi, m.contextMode === 'excluded' ? 'normal' : 'excluded')} title={m.contextMode === 'excluded' ? '重新纳入模型上下文' : '仅保留展示，不再送入模型'} size={20} />}
+                  {p.onFork && <IconButton icon={GitFork} onClick={() => p.onFork?.(mi)} title="从这条消息 Fork 新分支" size={20} />}
                   <div className="hv" onClick={() => copyText(mi, m.text || '')} style={copyChip(copiedIdx === mi)}>
                     {copiedIdx === mi ? <Check size={9} strokeWidth={2.5} /> : <Copy size={9} strokeWidth={2} />}
                   </div>
@@ -402,6 +577,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                   {m.typing && <TypingDots />}
                   {m.live && <AgentLiveBody live={m.live} />}
                   <AnswerBody blocks={m.blocks} />
+                  {(m.variants?.length || 0) > 0 && <AnswerVariants variants={m.variants!} onAdopt={p.onAdoptVariant ? (id) => p.onAdoptVariant?.(mi, id) : undefined} />}
                   {/* 就地追问子线程：问答都嵌套在本气泡内，形成一条对话支线 */}
                   {(m.followups?.length ?? 0) > 0 && (
                     <div style={{ marginTop: 5, paddingLeft: 10, borderLeft: `2px solid ${accent(0.7, 0.32)}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -439,6 +615,11 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                         </Chip>
                       )}
                       <span style={{ flex: 1 }} />
+                      {p.onSetContextMode && <IconButton icon={Pin} active={m.contextMode === 'pinned'} onClick={() => p.onSetContextMode?.(mi, m.contextMode === 'pinned' ? 'normal' : 'pinned')} title={m.contextMode === 'pinned' ? '取消长期上下文钉选' : '始终放入后续模型上下文'} size={22} />}
+                      {p.onSetContextMode && <IconButton icon={EyeOff} active={m.contextMode === 'excluded'} onClick={() => p.onSetContextMode?.(mi, m.contextMode === 'excluded' ? 'normal' : 'excluded')} title={m.contextMode === 'excluded' ? '重新纳入模型上下文' : '仅保留展示，不再送入模型'} size={22} />}
+                      {p.onSaveKnowledge && <IconButton icon={Library} onClick={() => void saveKnowledge('message', mi)} title="将这条回答写入本地向量知识库" size={22} />}
+                      {p.onFork && <IconButton icon={GitFork} onClick={() => p.onFork?.(mi)} title="从这条回答 Fork 新分支" size={22} />}
+                      {p.onAdvance && <IconButton icon={MoreHorizontal} active={advanceIdx === mi} onClick={() => setAdvanceIdx((value) => value === mi ? null : mi)} title="让 AI 深化、质疑或提出下一问" size={22} />}
                       {/* 悬停浮现：时间 + 复制整条回复 */}
                       <div className="row-acts" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {m.ts && <span style={{ ...text.faint(), fontSize: 9 }}>{fmtTs(m.ts)}</span>}
@@ -446,6 +627,34 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                           {copiedIdx === mi ? <><Check size={9} strokeWidth={2.5} />已复制</> : <><Copy size={9} strokeWidth={2} />复制</>}
                         </div>
                       </div>
+                    </div>
+                  )}
+                  {advanceIdx === mi && p.onAdvance && (
+                    <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 5, padding: 7, ...surface.inset() }}>
+                      {([
+                        ['critique', ShieldCheck, '严格自检'],
+                        ['assumptions', Brain, '假设与风险'],
+                        ['alternatives', GitFork, '替代路径'],
+                        ['decompose', ListTree, '拆解问题'],
+                        ['socratic', Quote, '反问澄清'],
+                        ['ground', Library, '知识库核验'],
+                        ['suggest', WandSparkles, '生成下一问']
+                      ] as const).map(([action, Icon, label]) => (
+                        <Button key={action} variant="ghost" sm onClick={() => { p.onAdvance?.(mi, action); setAdvanceIdx(null) }} style={{ justifyContent: 'flex-start', minWidth: 0 }}>
+                          <Icon size={11} strokeWidth={1.9} />{label}
+                        </Button>
+                      ))}
+                    </motion.div>
+                  )}
+                  {(m.suggestions?.length || 0) > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 3 }}>
+                      <span style={{ ...text.overline() }}>可继续追问</span>
+                      {m.suggestions!.map((suggestion) => (
+                        <button key={suggestion} onClick={() => p.onUseSuggestion?.(suggestion)} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, border: 'none', background: fill(2), borderRadius: R.sm, color: ink(2), padding: '6px 8px', textAlign: 'left', fontSize: FS.tiny, lineHeight: 1.4, cursor: 'pointer', fontFamily: 'var(--font)' }}>
+                          <CornerDownRight size={10} strokeWidth={2} style={{ flex: 'none', marginTop: 2, color: accent() }} />
+                          {suggestion}
+                        </button>
+                      ))}
                     </div>
                   )}
                   {/* 就地追问输入框：仅在该条回答下展开 */}
@@ -587,6 +796,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
             />
             <div style={{ display: 'flex', gap: 6 }}>
               <Button variant="primary" sm onClick={confirmQuote} style={{ flex: 1 }}>贴入输入区</Button>
+              {p.onSaveKnowledge && <IconButton icon={Library} onClick={() => { void saveKnowledge('selection', undefined, sel.text); setSel(null) }} title="将选中片段写入本地向量知识库" size={28} />}
               <Button variant="ghost" sm onClick={() => setSel(null)}>取消</Button>
             </div>
           </motion.div>

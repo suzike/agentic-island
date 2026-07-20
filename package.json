@@ -1,6 +1,6 @@
 {
   "name": "agentic-island",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "常驻 Windows 屏幕顶部的 AI 编码 Agent 状态监控、审批与协作面板",
   "main": "./out/main/index.js",
   "author": "Agentic-Island",
@@ -14,7 +14,8 @@
     "probe": "node --experimental-strip-types scripts/probe.mjs",
     "demo:plan": "node scripts/demo-plan.mjs",
     "docs:capture": "node scripts/capture-readme.mjs",
-    "package": "electron-vite build && electron-builder --win nsis --publish never"
+    "package": "electron-vite build && electron-builder --win nsis --publish never",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",

@@ -1,6 +1,6 @@
 # Agentic-Island 发布指南
 
-本文档对应 `0.5.1` 的 Windows NSIS 发布流程。
+本文档对应 `0.6.0` 的 Windows NSIS 发布流程。
 
 ## 1. 发布前审查
 
@@ -9,6 +9,7 @@
 - README、CHANGELOG、架构说明、截图和版本 Release Note 一致。
 - `npm audit --omit=dev` 无已知生产依赖漏洞。
 - 本地模型、FFmpeg、hooks 和图标资源均存在。
+- 问答分支、上下文、知识库写入与供应商配置迁移的回归测试通过。
 
 ## 2. 发布门禁
 
@@ -17,7 +18,9 @@ npm run typecheck
 npm test
 npm run build
 npm run docs:capture
+npm audit --omit=dev
 npm run package
+npm run verify:package
 ```
 
 如果 electron-builder 在 GitHub 运行时下载阶段超时，而 `node_modules/electron/dist` 已存在且 `node -p "require('electron/package.json').version"` 与项目锁定版本一致，可在 `npm run build` 成功后复用本地 Windows 运行时：

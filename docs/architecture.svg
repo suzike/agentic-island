@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
-<title id="title">Agentic-Island v0.5.1 总体架构</title>
+<title id="title">Agentic-Island v0.6.0 总体架构</title>
   <desc id="desc">展示 Agent 接入、Electron 主进程、预加载桥、React 工作台和本地数据边界。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#f0a233"/></marker>
@@ -9,7 +9,7 @@
     </style>
   </defs>
   <rect width="1200" height="720" fill="#100d1a"/>
-<text class="t head" x="48" y="52">Agentic-Island v0.5.1 · Windows 本地优先桌面架构</text>
+<text class="t head" x="48" y="52">Agentic-Island v0.6.0 · Windows 本地优先桌面架构</text>
   <text class="t muted small" x="48" y="78">Electron 39 · React 19 · TypeScript · loopback bridge · contextIsolation · DPAPI</text>
 
   <g filter="url(#shadow)">
@@ -34,7 +34,7 @@
     <text class="t label" x="768" y="149">Preload 契约与 React 工作台</text>
     <rect class="box" x="768" y="173" width="366" height="58" fill="#1c1733" stroke="#4c3f7a"/><text class="t small" x="790" y="198">contextBridge · IslandBridgeApi</text><text class="t muted small" x="790" y="217">最小化、类型化 IPC 能力面</text>
     <rect class="box" x="768" y="252" width="108" height="52" fill="#1e1836" stroke="#463a75"/><text class="t small" x="789" y="284">Agents / Plan</text>
-    <rect class="box" x="888" y="252" width="108" height="52" fill="#1e1836" stroke="#463a75"/><text class="t small" x="915" y="284">AI 问答</text>
+    <rect class="box" x="888" y="252" width="108" height="52" fill="#1e1836" stroke="#463a75"/><text class="t small" x="915" y="276">AI 问答</text><text class="t muted small" x="908" y="296">分支 · 会诊</text>
     <rect class="box" x="1008" y="252" width="108" height="52" fill="#1e1836" stroke="#463a75"/><text class="t small" x="1036" y="284">快捷执行</text>
     <rect class="box" x="768" y="316" width="108" height="52" fill="#1f1a38" stroke="#c9884a"/><text class="t small" x="802" y="348">待办</text>
     <rect class="box" x="888" y="316" width="108" height="52" fill="#1f1a38" stroke="#c9884a"/><text class="t small" x="913" y="348">灵感便签</text>

@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { FileText, FolderOpen, Globe, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
+import { FileText, FolderOpen, Globe, MessagesSquare, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import type { KbSourceView, LlmRequestConfig } from '../../../shared/protocol'
 import { island } from '../bridge'
 import { Markdown } from './Markdown'
@@ -24,7 +24,7 @@ interface Props {
   llmReady: boolean
 }
 
-const KIND_GLYPH: Record<string, LucideIcon> = { folder: FolderOpen, files: FileText, url: Globe }
+const KIND_GLYPH: Record<string, LucideIcon> = { folder: FolderOpen, files: FileText, url: Globe, conversation: MessagesSquare }
 
 // LLM-Wiki 合成：把代表性片段综合成一页结构化知识总览（编译一次、长期复用）
 const WIKI_SYSTEM =

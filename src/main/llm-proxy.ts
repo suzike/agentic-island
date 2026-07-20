@@ -6,6 +6,13 @@ import { netFetch } from './http-client'
 
 const chatUrl = (baseUrl: string): string => baseUrl.replace(/\/+$/, '') + '/chat/completions'
 
+function requestError(status: number, body: string, model = ''): string {
+  if (status === 401 || status === 403) return '认证失败：当前 API Key 无效，或不属于所选供应商'
+  if (status === 404 && /model|not found|不存在/i.test(body)) return `模型不可用：${model || '当前型号'}，请同步可用模型后重试`
+  if (status === 429) return '请求受限：账号余额、并发或速率限制不足'
+  return `HTTP ${status} ${body.slice(0, 160)}`
+}
+
 export async function complete(
   cfg: LlmRequestConfig,
   system: string,
@@ -37,7 +44,7 @@ export async function complete(
       if (hasImage && (res.status === 400 || /image_url|vision|multimodal|deserialize/i.test(body))) {
         return { ok: false, error: `当前模型「${cfg.model}」不支持图片输入。请到「设置 › 问答助手模型」切换/新增一个支持视觉的模型（如 glm-4v、qwen-vl-max、gpt-4o、gemini 等）后再试。` }
       }
-      return { ok: false, error: `HTTP ${res.status} ${body.slice(0, 160)}` }
+      return { ok: false, error: requestError(res.status, body, cfg.model) }
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[] }
     const msg = data.choices?.[0]?.message
@@ -45,6 +52,28 @@ export async function complete(
     // 推理型模型（如 deepseek-reasoner）会单独返回思维链
     const reasoning = msg?.reasoning_content || msg?.reasoning
     return typeof text === 'string' ? { ok: true, text, reasoning } : { ok: false, error: '响应为空' }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
+/** 读取当前端点与账号实际可用的模型目录（OpenAI 兼容 GET /models）。 */
+export async function listModels(cfg: LlmRequestConfig): Promise<{ ok: boolean; models?: string[]; error?: string }> {
+  if (!cfg.baseUrl || !/^https?:\/\//.test(cfg.baseUrl)) return { ok: false, error: 'Base URL 无效' }
+  if (!cfg.apiKey) return { ok: false, error: 'API Key 未配置' }
+  try {
+    const res = await netFetch(cfg.baseUrl.replace(/\/+$/, '') + '/models', {
+      method: 'GET',
+      timeoutMs: 30000,
+      headers: { authorization: `Bearer ${cfg.apiKey}` }
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      return { ok: false, error: requestError(res.status, body) }
+    }
+    const data = await res.json() as { data?: Array<{ id?: unknown }> }
+    const models = [...new Set((data.data || []).map((item) => typeof item.id === 'string' ? item.id.trim() : '').filter(Boolean))]
+    return models.length ? { ok: true, models } : { ok: false, error: '端点未返回可用模型' }
   } catch (e) {
     return { ok: false, error: String(e) }
   }
@@ -65,7 +94,7 @@ export async function embed(cfg: LlmRequestConfig, texts: string[]): Promise<{ o
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      return { ok: false, error: `embeddings HTTP ${res.status} · ${cfg.model} · ${body.slice(0, 160)}` }
+      return { ok: false, error: requestError(res.status, body, cfg.model) }
     }
     const data = (await res.json()) as { data?: { embedding?: number[]; index?: number }[] }
     // 按 index 归位（部分端点乱序返回），再取 embedding

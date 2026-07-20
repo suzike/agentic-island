@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import type { AgentCliEvent, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, RuntimeInfo } from '../../shared/protocol'
-import type { ActivityEntry, AgentLive, AgentVM, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
+import type { ActivityEntry, AgentLive, AgentVM, AskBranchMeta, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
 import { DEFAULT_QUICK_PROMPTS } from './logic/prompts'
@@ -9,7 +9,7 @@ import { tagOf } from './logic/clip'
 import { CLUSTER_SYSTEM, clusterPrompt, parseClusters } from './logic/clipCluster'
 import { noteSystemPrompt, parseAiNote, noteSearchPrompt, parseSearchIds } from './logic/noteAi'
 import { BUILTIN_POOLS, barRefreshPrompt, parseBarRefresh } from './logic/barContent'
-import { deriveAmbientStatus } from './logic/ambientBar'
+import { ambientTextWindow, buildAmbientTextDeck, clampBarRotation, deriveAmbientStatus, type AmbientTextItem } from './logic/ambientBar'
 import { PRESET_FEEDS, DEFAULT_FEED_INTERESTS, linkId, dailyPrompt, parseDaily, processPrompt, parseProcess, titleBlocked } from './logic/rssAi'
 import { capsuleSystemPrompt, parseCapsule, type CapsuleResult } from './logic/capsuleAi'
 import { Capsule } from './components/Capsule'
@@ -22,8 +22,8 @@ import { KB_SYSTEM, kbGroundPrompt, citeSources } from './logic/kbAsk'
 import { MarkdownStudio } from './components/MarkdownStudio'
 import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
-import { PROVIDERS } from './logic/providers'
-import { systemFor, parseBlocks, looseBlocks, historyFromThread, buildQuotedPrompt } from './logic/chat'
+import { PROVIDERS, migrateProviderSettings, patchProviderDraft, switchProviderSettings } from './logic/providers'
+import { ADVANCE_PROMPTS, branchMergePrompt, buildQuotedPrompt, conversationTitle, conversationToMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor } from './logic/chat'
 import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
 import { ThemeDesigner, type Tokens } from './components/ThemeDesigner'
 import { CalcSheet } from './components/CalcSheet'
@@ -67,6 +67,21 @@ const TABS: { key: Tab; label: string; icon: (typeof Ico)[keyof typeof Ico] }[] 
   { key: 'term', label: '终端', icon: Ico.term },
   { key: 'settings', label: '设置', icon: Ico.settings }
 ]
+const DEFAULT_LLM_SETTINGS = migrateProviderSettings({ provider: 'deepseek' })
+const AMBIENT_SUGGESTION_LABELS: Record<string, string> = {
+  quotes: '名言', exp: '经验', agent: 'Agent', thermal: '热管理', github: 'GitHub', custom: '自定义', brief: '工作简报'
+}
+
+const ambientSuggestionPrompt = (item: AmbientTextItem): string => {
+  if (item.mode === 'brief') return `请根据这条实时工作状态，帮我判断优先级并给出下一步行动：\n${item.text}`
+  if (item.mode === 'github') return `请介绍并评估这条 GitHub 热门内容，说明它是否值得我进一步关注：\n${item.text}`
+  return `请结合软件开发和我的实际工作场景，展开这条灵感，并给出 3 条可执行建议：\n${item.text}`
+}
+
+const newAskBranch = (title = '新会话', parentId?: number, forkAt?: number): AskBranchMeta => {
+  const now = Date.now()
+  return { id: now * 100 + Math.floor(Math.random() * 100), title, parentId, forkAt, createdAt: now, updatedAt: now, memory: '', instruction: '' }
+}
 
 // 桌面挂件「AI 速览」系统提示：只回一句极短中文提点
 const WIDGET_BRIEF_SYSTEM =
@@ -192,8 +207,10 @@ export function App(): React.JSX.Element {
   // 迷你条动态内容池：AI 每 10 分钟刷新 + GitHub 热门（内存态，重启重新拉）
   const [aiPools, setAiPools] = useState<Record<string, string[]>>({})
   const [ghItems, setGhItems] = useState<string[]>([])
+  const [askSuggestionCursor, setAskSuggestionCursor] = useState(() => Math.floor(Math.random() * 997))
   // 问答历史会话（归档）
   const [askSessions, setAskSessions] = useState<AskSession[]>([])
+  const [activeAskBranch, setActiveAskBranch] = useState<AskBranchMeta>(() => newAskBranch())
   // 项目工作台：资讯、待办和快捷执行共享项目、运行记录与成果物
   const [workbenchProjects, setWorkbenchProjects] = useState<WorkbenchProject[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
@@ -235,10 +252,7 @@ export function App(): React.JSX.Element {
   const [displays, setDisplays] = useState<DisplayInfo[]>([])
   useEffect(() => { island.getDisplays().then(setDisplays).catch(() => { /* 忽略 */ }) }, [])
   const [llm, setLlm] = useState<LlmState>({
-    open: false, provider: 'deepseek', model: '', baseUrl: 'https://api.deepseek.com/v1',
-    apiKey: '', testStatus: 'idle', testMsg: '', saved: [],
-    // 每家厂商的型号列表：以官方预设为种子，用户可增删（持久化）
-    modelLists: Object.fromEntries(PROVIDERS.map((pr): [string, string[]] => [pr.key, [...pr.models]]))
+    open: false, ...DEFAULT_LLM_SETTINGS, testStatus: 'idle', testMsg: ''
   })
 
   const llmRef = useRef(llm)
@@ -247,6 +261,8 @@ export function App(): React.JSX.Element {
   threadsRef.current = threads
   const quotesRef = useRef(quotes)
   quotesRef.current = quotes
+  const activeAskBranchRef = useRef(activeAskBranch)
+  activeAskBranchRef.current = activeAskBranch
   // 自动化规则用：始终读到最新的 reviews / 复盘素材，避免闭包陈旧
   const reviewsRef = useRef(reviews)
   reviewsRef.current = reviews
@@ -290,8 +306,14 @@ export function App(): React.JSX.Element {
         if (s.srsState && typeof s.srsState === 'object') setSrsState(s.srsState as Record<number, SrsCard>)
         if (Array.isArray(s.radar)) setRadar(s.radar as RadarItem[])
         if (typeof s.embedModel === 'string') setEmbedModel(s.embedModel)
-        if (Array.isArray(s.askThread)) setThreads((th) => ({ ...th, ask: s.askThread as ChatMessage[] }))
+        if (Array.isArray(s.askThread)) {
+          const askThread = s.askThread as ChatMessage[]
+          setThreads((th) => ({ ...th, ask: askThread }))
+          // 旧版只有 askThread、没有活动分支元数据：首次升级时从首问生成稳定根分支标题。
+          if (!s.activeAskBranch) setActiveAskBranch({ ...newAskBranch(conversationTitle(askThread)), createdAt: askThread[0]?.ts || Date.now() })
+        }
         if (Array.isArray(s.askSessions)) setAskSessions(s.askSessions as AskSession[])
+        if (s.activeAskBranch && typeof s.activeAskBranch === 'object') setActiveAskBranch((v) => ({ ...v, ...(s.activeAskBranch as Partial<AskBranchMeta>) }))
         const migratedProjects = migrateProjects(s)
         setWorkbenchProjects(migratedProjects)
         if (typeof s.activeProjectId === 'string' && migratedProjects.some((p) => p.id === s.activeProjectId)) setActiveProjectId(s.activeProjectId)
@@ -324,7 +346,7 @@ export function App(): React.JSX.Element {
         if (typeof s.fullscreen === 'boolean') setFullscreen(s.fullscreen)
         if (typeof s.fontChoice === 'string') setFontChoice(s.fontChoice)
         if (typeof s.uiZoom === 'number') setUiZoom(Math.max(0.9, Math.min(1.3, s.uiZoom)))
-        if (s.llm) setLlm((v) => ({ ...v, ...(s.llm as Partial<LlmState>), open: false, testStatus: 'idle', testMsg: '' }))
+        if (s.llm) setLlm((v) => ({ ...v, ...migrateProviderSettings(s.llm), open: false, testStatus: 'idle', testMsg: '' }))
       }
       // 权威同步一次多屏偏好：主进程默认 follow=true，与渲染层默认 multiMonitor=false 不一致，
       // 以水合后的持久化值为准纠正岛所在屏（修复"设置显示固定主屏、实际岛却跟鼠标跳屏"）
@@ -575,6 +597,7 @@ export function App(): React.JSX.Element {
         .map((m) => (m.followups ? { ...m, followups: m.followups.filter((f) => !f.typing && !f.live) } : m))
         .slice(-60),
       askSessions: askSessions.slice(0, 40),
+      activeAskBranch,
       workbenchProjects,
       activeProjectId,
       workflowRuns: workflowRuns.slice(0, 100),
@@ -603,9 +626,13 @@ export function App(): React.JSX.Element {
       pomo: pomo.phase === 'idle' ? undefined : pomo,
       pomoDone,
       notes: notes.slice(0, 400),
-      llm: { provider: llm.provider, model: llm.model, baseUrl: llm.baseUrl, apiKey: llm.apiKey, saved: llm.saved, modelLists: llm.modelLists }
+      llm: {
+        provider: llm.provider, model: llm.model, baseUrl: llm.baseUrl, apiKey: llm.apiKey,
+        saved: llm.saved, modelLists: llm.modelLists, profiles: llm.profiles,
+        providerCatalogVersion: llm.providerCatalogVersion
+      }
     })
-  }, [settings, soundMap, activeMonitor, todos, theme, threads, askSessions, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedModel, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists])
+  }, [settings, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedModel, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
 
   // 字体与缩放应用（--font 变量 + 主进程 zoomFactor）
   useEffect(() => {
@@ -941,6 +968,26 @@ export function App(): React.JSX.Element {
     return { quotes: merge('quotes'), exp: merge('exp'), agent: merge('agent'), thermal: merge('thermal'), github: ghItems, custom: customAgg }
   }, [aiPools, ghItems, barCfg.customTopics, barCfg.customQuotes])
 
+  const ambientBrief = useMemo(() => [
+    ...(meetings.filter((meeting) => meeting.start > Date.now()).slice(0, 1).map((meeting) => `⏰ ${new Date(meeting.start).getHours()}:${String(new Date(meeting.start).getMinutes()).padStart(2, '0')} ${meeting.title}（${Math.max(1, Math.round((meeting.start - Date.now()) / 60000))} 分钟后）`)),
+    ...(todos.filter((todo) => !todo.done && todo.due && todo.due <= Date.now()).length ? [`⏳ ${todos.filter((todo) => !todo.done && todo.due && todo.due <= Date.now()).length} 项待办已到时`] : []),
+    ...(agents.filter((agent) => agent.status !== 'done').length ? [`🤖 ${agents.filter((agent) => agent.status !== 'done').length} 个 Agent 会话活动中`] : []),
+    ...(todos.filter((todo) => !todo.done).length ? [`📝 今日还剩 ${todos.filter((todo) => !todo.done).length} 项待办`] : [])
+  ], [meetings, todos, agents])
+  const ambientSuggestionDeck = useMemo(
+    () => buildAmbientTextDeck(barCfg.modes, barPools, ambientBrief),
+    [barCfg.modes, barPools, ambientBrief]
+  )
+  const ambientSuggestions = useMemo(
+    () => ambientTextWindow(ambientSuggestionDeck, askSuggestionCursor, 2),
+    [ambientSuggestionDeck, askSuggestionCursor]
+  )
+  useEffect(() => {
+    if (tab !== 'ask' || (threads['ask']?.length || 0) > 0) return
+    const timer = setInterval(() => setAskSuggestionCursor((cursor) => cursor + 1), clampBarRotation(barCfg.rotationSeconds) * 1000)
+    return () => clearInterval(timer)
+  }, [tab, threads['ask']?.length, barCfg.rotationSeconds])
+
   // ===== 剪贴板助手：主进程推送（文本/图片）→ 记录历史（收藏项持久化，其余仅内存）=====
   const clipSeq = useRef(0)
   useEffect(() => {
@@ -1174,7 +1221,9 @@ export function App(): React.JSX.Element {
     const userPayload: string | Array<Record<string, unknown>> = images.length
       ? [{ type: 'text', text: fullText }, ...images.map((a) => ({ type: 'image_url', image_url: { url: a.dataUrl! } }))]
       : fullText
-    island.llmComplete(cfg, systemFor(key, deep), userPayload, deep, history).then((res) => {
+    const instruction = key === 'ask' ? activeAskBranchRef.current.instruction?.trim() : ''
+    const system = systemFor(key, deep) + (instruction ? `\n\n本会话额外指令（持续生效）：\n${instruction}` : '')
+    island.llmComplete(cfg, system, userPayload, deep, history).then((res) => {
       if (res.ok) {
         let blocks = parseBlocks(res.text) || looseBlocks(res.text)
         // 推理型模型单独返回的思维链，作为 think block 置于最前
@@ -1195,7 +1244,9 @@ export function App(): React.JSX.Element {
     if (!em) { settle([{ t: 'note', text: '📚 知识库检索需要向量模型：点输入区「⚙ 库」打开知识库面板，填入 Embedding 模型（如 text-embedding-3-small / bge-m3）。' }]); return }
     const sr = await island.kbSearch({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: em }, query, 8)
     if (!sr.ok || !sr.hits?.length) { settle([{ t: 'note', text: '📚 ' + (sr.error || '知识库里没有检索到相关内容，可在知识库面板添加更多资料。') }]); return }
-    const res = await island.llmComplete(cfg, KB_SYSTEM, kbGroundPrompt(query, sr.hits), deep, history)
+    const instruction = activeAskBranchRef.current.instruction?.trim()
+    const system = KB_SYSTEM + (instruction ? `\n\n本会话额外指令（持续生效）：\n${instruction}` : '')
+    const res = await island.llmComplete(cfg, system, kbGroundPrompt(query, sr.hits), deep, history)
     if (!res.ok) { settle([{ t: 'note', text: '请求失败：' + (res.error || '未知错误') }]); return }
     let blocks = parseBlocks(res.text) || looseBlocks(res.text)
     if (res.reasoning) blocks = [{ t: 'think' as const, text: res.reasoning }, ...blocks]
@@ -1207,7 +1258,9 @@ export function App(): React.JSX.Element {
   // 引用片段：气泡里作为卡片单独展示；发给模型的文本把引用+疑问组装进上下文
   const pushAndReply = useCallback((key: string, text: string, atts: Composer['attachments'], deep = false, qs: QuoteRef[] = []): void => {
     if (!text && atts.length === 0 && qs.length === 0) return
-    const history = historyFromThread(threadsRef.current[key] || [])
+    if (key === 'ask') setActiveAskBranch((branch) => ({ ...branch, title: branch.title === '新会话' ? (text.trim().replace(/\s+/g, ' ').slice(0, 28) || '附件会话') : branch.title, updatedAt: Date.now() }))
+    const memory = key === 'ask' ? activeAskBranchRef.current.memory || '' : ''
+    const history = historyFromThread(threadsRef.current[key] || [], 12, memory)
     const llmText = qs.length ? buildQuotedPrompt(qs, text) : text
     setThreads((th) => ({ ...th, [key]: [...(th[key] || []), { role: 'user', text, attachments: atts, quotes: qs.length ? qs : undefined, ts: Date.now() }, { role: 'agent', typing: true }] }))
     setComposers((c) => ({ ...c, [key]: emptyComposer() }))
@@ -1239,36 +1292,56 @@ export function App(): React.JSX.Element {
     // 重试时保留原引用上下文
     const retryText = lastUser.quotes?.length ? buildQuotedPrompt(lastUser.quotes, (lastUser.text || '').trim()) : (lastUser.text || '').trim()
     setThreads((th) => ({ ...th, [key]: [...kept, { role: 'agent', typing: true }] }))
-    fetchReply(key, retryText, lastUser.attachments || [], deep, historyFromThread(msgs.slice(0, lastUserIdx)))
+    fetchReply(key, retryText, lastUser.attachments || [], deep, historyFromThread(msgs.slice(0, lastUserIdx), 12, key === 'ask' ? activeAskBranchRef.current.memory || '' : ''))
   }, [fetchReply])
-  // ===== 问答多会话：归档当前 → 新建/切换/删除 =====
+  // ===== 问答分支树：稳定分支 id + 父子关系 + 分支级长期记忆/指令 =====
   const archiveCurrentAsk = useCallback((): AskSession | null => {
     const msgs = (threadsRef.current['ask'] || []).filter((m) => !m.typing)
     if (msgs.length === 0) return null
-    const firstUser = msgs.find((m) => m.role === 'user')
-    const title = (firstUser?.text || '未命名对话').slice(0, 20)
     return {
-      id: Date.now(),
-      title,
-      msgs: msgs.slice(-60)
+      ...activeAskBranch,
+      title: activeAskBranch.title === '新会话' ? conversationTitle(msgs) : activeAskBranch.title,
+      msgs: msgs.slice(-60),
+      updatedAt: Date.now()
     }
-  }, [])
+  }, [activeAskBranch])
   const askNew = useCallback((): void => {
     const arch = archiveCurrentAsk()
-    if (arch) setAskSessions((l) => [arch, ...l].slice(0, 40))
+    if (arch) setAskSessions((list) => [arch, ...list.filter((item) => item.id !== arch.id)].slice(0, 40))
+    setActiveAskBranch(newAskBranch())
     setThreads((th) => ({ ...th, ask: [] }))
   }, [archiveCurrentAsk])
   const askSwitch = useCallback((id: number): void => {
-    setAskSessions((l) => {
-      const target = l.find((s) => s.id === id)
-      if (!target) return l
-      const rest = l.filter((s) => s.id !== id)
-      const arch = archiveCurrentAsk()
-      setThreads((th) => ({ ...th, ask: target.msgs }))
+    if (id === activeAskBranch.id) return
+    const target = askSessions.find((session) => session.id === id)
+    if (!target) return
+    const arch = archiveCurrentAsk()
+    setAskSessions((list) => {
+      const rest = list.filter((session) => session.id !== id && session.id !== arch?.id)
       return arch ? [arch, ...rest].slice(0, 40) : rest
     })
-  }, [archiveCurrentAsk])
+    const { msgs, ...meta } = target
+    setActiveAskBranch(meta)
+    setThreads((th) => ({ ...th, ask: msgs }))
+  }, [activeAskBranch.id, archiveCurrentAsk, askSessions])
   const askDelete = useCallback((id: number): void => setAskSessions((l) => l.filter((s) => s.id !== id)), [])
+
+  const askFork = useCallback((msgIndex: number): void => {
+    const msgs = threadsRef.current.ask || []
+    const forked = forkConversation(msgs, msgIndex)
+    if (!forked.length) return
+    const original = archiveCurrentAsk()
+    if (original) setAskSessions((list) => [original, ...list.filter((item) => item.id !== original.id)].slice(0, 40))
+    const title = `${conversationTitle(forked)} · 分支`
+    setActiveAskBranch({ ...newAskBranch(title, activeAskBranch.id, msgIndex), memory: activeAskBranch.memory || '', instruction: activeAskBranch.instruction || '' })
+    setThreads((all) => ({ ...all, ask: forked }))
+    showToast('已从当前节点 Fork，新分支继承此前上下文')
+  }, [activeAskBranch.id, archiveCurrentAsk, showToast])
+
+  const renameAskBranch = useCallback((title: string): void => {
+    const next = title.trim().replace(/\s+/g, ' ').slice(0, 40)
+    if (next) setActiveAskBranch((branch) => ({ ...branch, title: next, updatedAt: Date.now() }))
+  }, [])
 
   const sendMessage = useCallback((key: string, deep = false): void => {
     const cur = getComposer(key)
@@ -1338,7 +1411,7 @@ export function App(): React.JSX.Element {
     // 2) 上下文：主线程到该条为止 + 该气泡已有子线程（此刻 ref 尚未含新追问，正合适）
     const base = threadsRef.current[key] || []
     const history = [
-      ...historyFromThread(base.slice(0, msgIndex + 1)),
+      ...historyFromThread(base.slice(0, msgIndex + 1), 12, key === 'ask' ? activeAskBranchRef.current.memory || '' : ''),
       ...historyFromThread(base[msgIndex]?.followups || [])
     ]
     // 知识库模式下的追问同样走 RAG 接地
@@ -1346,7 +1419,9 @@ export function App(): React.JSX.Element {
       void runKbReply(t, deep, history, settle)
       return
     }
-    island.llmComplete(cfg, systemFor(key, deep), t, deep, history).then((res) => {
+    const instruction = key === 'ask' ? activeAskBranchRef.current.instruction?.trim() : ''
+    const system = systemFor(key, deep) + (instruction ? `\n\n本会话额外指令（持续生效）：\n${instruction}` : '')
+    island.llmComplete(cfg, system, t, deep, history).then((res) => {
       if (res.ok) {
         let blocks = parseBlocks(res.text) || looseBlocks(res.text)
         if (res.reasoning) blocks = [{ t: 'think' as const, text: res.reasoning }, ...blocks]
@@ -1356,6 +1431,159 @@ export function App(): React.JSX.Element {
       }
     })
   }, [runKbReply, runAgentStream])
+
+  const setAskContextMode = useCallback((msgIndex: number, mode: NonNullable<ChatMessage['contextMode']>): void => {
+    setThreads((all) => ({
+      ...all,
+      ask: (all.ask || []).map((message, index) => index === msgIndex ? { ...message, contextMode: mode } : message)
+    }))
+  }, [])
+
+  const compressAskContext = useCallback((): void => {
+    const msgs = (threadsRef.current.ask || []).filter((message) => !message.typing && !message.live)
+    if (msgs.length < 4) { showToast('当前会话还不需要压缩上下文'); return }
+    const L = llmRef.current
+    if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+    showToast('正在压缩为长期会话记忆…')
+    const system = '你是会话记忆压缩器。输出简体中文 Markdown，只保留后续对话必须记住的事实、偏好、约束、已确认结论、分歧和未解决问题；不要复述过程，不要添加新信息。'
+    void island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, conversationToMarkdown(msgs).slice(0, 40000), false).then((res) => {
+      if (!res.ok || !res.text?.trim()) { showToast(res.error || '会话记忆压缩失败'); return }
+      setActiveAskBranch((branch) => ({ ...branch, memory: res.text!.trim(), updatedAt: Date.now() }))
+      showToast('长期会话记忆已更新，后续轮次会持续携带')
+    })
+  }, [showToast])
+
+  const mergeAskBranch = useCallback((id: number): void => {
+    const source = askSessions.find((session) => session.id === id)
+    if (!source) return
+    const L = llmRef.current
+    if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+    showToast(`正在合并分支「${source.title}」…`)
+    const system = '你是会话分支合并器。只输出可直接放进长期会话记忆的简体中文 Markdown，不要寒暄，不要编造。'
+    void island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, branchMergePrompt(source.title, source.msgs), false).then((res) => {
+      if (!res.ok || !res.text?.trim()) { showToast(res.error || '分支合并失败'); return }
+      setActiveAskBranch((branch) => ({
+        ...branch,
+        memory: [branch.memory?.trim(), `## 合并自「${source.title}」\n${res.text!.trim()}`].filter(Boolean).join('\n\n'),
+        updatedAt: Date.now()
+      }))
+      showToast('分支结论已合并进当前会话记忆')
+    })
+  }, [askSessions, showToast])
+
+  const saveAskKnowledge = useCallback(async (scope: 'message' | 'conversation' | 'selection', msgIndex?: number, selectedText?: string): Promise<{ ok: boolean; message: string }> => {
+    const L = llmRef.current
+    const model = embedModelRef.current.trim()
+    if (!L.apiKey || !model) return { ok: false, message: '请先在知识库面板配置向量模型' }
+    const msgs = threadsRef.current.ask || []
+    let title = activeAskBranchRef.current.title || '问答会话'
+    let content = ''
+    let sourceKey = `${activeAskBranchRef.current.id}:conversation`
+    if (scope === 'selection') {
+      content = selectedText?.trim() || ''
+      title += ' · 摘录'
+      sourceKey = `${activeAskBranchRef.current.id}:selection:${Date.now()}`
+    } else if (scope === 'message' && msgIndex != null && msgs[msgIndex]) {
+      content = conversationToMarkdown([msgs[msgIndex]])
+      title += msgs[msgIndex].role === 'agent' ? ' · 回答' : ' · 提问'
+      sourceKey = `${activeAskBranchRef.current.id}:message:${msgIndex}`
+    } else {
+      content = [activeAskBranchRef.current.instruction ? `# 会话指令\n${activeAskBranchRef.current.instruction}` : '', activeAskBranchRef.current.memory ? `# 长期记忆\n${activeAskBranchRef.current.memory}` : '', conversationToMarkdown(msgs)].filter(Boolean).join('\n\n')
+    }
+    if (!content.trim()) return { ok: false, message: '没有可保存的会话内容' }
+    const result = await island.kbAddText({ baseUrl: L.baseUrl, apiKey: L.apiKey, model }, title, content, sourceKey)
+    if (!result.ok) return { ok: false, message: result.error || '写入知识库失败' }
+    refreshKb()
+    return { ok: true, message: `已写入本地知识库 · ${result.added || 0} 个向量块` }
+  }, [refreshKb])
+
+  const advanceAsk = useCallback((msgIndex: number, action: keyof typeof ADVANCE_PROMPTS, deep: boolean): void => {
+    const msgs = threadsRef.current.ask || []
+    if (!msgs[msgIndex] || msgs[msgIndex].role !== 'agent') return
+    const target = conversationToMarkdown([msgs[msgIndex]]).slice(0, 18000)
+    const prompt = `${ADVANCE_PROMPTS[action]}\n\n【本次要处理的目标回答】\n${target}`
+    if (action === 'suggest') {
+      const L = llmRef.current
+      if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+      const history = historyFromThread(msgs.slice(0, msgIndex + 1), 16, activeAskBranchRef.current.memory || '')
+      void island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, '只输出一个 JSON 字符串数组，不要解释。', prompt, false, history).then((res) => {
+        if (!res.ok || !res.text) { showToast(res.error || '下一问生成失败'); return }
+        let suggestions: string[] = []
+        try {
+          const start = res.text.indexOf('['), end = res.text.lastIndexOf(']')
+          const parsed = JSON.parse(start >= 0 && end > start ? res.text.slice(start, end + 1) : res.text)
+          if (Array.isArray(parsed)) suggestions = parsed.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 4)
+        } catch { suggestions = res.text.split(/\r?\n/).map((line) => line.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean).slice(0, 4) }
+        setThreads((all) => ({ ...all, ask: (all.ask || []).map((message, index) => index === msgIndex ? { ...message, suggestions } : message) }))
+      })
+      return
+    }
+    if (action === 'ground' && !kbModeRef.current) {
+      const history = historyFromThread(msgs.slice(0, msgIndex + 1), 16, activeAskBranchRef.current.memory || '')
+      setThreads((all) => ({ ...all, ask: [...(all.ask || []), { role: 'user', text: prompt, ts: Date.now() }, { role: 'agent', typing: true }] }))
+      const settle = (blocks: ChatMessage['blocks']): void => setThreads((all) => ({ ...all, ask: [...(all.ask || []).filter((message) => !message.typing), { role: 'agent', blocks, ts: Date.now() }] }))
+      void runKbReply(prompt, deep, history, settle)
+      return
+    }
+    pushAndReply('ask', prompt, [], deep)
+  }, [pushAndReply, runKbReply, showToast])
+
+  const councilModels = useMemo(() => {
+    const current = llm.apiKey && llm.model ? [{ id: 'current', label: llm.model }] : []
+    const saved = llm.saved
+      .filter((config) => config.apiKey && config.model && !(config.model === llm.model && config.baseUrl === llm.baseUrl))
+      .map((config) => ({ id: `saved:${config.id}`, label: config.name }))
+    return [...current, ...saved].slice(0, 8)
+  }, [llm.apiKey, llm.baseUrl, llm.model, llm.saved])
+
+  const runAskCouncil = useCallback((mode: 'parallel' | 'consensus' | 'debate', modelIds: string[], deep: boolean): void => {
+    const msgs = (threadsRef.current.ask || []).filter((message) => !message.typing && !message.live)
+    const lastUser = [...msgs].reverse().find((message) => message.role === 'user' && message.text?.trim())
+    if (!lastUser?.text) { showToast('先提出一个问题，再启动多模型讨论'); return }
+    const L = llmRef.current
+    const allConfigs = [
+      { id: 'current', label: L.model, baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model },
+      ...L.saved.map((config) => ({ id: `saved:${config.id}`, label: config.name, baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model }))
+    ]
+    const configs = modelIds.map((id) => allConfigs.find((config) => config.id === id)).filter((config): config is NonNullable<typeof config> => !!config?.apiKey && !!config.model)
+    if (configs.length < 2) { showToast('多模型讨论至少需要两个已配置模型'); return }
+    const lastUserIndex = msgs.lastIndexOf(lastUser)
+    const history = historyFromThread(msgs.slice(0, lastUserIndex), 16, activeAskBranchRef.current.memory || '')
+    const instruction = activeAskBranchRef.current.instruction?.trim()
+    const system = systemFor('ask', deep) + (instruction ? `\n\n本会话额外指令：\n${instruction}` : '')
+    setThreads((all) => ({ ...all, ask: [...(all.ask || []), { role: 'agent', typing: true }] }))
+    void Promise.all(configs.map(async (config) => {
+      const result = await island.llmComplete(config, system, lastUser.text!, deep, history)
+      let blocks = result.ok ? (parseBlocks(result.text) || looseBlocks(result.text)) : [{ t: 'note' as const, text: result.error || `${config.label} 请求失败` }]
+      if (result.reasoning) blocks = [{ t: 'think' as const, text: result.reasoning }, ...blocks]
+      return { id: config.id, label: config.label, blocks }
+    })).then(async (variants) => {
+      let blocks: Block[] = [{ t: 'note', text: `已完成 ${variants.length} 个模型的并行回答，可切换查看。` }]
+      if (mode !== 'parallel') {
+        const body = variants.map((variant, index) => `【候选 ${index + 1} · ${variant.label}】\n${conversationToMarkdown([{ role: 'agent', blocks: variant.blocks }])}`).join('\n\n')
+        const moderator = mode === 'consensus'
+          ? '比较这些候选回答，提炼共识，保留必要分歧，给出一份更可靠且可执行的最终回答。'
+          : '主持一轮模型辩论：指出候选答案的核心分歧、各自最强论据、共同盲区，并给出你的裁决。'
+        const result = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, `${moderator}\n\n原问题：${lastUser.text}\n\n${body.slice(0, 45000)}`, deep, history)
+        blocks = result.ok ? (parseBlocks(result.text) || looseBlocks(result.text)) : [{ t: 'note', text: result.error || '主持模型请求失败' }]
+      }
+      setThreads((all) => ({ ...all, ask: [...(all.ask || []).filter((message) => !message.typing), { role: 'agent', blocks, variants, ts: Date.now() }] }))
+    }).catch((error: unknown) => {
+      setThreads((all) => ({ ...all, ask: [...(all.ask || []).filter((message) => !message.typing), { role: 'agent', blocks: [{ t: 'note', text: `多模型讨论失败：${String(error)}` }], ts: Date.now() }] }))
+    })
+  }, [showToast])
+
+  const adoptAskVariant = useCallback((msgIndex: number, variantId: string): void => {
+    setThreads((all) => ({
+      ...all,
+      ask: (all.ask || []).map((message, index) => {
+        if (index !== msgIndex) return message
+        const variant = message.variants?.find((item) => item.id === variantId)
+        return variant ? { ...message, blocks: variant.blocks } : message
+      })
+    }))
+    showToast('已采用该模型回答，后续对话将以它作为主上下文')
+  }, [showToast])
 
   const convFor = useCallback((key: string, placeholder: string, quick?: string[], deep = false): ChatProps => ({
     messages: threads[key] || [],
@@ -1376,38 +1604,97 @@ export function App(): React.JSX.Element {
     onFollowUp: key === 'ask' ? (mi: number, text: string): void => followUpReply(key, mi, text, deep) : undefined,
     quotes: quotes[key] || [],
     onAddQuote: (q) => addQuote(key, q),
-    onRemoveQuote: (id) => removeQuote(key, id)
-  }), [threads, quotes, getComposer, sendPreset, followUpReply, patchComposer, sendMessage, onAttach, onRemoveAtt, addQuote, removeQuote, settings.largeSize, fullscreen])
+    onRemoveQuote: (id) => removeQuote(key, id),
+    branch: key === 'ask' ? {
+      activeId: activeAskBranch.id,
+      title: activeAskBranch.title,
+      parentId: activeAskBranch.parentId,
+      branches: [
+        { id: activeAskBranch.id, title: activeAskBranch.title, parentId: activeAskBranch.parentId, forkAt: activeAskBranch.forkAt, active: true },
+        ...askSessions.map((session) => ({ id: session.id, title: session.title, parentId: session.parentId, forkAt: session.forkAt }))
+      ]
+    } : undefined,
+    onFork: key === 'ask' ? askFork : undefined,
+    onSwitchBranch: key === 'ask' ? askSwitch : undefined,
+    onRenameBranch: key === 'ask' ? renameAskBranch : undefined,
+    onMergeBranch: key === 'ask' ? mergeAskBranch : undefined,
+    memory: key === 'ask' ? activeAskBranch.memory || '' : undefined,
+    instruction: key === 'ask' ? activeAskBranch.instruction || '' : undefined,
+    onSetMemory: key === 'ask' ? (memory) => setActiveAskBranch((branch) => ({ ...branch, memory, updatedAt: Date.now() })) : undefined,
+    onSetInstruction: key === 'ask' ? (instruction) => setActiveAskBranch((branch) => ({ ...branch, instruction, updatedAt: Date.now() })) : undefined,
+    onCompressContext: key === 'ask' ? compressAskContext : undefined,
+    onSetContextMode: key === 'ask' ? setAskContextMode : undefined,
+    onSaveKnowledge: key === 'ask' ? saveAskKnowledge : undefined,
+    councilModels: key === 'ask' ? councilModels : undefined,
+    onCouncil: key === 'ask' ? (mode, ids) => runAskCouncil(mode, ids, deep) : undefined,
+    onAdoptVariant: key === 'ask' ? adoptAskVariant : undefined,
+    onAdvance: key === 'ask' ? (index, action) => advanceAsk(index, action, deep) : undefined,
+    onUseSuggestion: key === 'ask' ? (value) => patchComposer(key, { text: value }) : undefined
+  }), [threads, quotes, getComposer, sendPreset, followUpReply, patchComposer, sendMessage, onAttach, onRemoveAtt, addQuote, removeQuote, settings.largeSize, fullscreen, activeAskBranch, askSessions, askFork, askSwitch, renameAskBranch, mergeAskBranch, compressAskContext, setAskContextMode, saveAskKnowledge, councilModels, runAskCouncil, adoptAskVariant, advanceAsk])
 
   // ===== LLM 设置 =====
-  const setLlmField = (f: 'model' | 'baseUrl' | 'apiKey', v: string): void => setLlm((s) => ({ ...s, [f]: v, testStatus: 'idle', testMsg: '' }))
+  const setLlmField = (f: 'model' | 'baseUrl' | 'apiKey', v: string): void => setLlm((s) => ({
+    ...s,
+    ...patchProviderDraft(s, { [f]: v }),
+    testStatus: 'idle',
+    testMsg: ''
+  }))
   const setProvider = (k: string): void => {
-    const pr = PROVIDERS.find((x) => x.key === k) || PROVIDERS[0]
-    // 切厂商时自动选中该家型号列表的第一个（若当前型号不在其列表里）
-    setLlm((s) => {
-      const list = s.modelLists[k] || []
-      const model = list.includes(s.model) ? s.model : list[0] || ''
-      return { ...s, provider: k, model, baseUrl: pr.baseUrl || s.baseUrl, testStatus: 'idle', testMsg: '' }
-    })
+    setLlm((s) => ({ ...s, ...switchProviderSettings(s, k), testStatus: 'idle', testMsg: '' }))
   }
   // ===== 型号列表：新增（并设为当前）/ 删除 / 点选 =====
   const addModel = (name: string): void =>
     setLlm((s) => {
       const list = s.modelLists[s.provider] || []
-      if (list.includes(name)) return { ...s, model: name }
-      return { ...s, model: name, modelLists: { ...s.modelLists, [s.provider]: [...list, name] } }
+      const next = { ...s, modelLists: list.includes(name) ? s.modelLists : { ...s.modelLists, [s.provider]: [...list, name] } }
+      return { ...next, ...patchProviderDraft(next, { model: name }), testStatus: 'idle', testMsg: '' }
     })
   const removeModel = (name: string): void =>
     setLlm((s) => {
       const list = (s.modelLists[s.provider] || []).filter((m) => m !== name)
-      return { ...s, model: s.model === name ? list[0] || '' : s.model, modelLists: { ...s.modelLists, [s.provider]: list } }
+      const next = { ...s, modelLists: { ...s.modelLists, [s.provider]: list } }
+      return s.model === name
+        ? { ...next, ...patchProviderDraft(next, { model: list[0] || '' }), testStatus: 'idle', testMsg: '' }
+        : next
     })
-  const pickModel = (name: string): void => setLlm((s) => ({ ...s, model: name, testStatus: 'idle', testMsg: '' }))
+  const pickModel = (name: string): void => setLlm((s) => ({ ...s, ...patchProviderDraft(s, { model: name }), testStatus: 'idle', testMsg: '' }))
+  const syncLlmModels = (): void => {
+    const { provider, baseUrl, apiKey, model } = llm
+    setLlm((s) => ({ ...s, testStatus: 'testing', testMsg: '正在读取可用模型…' }))
+    island.llmListModels({ baseUrl, apiKey, model }).then((r) => {
+      setLlm((s) => {
+        // 用户可能在请求期间切换了供应商，旧请求不得污染新面板。
+        if (s.provider !== provider) return s
+        if (!r.ok || !r.models?.length) {
+          return { ...s, testStatus: 'fail', testMsg: r.error || '未读取到可用模型' }
+        }
+        const list = [...new Set([...r.models, ...(s.modelLists[provider] || [])])]
+        const next = { ...s, modelLists: { ...s.modelLists, [provider]: list } }
+        const selected = list.includes(s.model) ? s.model : list[0] || ''
+        return {
+          ...next,
+          ...patchProviderDraft(next, { model: selected }),
+          testStatus: 'ok',
+          testMsg: `已同步 ${r.models.length} 个可用模型`
+        }
+      })
+    }).catch((e: unknown) => {
+      setLlm((s) => s.provider === provider
+        ? { ...s, testStatus: 'fail', testMsg: String(e) }
+        : s)
+    })
+  }
   const testLlm = (): void => {
-    const { baseUrl, apiKey, model } = llm
+    const { provider, baseUrl, apiKey, model } = llm
     setLlm((s) => ({ ...s, testStatus: 'testing', testMsg: '正在连接…' }))
     island.llmTest({ baseUrl, apiKey, model }).then((r) => {
-      setLlm((s) => ({ ...s, testStatus: r.ok ? 'ok' : 'fail', testMsg: r.msg }))
+      setLlm((s) => s.provider === provider
+        ? { ...s, testStatus: r.ok ? 'ok' : 'fail', testMsg: r.msg }
+        : s)
+    }).catch((e: unknown) => {
+      setLlm((s) => s.provider === provider
+        ? { ...s, testStatus: 'fail', testMsg: String(e) }
+        : s)
     })
   }
   const saveLlm = (): void => setLlm((s) => {
@@ -1415,11 +1702,14 @@ export function App(): React.JSX.Element {
     const cfg = { id: now + Math.floor(focusRemaining), provider: s.provider, model: s.model, baseUrl: s.baseUrl, apiKey: s.apiKey, name: label + ' · ' + (s.model || '未命名') }
     const saved = s.saved.filter((c) => !(c.provider === s.provider && c.model === s.model && c.baseUrl === s.baseUrl))
     // 上限 12：支持每家厂商保存多个模型，在问答头部下拉自由切换
-    return { ...s, saved: [cfg, ...saved].slice(0, 12) }
+    const next = { ...s, saved: [cfg, ...saved].slice(0, 12) }
+    return { ...next, ...patchProviderDraft(next, { model: s.model, baseUrl: s.baseUrl, apiKey: s.apiKey }) }
   })
   const loadLlm = (id: number): void => setLlm((s) => {
     const c = s.saved.find((x) => x.id === id)
-    return c ? { ...s, provider: c.provider, model: c.model, baseUrl: c.baseUrl, apiKey: c.apiKey, testStatus: 'idle', testMsg: '' } : s
+    if (!c) return s
+    const profiles = { ...s.profiles, [c.provider]: { model: c.model, baseUrl: c.baseUrl, apiKey: c.apiKey } }
+    return { ...s, provider: c.provider, model: c.model, baseUrl: c.baseUrl, apiKey: c.apiKey, profiles, testStatus: 'idle', testMsg: '' }
   })
   const deleteLlm = (id: number): void => setLlm((s) => ({ ...s, saved: s.saved.filter((x) => x.id !== id) }))
 
@@ -1888,12 +2178,7 @@ export function App(): React.JSX.Element {
           pools={barPools}
           width={barCfg.width || 340}
           status={ambientStatus}
-          brief={[
-            ...(meetings.filter((m) => m.start > Date.now()).slice(0, 1).map((m) => `⏰ ${new Date(m.start).getHours()}:${String(new Date(m.start).getMinutes()).padStart(2, '0')} ${m.title}（${Math.max(1, Math.round((m.start - Date.now()) / 60000))} 分钟后）`)),
-            ...(todos.filter((t) => !t.done && t.due && t.due <= Date.now()).length ? [`⏳ ${todos.filter((t) => !t.done && t.due && t.due <= Date.now()).length} 项待办已到时`] : []),
-            ...(agents.filter((a) => a.status !== 'done').length ? [`🤖 ${agents.filter((a) => a.status !== 'done').length} 个 Agent 会话活动中`] : []),
-            ...(todos.filter((t) => !t.done).length ? [`📝 今日还剩 ${todos.filter((t) => !t.done).length} 项待办`] : [])
-          ]}
+          brief={ambientBrief}
           onMediaKey={(cmd) => island.mediaKey(cmd)}
           onOpen={() => setRevealed(true)}
           onOpenTarget={(target) => { setTab(target); setRevealed(true) }}
@@ -2112,10 +2397,12 @@ export function App(): React.JSX.Element {
                 mode={askMode} onSetMode={setAskMode}
                 kbMode={kbMode} onToggleKb={() => setKbMode((v) => !v)} onManageKb={() => setKbOpen(true)} kbCount={kbSources.reduce((a, s) => a + s.docCount, 0)}
                 engine={askEngine} onSetEngine={setAskEngine} agentCwd={agentCwd} onSetAgentCwd={setAgentCwd}
-                suggestions={[
-                  { label: '如何安全地做 git rebase？', go: () => sendPreset('ask', '如何安全地做 git rebase？', askMode === 'deep') },
-                  { label: '怎么精简 Docker 镜像体积？', go: () => sendPreset('ask', '怎么精简 Docker 镜像体积？', askMode === 'deep') }
-                ]}
+                suggestions={ambientSuggestions.map((item) => ({
+                  id: item.id,
+                  label: item.text,
+                  source: AMBIENT_SUGGESTION_LABELS[item.mode] || '灵感',
+                  go: () => sendPreset('ask', ambientSuggestionPrompt(item), askMode === 'deep')
+                }))}
                 conv={convFor('ask', askMode === 'deep' ? '深度思考模式 · 提问后展示思维链…' : '有问题随时问，支持追问（AI 记得上文）…', undefined, askMode === 'deep')}
                 sessions={askSessions.map((s) => ({ id: s.id, title: s.title }))}
                 onNew={askNew} onSwitch={askSwitch} onDeleteSession={askDelete}
@@ -2275,7 +2562,7 @@ export function App(): React.JSX.Element {
                 settings={settings} onToggle={toggleSetting}
                 soundMap={soundMap} soundPickerOpen={soundPickerOpen} onToggleSoundPicker={() => settings.sound && setSoundPickerOpen((v) => !v)} onSetSound={setSoundFor} onPreviewSound={previewSound}
                 activeMonitor={activeMonitor} displays={displays} monitorPreviewOpen={monitorPreviewOpen} onToggleMonitorPreview={() => { setMonitorPreviewOpen((v) => !v); island.getDisplays().then(setDisplays).catch(() => { /* 忽略 */ }) }} onSetMonitor={changeMonitor}
-                llm={llm} onToggleLlm={() => setLlm((s) => ({ ...s, open: !s.open }))} onSetProvider={setProvider} onSetLlmField={setLlmField} onTestLlm={testLlm} onSaveLlm={saveLlm} onLoadLlm={loadLlm} onDeleteLlm={deleteLlm}
+                llm={llm} onToggleLlm={() => setLlm((s) => ({ ...s, open: !s.open }))} onSetProvider={setProvider} onSetLlmField={setLlmField} onSyncLlmModels={syncLlmModels} onTestLlm={testLlm} onSaveLlm={saveLlm} onLoadLlm={loadLlm} onDeleteLlm={deleteLlm}
                 onAddModel={addModel} onRemoveModel={removeModel} onPickModel={pickModel}
                 icsUrl={icsUrl} onSetIcsUrl={setIcsUrl} calMsg={calMsg}
                 caldav={caldav} onSetCaldav={setCaldav}

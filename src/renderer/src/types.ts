@@ -115,6 +115,18 @@ export interface ChatMessage {
   followups?: ChatMessage[]
   /** 本地 Agent 流式进行中：思考/步骤/正文实时更新，完成后此字段清除、转为 blocks */
   live?: AgentLive
+  /** 上下文策略：pinned 始终送入模型；excluded 仅保留展示、不送入模型 */
+  contextMode?: 'normal' | 'pinned' | 'excluded'
+  /** 多模型并行讨论的候选回答；blocks 保存最终共识/主持结论 */
+  variants?: ChatVariant[]
+  /** AI 基于本条回答生成的下一问建议 */
+  suggestions?: string[]
+}
+
+export interface ChatVariant {
+  id: string
+  label: string
+  blocks: Block[]
 }
 
 export interface Composer {
@@ -129,7 +141,16 @@ export interface AskSession {
   id: number
   title: string
   msgs: ChatMessage[]
+  parentId?: number
+  forkAt?: number
+  memory?: string
+  instruction?: string
+  createdAt?: number
+  updatedAt?: number
 }
+
+/** 当前问答分支的元数据；消息本体仍由 threads.ask 持有，避免双份状态。 */
+export type AskBranchMeta = Omit<AskSession, 'msgs'>
 
 /** 资讯、待办和快捷执行共享的项目上下文。 */
 export interface WorkbenchProject {
@@ -361,4 +382,31 @@ export interface ChatProps {
   quotes?: QuoteRef[]
   onAddQuote?: (q: { text: string; note?: string }) => void
   onRemoveQuote?: (id: number) => void
+  /** 会话分支树（当前分支也包含在 branches 中）。 */
+  branch?: {
+    activeId: number
+    title: string
+    parentId?: number
+    branches: { id: number; title: string; parentId?: number; forkAt?: number; active?: boolean }[]
+  }
+  onFork?: (msgIndex: number) => void
+  onSwitchBranch?: (id: number) => void
+  onRenameBranch?: (title: string) => void
+  onMergeBranch?: (id: number) => void
+  /** 长期记忆与会话级指令均按分支持久化，并真实注入模型上下文。 */
+  memory?: string
+  instruction?: string
+  onSetMemory?: (text: string) => void
+  onSetInstruction?: (text: string) => void
+  onCompressContext?: () => void
+  onSetContextMode?: (msgIndex: number, mode: NonNullable<ChatMessage['contextMode']>) => void
+  /** 回答/整段分支/框选片段写入本地向量知识库。 */
+  onSaveKnowledge?: (scope: 'message' | 'conversation' | 'selection', msgIndex?: number, text?: string) => Promise<{ ok: boolean; message: string }>
+  /** 多模型会话：parallel=并列回答，consensus=主持共识，debate=分歧辩论。 */
+  councilModels?: { id: string; label: string }[]
+  onCouncil?: (mode: 'parallel' | 'consensus' | 'debate', modelIds: string[]) => void
+  onAdoptVariant?: (msgIndex: number, variantId: string) => void
+  /** 基于某条回答继续推进，不修改原回答。 */
+  onAdvance?: (msgIndex: number, action: 'critique' | 'assumptions' | 'alternatives' | 'decompose' | 'socratic' | 'ground' | 'suggest') => void
+  onUseSuggestion?: (text: string) => void
 }

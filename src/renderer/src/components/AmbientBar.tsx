@@ -7,7 +7,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import type { BarConfig } from '../types'
 import type { AmbientStatus, AmbientStatusKind } from '../logic/ambientBar'
-import { buildAmbientSlots, clampBarRotation } from '../logic/ambientBar'
+import { AMBIENT_TEXT_MODES, buildAmbientSlots, clampBarRotation } from '../logic/ambientBar'
 import { parseLrc, currentLine, type LrcLine } from '../logic/lrc'
 import { accent as dsAccent, ink } from '../ui/tokens'
 
@@ -31,7 +31,6 @@ interface AmbientBarProps {
   fetchLyrics?: (title: string, artist: string) => Promise<{ ok: boolean; lrc?: string; plain?: string }>
 }
 
-const TEXT_MODES = ['quotes', 'exp', 'agent', 'thermal', 'github', 'custom', 'brief']
 const VISUAL_MODES = ['flow', 'eq', 'neon']
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const TEXT_COLOR = ink(1)
@@ -249,7 +248,7 @@ export function AmbientBar({ cfg, media, brief, pools, width, status, onMediaKey
               <span className="ambient-pet-track" />
             </div>
           )}
-          {TEXT_MODES.includes(mode) && (
+          {(AMBIENT_TEXT_MODES as readonly string[]).includes(mode) && (
             <div className="ambient-text-stage">
               <ModeIcon size={13} strokeWidth={2} />
               {renderText(text)}

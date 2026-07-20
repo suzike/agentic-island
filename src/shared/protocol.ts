@@ -301,7 +301,7 @@ export interface GitHubRepo {
 /** 知识库源（本地文件夹/文件/网页），docCount 为已索引块数 */
 export interface KbSourceView {
   id: string
-  kind: 'folder' | 'files' | 'url'
+  kind: 'folder' | 'files' | 'url' | 'conversation'
   target: string
   label: string
   addedAt: number
@@ -438,6 +438,8 @@ export interface IslandBridgeApi {
   /** 在系统默认浏览器打开链接（仅 http/https） */
   openExternal: (url: string) => void
   llmTest: (cfg: LlmRequestConfig) => Promise<{ ok: boolean; msg: string }>
+  /** 从当前 OpenAI 兼容端点读取账号实际可用的模型。 */
+  llmListModels: (cfg: LlmRequestConfig) => Promise<{ ok: boolean; models?: string[]; error?: string }>
   /** 文本向量化（第二大脑本地 RAG）；cfg.model = 向量模型名 */
   llmEmbed: (cfg: LlmRequestConfig, texts: string[]) => Promise<{ ok: boolean; vectors?: number[][]; error?: string }>
   /** 知识库（本地 RAG）：列出已接入的源 */
@@ -448,6 +450,8 @@ export interface IslandBridgeApi {
   kbAddFiles: (cfg: LlmRequestConfig) => Promise<{ ok: boolean; added?: number; skipped?: number; canceled?: boolean; error?: string }>
   /** 添加网页（抓正文+切块+向量化） */
   kbAddUrl: (cfg: LlmRequestConfig, url: string) => Promise<{ ok: boolean; added?: number; error?: string }>
+  /** 将对话/回答直接作为文本知识源写入本地向量库。sourceKey 用于同一来源覆盖更新。 */
+  kbAddText: (cfg: LlmRequestConfig, title: string, text: string, sourceKey: string) => Promise<{ ok: boolean; added?: number; error?: string }>
   /** 移除某个源及其全部块 */
   kbRemove: (id: string) => Promise<{ ok: boolean }>
   /** 增量重扫所有文件夹源（按 mtime 只重嵌变更/新增） */

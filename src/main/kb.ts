@@ -6,7 +6,7 @@ import { join, extname, basename } from 'node:path'
 import { embed } from './llm-proxy'
 import type { LlmRequestConfig } from '../shared/protocol'
 
-export type KbKind = 'folder' | 'files' | 'url'
+export type KbKind = 'folder' | 'files' | 'url' | 'conversation'
 export interface KbSource { id: string; kind: KbKind; target: string; label: string; addedAt: number }
 export interface KbDoc { id: string; sourceId: string; title: string; path: string; chunk: number; text: string; vector: number[]; mtime: number }
 // wiki：LLM 合成的持久化知识页（key='overview' 为全库总览；或按 sourceId）——"编译一次、长期复用"（LLM-Wiki 模式）
@@ -198,6 +198,26 @@ export async function addUrl(cfg: LlmRequestConfig, url: string, title: string, 
   const docs: KbDoc[] = parts.map((t, i) => ({ id: `${id}:${url}#${i}`, sourceId: id, title: title || url, path: url, chunk: i, text: t, vector: vectors[i], mtime: addedAt }))
   const s = await load()
   s.sources = s.sources.filter((x) => x.id !== id).concat({ id, kind: 'url', target: url, label: title || url, addedAt })
+  s.docs = s.docs.filter((d) => d.sourceId !== id).concat(docs)
+  await save(s)
+  return { ok: true, added: docs.length }
+}
+
+/** 添加岛内对话文本：与文件/网页使用同一切块、向量化和本地索引，不经过临时文件。 */
+export async function addText(cfg: LlmRequestConfig, title: string, text: string, sourceKey: string, addedAt: number): Promise<{ ok: boolean; added?: number; error?: string }> {
+  const clean = (text || '').trim()
+  if (!clean) return { ok: false, error: '对话内容为空' }
+  if (clean.length > 500_000) return { ok: false, error: '对话内容过长，请先压缩会话上下文' }
+  const key = (sourceKey || `${title}|${addedAt}`).slice(0, 512)
+  const id = newId('conversation', key)
+  const parts = chunkText(clean)
+  const vectors = await embedAll(cfg, parts)
+  if ('error' in vectors) return { ok: false, error: vectors.error }
+  const path = `conversation://${encodeURIComponent(key)}`
+  const label = (title || '问答会话').trim().slice(0, 120)
+  const docs: KbDoc[] = parts.map((part, i) => ({ id: `${id}:${i}`, sourceId: id, title: label, path, chunk: i, text: part, vector: vectors[i], mtime: addedAt }))
+  const s = await load()
+  s.sources = s.sources.filter((x) => x.id !== id).concat({ id, kind: 'conversation', target: path, label, addedAt })
   s.docs = s.docs.filter((d) => d.sourceId !== id).concat(docs)
   await save(s)
   return { ok: true, added: docs.length }

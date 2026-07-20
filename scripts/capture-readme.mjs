@@ -25,26 +25,62 @@ const demoState = {
     ruleMeetingNote: true, desktopWidget: false
   },
   workbenchProjects: [{
-    id: 'docs-project', name: 'Agentic-Island v0.5.1', repoPath: 'C:\\Work\\Agentic-Island',
+    id: 'docs-project', name: 'Agentic-Island v0.6.0', repoPath: 'C:\\Work\\Agentic-Island',
     objective: '完成桌面 Agent 工作台的产品化发布', status: 'active', colorHue: 155,
     createdAt: now - 12 * day, updatedAt: now
   }],
   activeProjectId: 'docs-project',
   todos: [
-    { id: 1, text: '完成录屏工坊发布回归', done: false, status: 'doing', priority: 1, projectId: 'docs-project', project: 'Agentic-Island v0.5.1', tags: ['发布', '录屏'], energy: 'deep', acceptance: '双显示器、区域定位、录制预览和导出全部通过', estimate: 90, spent: 58, due: now + 3_600_000, createdAt: now - day },
-    { id: 2, text: '核对 Agent 审批与外部窗口让位', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.5.1', tags: ['Agent', '交互'], energy: 'normal', acceptance: '审批闭环和外部打开流程可重复验证', estimate: 45, createdAt: now - day },
-    { id: 3, text: '更新架构图、截图与功能矩阵', done: true, status: 'done', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.5.1', tags: ['文档'], estimate: 60, spent: 52, doneAt: now - 2_000_000, createdAt: now - 2 * day },
-    { id: 4, text: '验证 NSIS 安装包与 SHA-256', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.5.1', tags: ['发布'], energy: 'light', estimate: 25, createdAt: now }
+    { id: 1, text: '完成问答会话增强发布回归', done: false, status: 'doing', priority: 1, projectId: 'docs-project', project: 'Agentic-Island v0.6.0', tags: ['发布', '问答'], energy: 'deep', acceptance: '分支、上下文、多模型会诊和知识沉淀全部通过', estimate: 90, spent: 58, due: now + 3_600_000, createdAt: now - day },
+    { id: 2, text: '核对模型供应商隔离与在线目录同步', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.0', tags: ['模型', '安全'], energy: 'normal', acceptance: 'DeepSeek 与 Kimi 配置互不串用且错误信息脱敏', estimate: 45, createdAt: now - day },
+    { id: 3, text: '更新架构图、截图与功能矩阵', done: true, status: 'done', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.0', tags: ['文档'], estimate: 60, spent: 52, doneAt: now - 2_000_000, createdAt: now - 2 * day },
+    { id: 4, text: '验证 NSIS 安装包与 SHA-256', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.0', tags: ['发布'], energy: 'light', estimate: 25, createdAt: now }
   ],
   notes: [
     { id: 11, emoji: '🧭', title: '产品原则', md: '## 不打断，但始终可控\n\n- Agent 状态必须实时可见\n- 外部操作时主动让出桌面焦点\n- 数据默认留在本机', color: 'sky', tags: ['产品', '原则'], pinned: true, createdAt: now - 4 * day, updatedAt: now },
     { id: 12, emoji: '🧠', title: '知识工作闭环', md: '资讯信号 → 待办行动 → 快捷执行 → 复盘沉淀。\n\n[[产品原则]]', color: 'violet', tags: ['工作流', '知识库'], starred: true, createdAt: now - 3 * day, updatedAt: now },
     { id: 13, emoji: '⚙️', title: '发布检查清单', md: '- [x] typecheck\n- [x] unit tests\n- [ ] NSIS installer\n- [ ] GitHub Release', color: 'mint', tags: ['发布'], later: true, createdAt: now - day, updatedAt: now }
   ],
+  activeAskBranch: {
+    id: 602, title: 'v0.6.0 发布决策', parentId: 601, forkAt: 1,
+    memory: '当前目标是完成 v0.6.0 发布；必须保留既有模块能力，并以真实测试和安装包为准。',
+    instruction: '结论优先，风险按严重度排序；所有建议必须给出可执行验证方式。',
+    createdAt: now - 180_000, updatedAt: now
+  },
+  askSessions: [{
+    id: 601, title: '问答增强方案基线', createdAt: now - day, updatedAt: now - 200_000,
+    memory: '围绕会话本身增强，不引入转待办、转便签、编辑重发或导出等偏离能力。',
+    msgs: [
+      { role: 'user', text: '问答模块应该围绕哪些核心能力增强？', ts: now - 260_000 },
+      { role: 'agent', blocks: [{ t: 'p', text: '优先补齐分支探索、长期记忆、上下文控制、多模型协作和知识沉淀。' }], ts: now - 250_000 }
+    ]
+  }],
   askThread: [
-    { id: 21, role: 'user', text: '请基于当前项目状态给出发布前风险清单。', ts: now - 120_000 },
-    { id: 22, role: 'agent', blocks: [{ t: 'think', text: ['用户想了解发布前风险。先梳理项目状态：这是一个 Electron 桌面应用，包含主进程、预加载、渲染层三端。', '第一步，检查审批闭环：hooks 转发脚本必须 fail-open，否则岛未启动时会卡住用户 CLI。需要验证 PreToolUse 阻塞审批的 stdout 协议。', '第二步，检查窗口让位：外部打开文件/网页时，透明置顶窗口必须主动降层，否则会遮挡目标应用。ExternalYieldController 需要覆盖全部入口。', '第三步，确认配置与密钥：API Key、CalDAV 密码必须 DPAPI 加密存储在本机 userData，不能落明文，不能外传。', '第四步，安装包验证：NSIS 打包后需要在干净环境安装一次，确认 hooks 安装器幂等、bridge.json 自愈正常。', '最后，综合以上四点给出风险清单，按严重度排序，并给出每项的具体验证方法。'].join('\n\n') }, { t: 'h', text: '发布前检查重点' }, { t: 'ul', items: ['验证 Agent 审批闭环与 fail-open', '检查外部打开时窗口让位', '确认所有配置和密钥仅保存在本机', '生成安装包并执行干净安装验证'] }], ts: now - 110_000 }
+    { role: 'user', text: '请基于当前代码和发布门禁，判断 v0.6.0 是否可以发布。', contextMode: 'pinned', ts: now - 120_000 },
+    {
+      role: 'agent',
+      blocks: [{ t: 'think', text: '先核对会话分支、上下文注入、多模型会诊和知识库写入，再检查供应商配置迁移与发布门禁。' }, { t: 'h', text: '发布判断' }, { t: 'p', text: '功能面已形成完整会话闭环，当前进入发布验证阶段。必须以类型检查、32 项离线测试、三端构建、真实 Electron 可视检查和 NSIS 安装验证全部通过作为放行条件。' }, { t: 'ul', items: ['分支 Fork、切换、合并和长期记忆回归', '上下文钉选、排除、附件连续上下文和 token 预算', 'DeepSeek/Kimi 配置隔离、模型同步与认证错误脱敏', '安装包、自动更新清单和 SHA-256 一致'] }],
+      variants: [
+        { id: 'deepseek-demo', label: 'DeepSeek · deepseek-v4-pro', blocks: [{ t: 'p', text: '建议按发布门禁逐项签收，任何一项失败都不创建标签。' }] },
+        { id: 'kimi-demo', label: 'Kimi · kimi-k2.6', blocks: [{ t: 'p', text: '重点复核旧配置迁移与分支持久化，避免升级后丢失上下文。' }] }
+      ],
+      suggestions: ['检查本轮变更是否完整覆盖测试', '生成 v0.6.0 发布风险矩阵'],
+      ts: now - 110_000
+    }
   ],
+  llm: {
+    provider: 'deepseek', model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'not-a-real-key',
+    saved: [
+      { id: 701, provider: 'deepseek', model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'not-a-real-key', name: 'DeepSeek · deepseek-v4-pro' },
+      { id: 702, provider: 'kimi', model: 'kimi-k2.6', baseUrl: 'https://api.moonshot.cn/v1', apiKey: 'not-a-real-key', name: 'Kimi · kimi-k2.6' }
+    ],
+    modelLists: { deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'], kimi: ['kimi-k2.6', 'kimi-k2.5'], qwen: ['qwen-plus'], openai: ['gpt-4o'], claude: ['claude-sonnet-4'], custom: [] },
+    profiles: {
+      deepseek: { model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'not-a-real-key' },
+      kimi: { model: 'kimi-k2.6', baseUrl: 'https://api.moonshot.cn/v1', apiKey: 'not-a-real-key' }
+    },
+    providerCatalogVersion: 2
+  },
   feedSources: [
     { id: 'openai', name: 'OpenAI', url: 'https://openai.com/news/rss.xml', enabled: true },
     { id: 'hn', name: 'Hacker News', url: 'https://hnrss.org/frontpage', enabled: true },
@@ -183,13 +219,13 @@ try {
     process.stdout.write(`captured ${filename}\n`)
   }
 
-  await capture('问答', 'ask-v051.png')
-  await capture('快捷', 'shortcuts-v051.png')
-  await capture('待办', 'todos-v051.png')
-  await capture('灵感便签', 'notes-v051.png')
-  await capture('资讯', 'news-v051.png')
-  await capture('复盘', 'review-v051.png')
-  await capture('设置', 'settings-v051.png')
+  await capture('问答', 'ask-v060.png')
+  await capture('快捷', 'shortcuts-v060.png')
+  await capture('待办', 'todos-v060.png')
+  await capture('灵感便签', 'notes-v060.png')
+  await capture('资讯', 'news-v060.png')
+  await capture('复盘', 'review-v060.png')
+  await capture('设置', 'settings-v060.png')
 
   await evaluate(`(() => {
     const button = [...document.querySelectorAll('[title]')].find((item) => item.title?.includes('录屏工坊'))
@@ -208,8 +244,8 @@ try {
     format: 'png', fromSurface: true, captureBeyondViewport: false,
     clip: { ...recordingRect, scale: 1 }
   })
-  await writeFile(join(outputDir, 'recording-v051.png'), Buffer.from(recordingShot.data, 'base64'))
-  process.stdout.write('captured recording-v051.png\n')
+  await writeFile(join(outputDir, 'recording-v060.png'), Buffer.from(recordingShot.data, 'base64'))
+  process.stdout.write('captured recording-v060.png\n')
 } finally {
   cdp?.close()
   child.kill()

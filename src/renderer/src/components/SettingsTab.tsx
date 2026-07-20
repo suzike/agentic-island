@@ -4,31 +4,24 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Activity, CalendarClock, ChevronDown, GlassWater, MessageSquare, Minus, PanelTop, Palette,
+  Activity, CalendarClock, ChevronDown, GlassWater, MessageSquare, Minus, PanelTop, Palette, RefreshCw,
   Moon, Pencil, Play, Plug, Plus, Power, Settings2, Sparkles, Sun, Terminal, TimerReset, TriangleAlert,
   Waves, Wind, Wrench, X, Zap
 } from 'lucide-react'
 import type { DisplayInfo, RuntimeInfo } from '../../../shared/protocol'
 import type { BarConfig } from '../types'
 import { SOUNDS, SOUND_TYPES, type SoundMap } from '../logic/sounds'
-import { PROVIDERS } from '../logic/providers'
+import { PROVIDERS, type ProviderSettingsSnapshot } from '../logic/providers'
 import { normalizeThemeTokens, THEMES, type ThemeDef } from '../logic/themes'
 import { Badge, Button, Chip, Group, IconButton, Input, SectionHeader, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
 import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, separatorRow, SP, surface, text } from '../ui/tokens'
 import type { LucideIcon } from '../ui/icons'
 
-export interface LlmState {
+export interface LlmState extends ProviderSettingsSnapshot {
   open: boolean
-  provider: string
-  model: string
-  baseUrl: string
-  apiKey: string
   testStatus: 'idle' | 'testing' | 'ok' | 'fail'
   testMsg: string
-  saved: { id: number; provider: string; model: string; baseUrl: string; apiKey: string; name: string }[]
-  /** 每家厂商的型号列表（用户可增删；问答头部可自由切换），key=provider */
-  modelLists: Record<string, string[]>
 }
 
 export interface SettingsFlags {
@@ -84,6 +77,7 @@ interface SettingsTabProps {
   onAddModel: (name: string) => void
   onRemoveModel: (name: string) => void
   onPickModel: (name: string) => void
+  onSyncLlmModels: () => void
   onTestLlm: () => void
   onSaveLlm: () => void
   onLoadLlm: (id: number) => void
@@ -264,7 +258,8 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
   const [cdDraft, setCdDraft] = useState(p.caldav)
   useEffect(() => setCdDraft(p.caldav), [p.caldav])
   const enabledTools = TOOLS.filter((t) => p.settings[t.key]).length
-  const providerLabel = (PROVIDERS.find((x) => x.key === p.llm.provider) || {}).label
+  const activeProvider = PROVIDERS.find((x) => x.key === p.llm.provider) || PROVIDERS[0]
+  const providerLabel = activeProvider.label
   const llmSummary = `${providerLabel} · ${p.llm.model || '未设置'}`
   const statusItems = [
     {
@@ -522,7 +517,10 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={labelSm}>型号（每家可添加多个 · 点选使用 · 问答界面可随时切换）</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={labelSm}>型号（每家可添加多个 · 点选使用 · 问答界面可随时切换）</div>
+              <Button sm variant="ghost" icon={RefreshCw} disabled={p.llm.testStatus === 'testing'} onClick={p.onSyncLlmModels}>同步可用模型</Button>
+            </div>
             {(p.llm.modelLists[p.llm.provider] || []).length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {(p.llm.modelLists[p.llm.provider] || []).map((m) => {
@@ -544,7 +542,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                 value={modelDraft}
                 onChange={setModelDraft}
                 onKeyDown={(e) => { if (e.key === 'Enter' && modelDraft.trim()) { p.onAddModel(modelDraft.trim()); setModelDraft('') } }}
-                placeholder="输入 model id 添加，如 deepseek-v4-pro"
+                placeholder={`输入 model id 添加，如 ${activeProvider.models[0] || 'your-model-id'}`}
                 style={{ flex: 1, minWidth: 0 }}
               />
               <Button
@@ -566,7 +564,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
             <input value={p.llm.apiKey} onChange={(e) => p.onSetLlmField('apiKey', e.target.value)} type="password" placeholder="sk-••••••••••••" style={secretInput} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Button variant="primary" onClick={p.onTestLlm}>
+            <Button variant="primary" disabled={p.llm.testStatus === 'testing'} onClick={p.onTestLlm}>
               {p.llm.testStatus === 'testing' && <span style={{ display: 'inline-block', width: 11, height: 11, border: '2px solid rgba(0,0,0,.25)', borderTopColor: gradient.onPrimary(), borderRadius: 999, animation: 'ai-ring .7s linear infinite' }} />}
               测试连通性
             </Button>
@@ -594,7 +592,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
               })}
             </div>
           )}
-          <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.5 }}>仅用于「问答助手」。Agent（Claude Code / Codex）的模型在各自 CLI 中已配置，此处不涉及。兼容 OpenAI Chat Completions 协议的服务均可接入，密钥仅保存在本机。</div>
+          <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.5 }}>仅用于「问答助手」。每家供应商的模型、地址和密钥独立保留，切换时不会串用；“同步可用模型”读取当前账号的 `/models` 列表。Agent（Claude Code / Codex）的模型仍在各自 CLI 中配置，密钥仅保存在本机。</div>
         </div>
       </CollapsibleSection>
 

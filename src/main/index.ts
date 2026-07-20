@@ -16,7 +16,7 @@ import {
   installCodexNotify,
   uninstallCodexNotify
 } from './hook-installer'
-import { complete as llmComplete, test as llmTest, embed as llmEmbed } from './llm-proxy'
+import { complete as llmComplete, test as llmTest, embed as llmEmbed, listModels as llmListModels } from './llm-proxy'
 import { agentCliStream, agentCliCancel, agentCliCheck, type AgentEngine } from './agent-cli'
 import * as kb from './kb'
 import { playSound } from './sound'
@@ -52,7 +52,8 @@ let win: BrowserWindow | null = null
 let externalYield: ExternalYieldController | null = null
 let rendererDialogRelease: (() => void) | null = null
 const store = new AgentsStore()
-const bridge = new BridgeServer(store, gitSummary)
+// 文档截图、安装验证和审计实例必须能隔离 discovery，避免覆盖真实 bridge.json。
+const bridge = new BridgeServer(store, gitSummary, process.env.AIISLAND_BRIDGE_FILE || undefined)
 // Codex 实时接入：跟随其 rollout 会话日志（Windows 上 hooks/notify 都不通，这是唯一可靠通道）
 const codexTail = new CodexTail(store, gitSummary)
 const recordingExportJobs = new Map<string, ChildProcess>()
@@ -992,6 +993,7 @@ function wireIpc(): void {
     if (external) void openExternalTarget(external)
   })
   ipcMain.handle('llm-test', (_e, cfg: LlmRequestConfig) => llmTest(cfg))
+  ipcMain.handle('llm-list-models', (_e, cfg: LlmRequestConfig) => llmListModels(cfg))
   // 截图工坊：渲染层主动触发框选截图（复用 ms-screenclip 流程，事件仍走 screenshot-captured）
   ipcMain.on('trigger-screenshot', (_e, target: ScreenshotTarget) => openScreenshot(target === 'studio' ? 'studio' : 'ask'))
 
@@ -1405,6 +1407,9 @@ function wireIpc(): void {
     if (!page.ok || !page.text) return { ok: false, error: page.error || '抓取失败' }
     return kb.addUrl(cfg, String(url), page.title || String(url), page.text, Date.now())
   }))
+  ipcMain.handle('kb-add-text', (_e, cfg: LlmRequestConfig, title: string, text: string, sourceKey: string) => kbGuard(() =>
+    kb.addText(cfg, String(title), String(text), String(sourceKey), Date.now())
+  ))
   ipcMain.handle('kb-remove', (_e, id: string) => kbGuard(() => kb.removeSource(String(id))))
   ipcMain.handle('kb-reindex', (_e, cfg: LlmRequestConfig) => kbGuard(() => kb.reindex(cfg)))
   ipcMain.handle('kb-search', (_e, cfg: LlmRequestConfig, query: string, k?: number) => kbGuard(() => kb.search(cfg, String(query), k || 8)))

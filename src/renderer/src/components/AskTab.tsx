@@ -35,7 +35,7 @@ interface AskTabProps {
   onSetEngine: (e: 'llm' | 'claude' | 'codex') => void
   agentCwd: string
   onSetAgentCwd: (d: string) => void
-  suggestions: { label: string; go: () => void }[]
+  suggestions: { id: string; label: string; source: string; go: () => void }[]
   conv: ChatProps
   sessions: { id: number; title: string }[]
   onNew: () => void
@@ -393,11 +393,22 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
             </div>
           )}
 
-          {/* 示例问题：点击直接发送 */}
+          {/* 与常驻迷你条同源的动态灵感：点击直接发送 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {p.suggestions.map((s, i) => (
-              <motion.div key={i} whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.985 }} onClick={s.go} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px', borderRadius: R.lg, background: fill(2), color: ink(2), fontSize: 11.5, cursor: 'pointer' }}>
-                <Lightbulb size={12} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />{s.label}
+            {p.suggestions.map((s) => (
+              <motion.div
+                key={s.id}
+                initial={{ opacity: 0, scale: 0.99 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.985 }}
+                onClick={s.go}
+                style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 38, padding: '8px 12px', borderRadius: R.lg, background: fill(2), color: ink(2), fontSize: 11.5, cursor: 'pointer', boxSizing: 'border-box' }}
+              >
+                <Lightbulb size={12} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
+                <span style={{ flex: 'none', color: ink(4), fontSize: 9.5 }}>{s.source}</span>
               </motion.div>
             ))}
           </div>
