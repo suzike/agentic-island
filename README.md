@@ -9,7 +9,7 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release](https://img.shields.io/github/v/release/suzike/agentic-island?color=e89a2e&label=release)](https://github.com/suzike/agentic-island/releases/latest)
+[![Release v0.5.1](https://img.shields.io/badge/release-v0.5.1-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.5.1)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
