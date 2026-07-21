@@ -18,6 +18,7 @@ import type { AgentCliEvent } from '../shared/protocol'
 export type AgentEngine = 'claude' | 'codex'
 
 const running: Partial<Record<AgentEngine, ChildProcess>> = {}
+const stopReasons = new Map<number, string>()
 const TIMEOUT_MS = 15 * 60_000 // 带工具的 Agent 回合可能很长，给足 15 分钟
 
 function killTree(p?: ChildProcess): void {
@@ -43,8 +44,9 @@ export function agentCliCheck(engine: AgentEngine): Promise<{ ok: boolean; versi
 
 /** 主动停止当前引擎的进行中请求（渲染层"⏹ 停止"按钮） */
 export function agentCliCancel(engine: AgentEngine): void {
-  killTree(running[engine])
-  delete running[engine]
+  const process = running[engine]
+  if (process?.pid != null) stopReasons.set(process.pid, '已由用户停止')
+  killTree(process)
 }
 
 // 工具名 → 展示标签：MCP 工具/技能特殊标注，满足"工具、技能及 MCP 操作步骤"可视化
@@ -93,7 +95,9 @@ export async function agentCliStream(
     catch { return { ok: false, error: `工作目录不存在：${cwd}` } }
   }
   // 同引擎并发保护：新提问杀掉上一个仍在跑的
-  killTree(running[engine]); delete running[engine]
+  const previous = running[engine]
+  if (previous?.pid != null) stopReasons.set(previous.pid, '已被新的同引擎请求停止')
+  killTree(previous)
 
   const cmdline = engine === 'claude'
     ? `claude -p --output-format stream-json --verbose --include-partial-messages${cont ? ' -c' : ''}`
@@ -109,9 +113,11 @@ export async function agentCliStream(
   let lineBuf = ''
   const finish = (ev: AgentCliEvent): void => {
     if (ended) return
+    const stopReason = p.pid == null ? undefined : stopReasons.get(p.pid)
+    if (p.pid != null) stopReasons.delete(p.pid)
     ended = true
     if (running[engine]?.pid === p.pid) delete running[engine]
-    send(ev)
+    send(stopReason ? { kind: 'error', text: stopReason } : ev)
   }
   const timer = setTimeout(() => { killTree(p); finish({ kind: 'error', text: '执行超时（15 分钟），已终止。' }) }, TIMEOUT_MS)
 
@@ -197,7 +203,7 @@ export async function agentCliStream(
   p.on('close', (code) => {
     clearTimeout(timer)
     if (ended) return
-    // 进程结束但没等到 result 事件：有正文按结果收（含用户主动停止的情形），否则报错
+    // 进程结束但没等到 result 事件：有正文按结果收，否则报错；停止原因由 finish 统一覆盖。
     if (!sawResult && accText) finish({ kind: 'result', text: accText })
     else if (!sawResult) finish({ kind: 'error', text: errBuf.trim().slice(-500) || `${engine} 退出码 ${code}（未装或未登录？终端里先跑一次 ${engine}）` })
   })

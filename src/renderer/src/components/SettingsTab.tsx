@@ -515,11 +515,14 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                 </Chip>
               ))}
             </div>
+            {activeProvider.hint && <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.45 }}>{activeProvider.hint}</div>}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
               <div style={labelSm}>型号（每家可添加多个 · 点选使用 · 问答界面可随时切换）</div>
-              <Button sm variant="ghost" icon={RefreshCw} disabled={p.llm.testStatus === 'testing'} onClick={p.onSyncLlmModels}>同步可用模型</Button>
+              {activeProvider.modelDiscovery === false
+                ? <span style={{ ...text.faint(), fontSize: 10, whiteSpace: 'nowrap' }}>官方固定目录</span>
+                : <Button sm variant="ghost" icon={RefreshCw} disabled={p.llm.testStatus === 'testing'} onClick={p.onSyncLlmModels}>同步可用模型</Button>}
             </div>
             {(p.llm.modelLists[p.llm.provider] || []).length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -529,15 +532,17 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                     <div key={m} onClick={() => p.onPickModel(m)} className="hv" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: R.sm, background: sel ? semBg(accent(), 0.14) : fill(2), border: sel ? `0.5px solid ${accent(0.7, 0.5)}` : 'none', cursor: 'pointer' }}>
                       <span style={{ ...text.mono(11), color: sel ? ink(1) : ink(2) }}>{m}</span>
                       {sel && <span style={{ color: accent(), fontSize: 9, fontWeight: 700 }}>使用中</span>}
-                      <span onClick={(e) => { e.stopPropagation(); p.onRemoveModel(m) }} title="删除此型号" style={{ display: 'inline-flex', color: ink(3), cursor: 'pointer' }}>
-                        <X size={11} strokeWidth={2} />
-                      </span>
+                      {activeProvider.modelDiscovery !== false && (
+                        <span onClick={(e) => { e.stopPropagation(); p.onRemoveModel(m) }} title="删除此型号" style={{ display: 'inline-flex', color: ink(3), cursor: 'pointer' }}>
+                          <X size={11} strokeWidth={2} />
+                        </span>
+                      )}
                     </div>
                   )
                 })}
               </div>
             )}
-            <div style={{ display: 'flex', gap: 6 }}>
+            {activeProvider.modelDiscovery !== false && <div style={{ display: 'flex', gap: 6 }}>
               <Input
                 value={modelDraft}
                 onChange={setModelDraft}
@@ -553,7 +558,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
               >
                 添加
               </Button>
-            </div>
+            </div>}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={labelSm}>Base URL</div>
@@ -592,7 +597,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
               })}
             </div>
           )}
-          <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.5 }}>仅用于「问答助手」。每家供应商的模型、地址和密钥独立保留，切换时不会串用；“同步可用模型”读取当前账号的 `/models` 列表。Agent（Claude Code / Codex）的模型仍在各自 CLI 中配置，密钥仅保存在本机。</div>
+          <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.5 }}>仅用于「问答助手」。每家供应商的模型、地址和密钥独立保留，切换时不会串用；支持发现模型的供应商可读取当前账号的 `/models` 列表。Agent（Claude Code / Codex）的模型仍在各自 CLI 中配置，密钥仅保存在本机。</div>
         </div>
       </CollapsibleSection>
 

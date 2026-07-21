@@ -71,7 +71,8 @@ export async function readAttachment(f: File): Promise<Attachment> {
     if (f.type.startsWith('image/')) {
       if (f.size > MAX_IMAGE_BYTES) return { type: 'screenshot', name: `${f.name}（超过 4MB，未读取）` }
       const dataUrl = await readAsDataUrl(f)
-      return { type: 'screenshot', name: f.name, thumb: dataUrl, dataUrl }
+      const compact = await downscaleDataUrl(dataUrl)
+      return { type: 'screenshot', name: f.name, thumb: compact, dataUrl: compact }
     }
     const looksText = TEXT_EXT.test(f.name) || f.type.startsWith('text/') || f.type === 'application/json'
     if (looksText) {

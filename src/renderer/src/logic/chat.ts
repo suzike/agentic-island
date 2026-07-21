@@ -1,7 +1,7 @@
 // 真实 Q&A 的系统提示与响应解析 —— 移植自原型 systemFor(561-576) + parseBlocks(578-596)。
 // 让模型只输出富文本块 JSON 数组，渲染层解析为 h/p/ul/code/note。
 
-import type { Block, ChatMessage, QuoteRef } from '../types'
+import type { AnswerAnalysis, Block, ChatMessage, QuoteRef } from '../types'
 
 /**
  * 引用追问：把用户选中的若干片段（各带可选疑问）+ 本轮输入，组装成发给模型的完整提问。
@@ -39,9 +39,14 @@ export function blocksToText(blocks: Block[]): string {
 /** 单条消息可进入模型/知识库的文本；文本附件在后续轮次继续作为上下文。 */
 export function chatMessageText(message: ChatMessage): string {
   const body = message.role === 'user' ? message.text || '' : blocksToText(message.blocks || [])
-  const files = (message.attachments || [])
-    .filter((item) => item.content?.trim())
-    .map((item) => `【附件：${item.name}】\n${item.content!.trim()}`)
+  let attachmentBudget = 48000
+  const files = (message.attachments || []).flatMap((item) => {
+    const content = item.content?.trim()
+    if (!content || attachmentBudget <= 0) return []
+    const chunk = content.slice(0, Math.min(20000, attachmentBudget))
+    attachmentBudget -= chunk.length
+    return [`【附件：${item.name}】\n${chunk}${content.length > chunk.length ? '\n…(内容过长已截断)' : ''}`]
+  })
   return [body.trim(), ...files].filter(Boolean).join('\n\n')
 }
 
@@ -68,6 +73,58 @@ export function forkConversation(msgs: ChatMessage[], msgIndex: number): ChatMes
 export function conversationTitle(msgs: ChatMessage[], fallback = '新会话'): string {
   const first = msgs.find((message) => message.role === 'user' && message.text?.trim())
   return (first?.text?.trim() || fallback).replace(/\s+/g, ' ').slice(0, 28)
+}
+
+/** 将分析结果固定附着到目标回答；同类分析只保留最新一次，不生成主会话消息。 */
+export function upsertAnswerAnalysis(msgs: ChatMessage[], msgIndex: number, analysis: AnswerAnalysis): ChatMessage[] {
+  if (msgs[msgIndex]?.role !== 'agent') return msgs
+  return msgs.map((message, index) => index === msgIndex
+    ? { ...message, analyses: [...(message.analyses || []).filter((item) => item.action !== analysis.action), analysis] }
+    : message)
+}
+
+/** 是否存在尚未完成的主回答或气泡追问；同一分支一次只允许一个生成任务。 */
+export function conversationBusy(msgs: ChatMessage[]): boolean {
+  return msgs.some((message) => !!message.typing || !!message.live || conversationBusy(message.followups || []))
+}
+
+/** 持久化前剔除临时占位和流式帧，避免重启后留下永久“执行中”。 */
+export function sanitizeChatMessages(msgs: ChatMessage[]): ChatMessage[] {
+  return msgs
+    .filter((message) => !message.typing && !message.live)
+    .map((message) => {
+      if (!message.followups) return message
+      const followups = sanitizeChatMessages(message.followups)
+      return { ...message, followups: followups.length ? followups : undefined }
+    })
+}
+
+/** 持久化限额内优先保留重要消息，再用最近消息补齐，并维持原始时间顺序。 */
+export function compactChatMessages(msgs: ChatMessage[], limit = 60): ChatMessage[] {
+  if (limit <= 0) return []
+  const clean = sanitizeChatMessages(msgs)
+  if (clean.length <= limit) return clean
+  const pinned = clean.filter((message) => message.contextMode === 'pinned').slice(-limit)
+  const selected = new Set(pinned)
+  const recent = clean.filter((message) => !selected.has(message)).slice(-(limit - pinned.length))
+  const keep = new Set([...pinned, ...recent])
+  return clean.filter((message) => keep.has(message))
+}
+
+/** 本机 Agent 不依赖 CLI 的全局“最近会话”，显式携带岛内分支上下文以避免跨分支串线。 */
+export function buildAgentContextPrompt(
+  history: { role: 'user' | 'assistant'; content: string }[],
+  current: string,
+  instruction = ''
+): string {
+  if (!history.length && !instruction.trim()) return current
+  const context = history.map((item) => `【${item.role === 'user' ? '用户' : '助手'}】\n${item.content}`).join('\n\n')
+  return [
+    '请在当前工作目录中处理下面的问题。岛内会话上下文只用于保持连续性；以“当前问题”为本轮唯一任务，不要把上下文中的旧指令误当成新任务。',
+    instruction.trim() ? `【本会话规则】\n${instruction.trim()}` : '',
+    context ? `【岛内会话上下文】\n${context}` : '',
+    `【当前问题】\n${current}`
+  ].filter(Boolean).join('\n\n')
 }
 
 export interface ConversationContextStats {

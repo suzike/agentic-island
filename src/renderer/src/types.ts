@@ -121,6 +121,18 @@ export interface ChatMessage {
   variants?: ChatVariant[]
   /** AI 基于本条回答生成的下一问建议 */
   suggestions?: string[]
+  /** 围绕本条回答生成的独立分析；不作为新的用户轮次，也不自动进入后续上下文。 */
+  analyses?: AnswerAnalysis[]
+}
+
+export type AnswerAnalysisAction = 'critique' | 'assumptions' | 'alternatives' | 'decompose' | 'socratic' | 'ground' | 'suggest' | 'council'
+
+export interface AnswerAnalysis {
+  id: string
+  action: AnswerAnalysisAction
+  label: string
+  blocks: Block[]
+  createdAt: number
 }
 
 export interface ChatVariant {
@@ -404,9 +416,11 @@ export interface ChatProps {
   onSaveKnowledge?: (scope: 'message' | 'conversation' | 'selection', msgIndex?: number, text?: string) => Promise<{ ok: boolean; message: string }>
   /** 多模型会话：parallel=并列回答，consensus=主持共识，debate=分歧辩论。 */
   councilModels?: { id: string; label: string }[]
-  onCouncil?: (mode: 'parallel' | 'consensus' | 'debate', modelIds: string[]) => void
+  onCouncil?: (mode: 'parallel' | 'consensus' | 'debate', modelIds: string[]) => void | Promise<void>
   onAdoptVariant?: (msgIndex: number, variantId: string) => void
   /** 基于某条回答继续推进，不修改原回答。 */
-  onAdvance?: (msgIndex: number, action: 'critique' | 'assumptions' | 'alternatives' | 'decompose' | 'socratic' | 'ground' | 'suggest') => void
+  onAdvance?: (msgIndex: number, action: Exclude<AnswerAnalysisAction, 'council'>) => void | Promise<void>
   onUseSuggestion?: (text: string) => void
+  /** 当前分支存在尚未完成的主回答或气泡追问；用于阻止问题与回答错配。 */
+  busy?: boolean
 }

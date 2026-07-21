@@ -1,19 +1,20 @@
-// 问答分区 v4：设计系统重做（ui/tokens + Segmented/Chip/EmptyState + lucide 图标）。
+// 问答分区：回答配置保持在第一层；模型、资料、模板、剪贴板与历史按任务分层展示。
 // · 模型 chip 下拉可在「已保存的配置」间一键切换（多厂商多模型自由切换）
-// · 快捷指令完全可自定义（增删改 + 恢复默认，持久化），空态卡片与输入区 chips 同源。
+// · 提问模板完全可自定义（增删改 + 恢复默认，持久化），空态卡片与工具面板同源。
 
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Cloud, Terminal, Hexagon, Zap, Brain, Library, Settings2, ChevronDown,
-  Pencil, ClipboardList, RotateCw, Plus, History, Sparkles, Lightbulb, X, Check, Star, MessageSquare,
+  Pencil, ClipboardList, Plus, History, Sparkles, Lightbulb, X, Check, Star, MessageSquare, MoreHorizontal,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { ChatProps, ClipItem, QuickPrompt } from '../types'
 import { CLIP_ACTIONS, tagHue } from '../logic/clip'
 import { island } from '../bridge'
 import { IslandChat } from './IslandChat'
 import { Button, Chip, Segmented } from '../ui/components'
-import { overlayPop } from '../ui/motion'
+import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accent, fill, FS, gradient, hairline, hueAccent, ink, R, sem, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface AskTabProps {
@@ -37,12 +38,11 @@ interface AskTabProps {
   onSetAgentCwd: (d: string) => void
   suggestions: { id: string; label: string; source: string; go: () => void }[]
   conv: ChatProps
-  sessions: { id: number; title: string }[]
+  sessions: { id: number; title: string; busy?: boolean }[]
   onNew: () => void
   onSwitch: (id: number) => void
   onDeleteSession: (id: number) => void
-  onRetry: () => void
-  /** 快捷指令（用户可增删改） */
+  /** 提问模板（用户可增删改） */
   prompts: QuickPrompt[]
   onSavePrompt: (p: { id?: number; icon: string; label: string; text: string }) => void
   onDeletePrompt: (id: number) => void
@@ -85,11 +85,35 @@ const miniInput: React.CSSProperties = {
 
 const emptyEdit = { icon: '✨', label: '', text: '' }
 
+function ToolItem({ icon: Icon, title, detail, count, onClick, disabled }: { icon: LucideIcon; title: string; detail: string; count?: number; onClick: () => void; disabled?: boolean }): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="hv"
+      style={{ display: 'grid', gridTemplateColumns: '30px minmax(0, 1fr) auto', alignItems: 'center', gap: 8, minHeight: 48, padding: '7px 9px', border: 'none', borderRadius: R.md, background: fill(1), color: ink(1), textAlign: 'left', fontFamily: 'var(--font)', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.48 : 1 }}
+    >
+      <span style={{ width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent() }}>
+        <Icon size={14} strokeWidth={1.8} />
+      </span>
+      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontSize: FS.small, fontWeight: 650 }}>{title}</span>
+        <span style={{ ...text.faint(), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
+      </span>
+      {typeof count === 'number' && <span style={{ minWidth: 20, textAlign: 'center', padding: '2px 6px', borderRadius: R.pill, background: fill(3), color: ink(2), fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>{count}</span>}
+    </button>
+  )
+}
+
 export function AskTab(p: AskTabProps): React.JSX.Element {
   const [showHistory, setShowHistory] = useState(false)
   const [showModels, setShowModels] = useState(false)
+  const [showTools, setShowTools] = useState(false)
+  const [confirmNew, setConfirmNew] = useState(false)
   const [manage, setManage] = useState(false)
   const [showClips, setShowClips] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
   const [clipQuery, setClipQuery] = useState('')
   // 本地 Agent CLI 可用性探测（切到该引擎时检测一次）
   const [engineStat, setEngineStat] = useState('')
@@ -110,25 +134,22 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
     setEdit(emptyEdit)
   }
 
-  // 快捷指令注入输入区（有对话时显示为输入框上方的横滑 chips；点击回填不发送）
+  // 对话开始后不再铺开模板；模板统一从“工具”进入，空态仍可直接选择。
   const finalConv: ChatProps = {
     ...p.conv,
-    quickReplies: p.empty ? undefined : p.prompts.map((q) => q.label),
-    onQuick: (label) => {
-      const found = p.prompts.find((q) => q.label === label)
-      if (found) p.conv.onText(found.text)
-    }
+    quickReplies: undefined,
+    onQuick: undefined
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SP.md - 2 }}>
-      {/* 紧凑头部：引擎 · 模式 · 知识库 · 模型(下拉切换) · 指令管理 · 操作 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      {/* 第一层只显示当前回答配置；低频能力统一进入“工具”。 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: 6, ...surface.inset(), borderRadius: R.lg }}>
         {/* 引擎切换：云端模型 / 本机 Claude Code / 本机 Codex（本地引擎继承全部技能/工具/MCP 配置） */}
         <Segmented
           options={[
-            { key: 'llm', label: '模型', icon: Cloud },
-            { key: 'claude', label: 'CC', icon: Terminal },
+            { key: 'llm', label: '云模型', icon: Cloud },
+            { key: 'claude', label: 'Claude', icon: Terminal },
             { key: 'codex', label: 'Codex', icon: Hexagon }
           ]}
           value={p.engine}
@@ -144,44 +165,48 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
             onChange={(k) => p.onSetMode(k)}
           />
         )}
-        {/* 知识库模式：只依据接入的本地/网页资料作答（RAG，仅云端引擎） */}
+        {p.engine === 'llm' && (
+          <Chip
+            onClick={() => {
+              if (!p.models.length) { p.onOpenLlmSettings(); return }
+              setShowModels((v) => !v); setShowTools(false); setShowHistory(false); setShowClips(false); setManage(false)
+            }}
+            title={p.models.length > 0 ? '切换当前回答模型' : '打开模型设置'}
+            active={showModels}
+            style={{ maxWidth: 190 }}
+          >
+            <span style={{ width: 5, height: 5, flex: 'none', borderRadius: 999, background: accent(), boxShadow: `0 0 6px ${accent()}` }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 10 }}>{p.modelLabel}</span>
+            {p.models.length > 0 && <ChevronDown size={9} strokeWidth={2} style={{ opacity: 0.7 }} />}
+          </Chip>
+        )}
+        {/* 资料范围：通用知识或仅依据用户知识库。 */}
         {p.engine === 'llm' && (
           <Chip
             icon={Library}
             active={p.kbMode}
             color={sem.calm}
-            onClick={p.onToggleKb}
-            title={p.kbMode ? '知识库模式已开启：只依据你接入的资料作答' : '开启知识库模式：只依据你接入的本地/网页资料作答'}
+            onClick={() => p.kbCount > 0 || p.kbMode ? p.onToggleKb() : p.onManageKb()}
+            title={p.kbMode ? '当前仅依据你的知识库作答；点击切回通用知识' : p.kbCount > 0 ? '点击后仅依据你接入的知识库作答' : '先接入知识库资料'}
           >
-            知识库{p.kbCount ? ' · ' + p.kbCount : ''}
-          </Chip>
-        )}
-        <Chip icon={Settings2} onClick={p.onManageKb} title="管理知识库（添加文件夹 / 文件 / 网页）">库</Chip>
-        <Chip
-          onClick={() => (p.models.length > 0 ? setShowModels((v) => !v) : p.onOpenLlmSettings())}
-          title={p.models.length > 0 ? '切换模型（已保存的配置）' : '模型设置'}
-          active={showModels}
-          style={{ maxWidth: 180 }}
-        >
-          <span style={{ width: 5, height: 5, flex: 'none', borderRadius: 999, background: accent(), boxShadow: `0 0 6px ${accent()}` }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 10 }}>{p.modelLabel}</span>
-          {p.models.length > 0 && <ChevronDown size={9} strokeWidth={2} style={{ opacity: 0.7 }} />}
-        </Chip>
-        <Chip icon={Pencil} active={manage} onClick={() => setManage((v) => !v)} title="管理快捷指令（增删改）" />
-        {p.clips.length > 0 && (
-          <Chip icon={ClipboardList} active={showClips} onClick={() => setShowClips((v) => !v)} title="剪贴板历史（仅内存，AI 一键分析）">
-            {p.clips.length}
+            {p.kbMode ? `我的知识库 · ${p.kbCount}` : p.kbCount > 0 ? '通用知识' : '接入知识库'}
           </Chip>
         )}
         <span style={{ flex: 1 }} />
-        {!p.empty && <Chip icon={RotateCw} onClick={p.onRetry} title="重新生成最后一个回答" />}
-        {!p.empty && <Chip icon={Plus} onClick={p.onNew} title="归档当前对话，开始新话题" />}
-        {p.sessions.length > 0 && (
-          <Chip icon={History} active={showHistory} onClick={() => setShowHistory((v) => !v)} title="历史对话">
-            {p.sessions.length}
-          </Chip>
-        )}
+        {!p.empty && <Chip icon={Plus} active={confirmNew} onClick={() => setConfirmNew((value) => !value)} title="开始一个新话题">新对话</Chip>}
+        <Chip icon={MoreHorizontal} active={showTools || manage || showClips || showHistory} onClick={() => { setShowTools((v) => !v); setShowModels(false); setManage(false); setShowClips(false); setShowHistory(false) }} title="知识库、模板、剪贴板和历史对话">工具</Chip>
       </div>
+
+      <AnimatePresence>
+      {confirmNew && !p.empty && (
+        <motion.div variants={fadeScaleIn} initial="initial" animate="animate" exit="exit" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', ...surface.inset(), borderRadius: R.md }}>
+          <MessageSquare size={13} strokeWidth={1.8} style={{ color: accent(), flex: 'none' }} />
+          <span style={{ flex: 1, color: ink(2), fontSize: FS.small }}>当前对话会自动保存到历史记录，然后打开一个空白对话。</span>
+          <Button variant="ghost" sm onClick={() => setConfirmNew(false)}>取消</Button>
+          <Button variant="primary" sm onClick={() => { setConfirmNew(false); p.onNew() }}>保存并新建</Button>
+        </motion.div>
+      )}
+      </AnimatePresence>
 
       {/* 本地 Agent 引擎配置：可用性 + 工作目录（本地技能/MCP/CLAUDE.md 按目录生效） */}
       {p.engine !== 'llm' && (
@@ -195,7 +220,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
             title="本地配置（CLAUDE.md/技能/MCP）按目录生效；也决定 Agent 能读写哪个项目"
             style={{ flex: 1, minWidth: 0, ...surface.inset(), outline: 'none', color: ink(1), fontSize: 10, padding: '4px 8px', fontFamily: 'ui-monospace,monospace' }}
           />
-          <span style={{ flex: 'none', ...text.faint(), fontSize: 8.5 }}>{p.engine === 'claude' ? '多轮续聊 ✓' : '单轮问答'}</span>
+          <span style={{ flex: 'none', ...text.faint(), fontSize: 8.5 }}>岛内上下文 ✓</span>
         </div>
       )}
 
@@ -222,12 +247,25 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
       )}
       </AnimatePresence>
 
-      {/* 快捷指令管理：增删改 + 恢复默认 */}
+      {/* 二级工具入口：用“动作 + 结果”代替一排含义不明的图标。 */}
+      <AnimatePresence>
+      {showTools && (
+        <motion.div variants={overlayPop} initial="initial" animate="animate" exit="exit" style={{ ...panelBox, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 6 }}>
+          <ToolItem icon={Settings2} title="知识库资料" detail="接入文件、文件夹和网页" count={p.kbCount} onClick={() => { setShowTools(false); p.onManageKb() }} />
+          <ToolItem icon={Pencil} title="提问模板" detail="管理常用问题和提示词" count={p.prompts.length} onClick={() => { setShowTools(false); setManage(true) }} />
+          <ToolItem icon={ClipboardList} title="剪贴板" detail={p.clips.length ? '复用并处理最近复制的内容' : '暂无可用内容'} count={p.clips.length} disabled={!p.clips.length} onClick={() => { setShowTools(false); setShowClips(true) }} />
+          <ToolItem icon={History} title="历史对话" detail={p.sessions.length ? '恢复已归档的话题' : '暂无已归档对话'} count={p.sessions.length} disabled={!p.sessions.length} onClick={() => { setShowTools(false); setShowHistory(true) }} />
+          <ToolItem icon={Cloud} title="模型设置" detail="配置供应商、模型和密钥" onClick={() => { setShowTools(false); p.onOpenLlmSettings() }} />
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {/* 提问模板管理：增删改 + 恢复默认 */}
       <AnimatePresence>
       {manage && (
         <motion.div variants={overlayPop} initial="initial" animate="animate" exit="exit" style={{ ...panelBox, gap: 7 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: ink(1), fontSize: 11, fontWeight: 700 }}><Pencil size={11} strokeWidth={2} style={{ color: accent() }} />快捷指令</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: ink(1), fontSize: 11, fontWeight: 700 }}><Pencil size={11} strokeWidth={2} style={{ color: accent() }} />提问模板</span>
             <span style={{ flex: 1 }} />
             <span className="hv" onClick={p.onResetPrompts} title="恢复出厂 6 条默认指令" style={{ color: ink(3), fontSize: 10, cursor: 'pointer' }}>恢复默认</span>
             <span className="hv" onClick={() => { setManage(false); setEdit(emptyEdit) }} style={{ color: accent(), fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>完成</span>
@@ -352,10 +390,21 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
           {p.sessions.map((s) => (
             <div key={s.id} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: R.md, background: fill(1) }}>
               <MessageSquare size={12} strokeWidth={1.75} style={{ color: ink(3), flex: 'none' }} />
-              <span onClick={() => { p.onSwitch(s.id); setShowHistory(false) }} style={{ flex: 1, color: ink(1), fontSize: 11.5, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="恢复此对话继续聊">
-                {s.title}
-              </span>
-              <X size={12} strokeWidth={2} className="hv" onClick={() => p.onDeleteSession(s.id)} style={{ color: ink(4), cursor: 'pointer', flex: 'none' }} />
+              {pendingDeleteId === s.id ? (
+                <>
+                  <span style={{ flex: 1, color: s.busy ? sem.warn : ink(2), fontSize: 10.5 }}>{s.busy ? '该会话仍在生成，删除会丢弃结果。' : '删除后无法恢复这段对话。'}</span>
+                  <Button variant="ghost" sm onClick={() => setPendingDeleteId(null)}>取消</Button>
+                  <Button variant="danger" sm onClick={() => { p.onDeleteSession(s.id); setPendingDeleteId(null) }}>确认删除</Button>
+                </>
+              ) : (
+                <>
+                  <span onClick={() => { p.onSwitch(s.id); setShowHistory(false) }} style={{ flex: 1, color: ink(1), fontSize: 11.5, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="恢复此对话继续聊">
+                    {s.title}
+                  </span>
+                  {s.busy && <span style={{ color: sem.warn, fontSize: 9, fontWeight: 650 }}>生成中</span>}
+                  <span className="hv" onClick={() => setPendingDeleteId(s.id)} title="删除历史会话" style={{ color: ink(4), cursor: 'pointer', flex: 'none', display: 'inline-flex' }}><X size={12} strokeWidth={2} /></span>
+                </>
+              )}
             </div>
           ))}
         </motion.div>
@@ -371,7 +420,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
             </div>
             <div style={{ ...text.title(), fontSize: 14 }}>工作助手</div>
             <div style={{ ...text.dim(), textAlign: 'center', lineHeight: 1.6 }}>
-              支持多轮追问（记得上文）· 多行粘贴代码 · {p.mode === 'deep' ? '深度模式展示思维链' : '快速模式直给结论'}
+              从一个明确问题开始 · {p.engine === 'llm' ? (p.kbMode ? '仅依据我的知识库' : p.mode === 'deep' ? '深度回答' : '快速回答') : p.engine === 'claude' ? '交给本机 Claude' : '交给本机 Codex'}
             </div>
           </div>
 

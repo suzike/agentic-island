@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import type { AgentCliEvent, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, RuntimeInfo } from '../../shared/protocol'
-import type { ActivityEntry, AgentLive, AgentVM, AskBranchMeta, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
+import type { ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AskBranchMeta, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
 import { DEFAULT_QUICK_PROMPTS } from './logic/prompts'
@@ -23,7 +23,7 @@ import { MarkdownStudio } from './components/MarkdownStudio'
 import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
 import { PROVIDERS, migrateProviderSettings, patchProviderDraft, switchProviderSettings } from './logic/providers'
-import { ADVANCE_PROMPTS, branchMergePrompt, buildQuotedPrompt, conversationTitle, conversationToMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor } from './logic/chat'
+import { ADVANCE_PROMPTS, branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
 import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
 import { ThemeDesigner, type Tokens } from './components/ThemeDesigner'
 import { CalcSheet } from './components/CalcSheet'
@@ -76,6 +76,16 @@ const ambientSuggestionPrompt = (item: AmbientTextItem): string => {
   if (item.mode === 'brief') return `请根据这条实时工作状态，帮我判断优先级并给出下一步行动：\n${item.text}`
   if (item.mode === 'github') return `请介绍并评估这条 GitHub 热门内容，说明它是否值得我进一步关注：\n${item.text}`
   return `请结合软件开发和我的实际工作场景，展开这条灵感，并给出 3 条可执行建议：\n${item.text}`
+}
+
+const ANSWER_ANALYSIS_LABELS: Record<Exclude<AnswerAnalysisAction, 'council'>, string> = {
+  critique: '检查漏洞',
+  assumptions: '检查前提',
+  alternatives: '替代方案',
+  decompose: '执行步骤',
+  socratic: '澄清问题',
+  ground: '资料核对',
+  suggest: '下一步问题'
 }
 
 const newAskBranch = (title = '新会话', parentId?: number, forkAt?: number): AskBranchMeta => {
@@ -592,11 +602,8 @@ export function App(): React.JSX.Element {
       radar,
       embedModel,
       // 问答历史持久化（截尾 60 条、剔除 typing 占位与本地 Agent 进行中的 live 消息，含就地追问子线程）+ 归档会话
-      askThread: (threads['ask'] || [])
-        .filter((m) => !m.typing && !m.live)
-        .map((m) => (m.followups ? { ...m, followups: m.followups.filter((f) => !f.typing && !f.live) } : m))
-        .slice(-60),
-      askSessions: askSessions.slice(0, 40),
+      askThread: compactChatMessages(threads['ask'] || []),
+      askSessions: askSessions.slice(0, 40).map((session) => ({ ...session, msgs: compactChatMessages(session.msgs) })),
       activeAskBranch,
       workbenchProjects,
       activeProjectId,
@@ -1152,15 +1159,19 @@ export function App(): React.JSX.Element {
   }, [])
   // ===== 本地 Agent 流式管线：runId → sink 分发；每次运行以 result/error 收尾 =====
   const agentSinks = useRef(new Map<string, (ev: AgentCliEvent) => void>())
-  // 代际守卫：新提问会杀掉旧进程，旧进程的收尾事件会"晚到"——只允许最新一代写入线程，防止旧的半截结果挤掉新活气泡
-  const agentGenRef = useRef(0)
   useEffect(() => island.onAgentCliEvent(({ runId, ev }) => agentSinks.current.get(runId)?.(ev)), [])
   /**
    * 启动一次本地 Agent 流式问答：patch 把"活"消息写进目标位置（主线程/追问子线程），done 以最终 blocks 收尾。
    * 事件节流 80ms 刷一次 UI（token 级事件频率高，逐条 setState 会拖垮渲染）。
    */
   const runAgentStream = useCallback(async (eng: 'claude' | 'codex', prompt: string, cont: boolean, imagesIgnored: boolean, patch: (m: ChatMessage) => void, done: (blocks: Block[]) => void): Promise<void> => {
-    const r = await island.agentCliStream(eng, prompt, agentCwdRef.current, cont)
+    let r: Awaited<ReturnType<typeof island.agentCliStream>>
+    try {
+      r = await island.agentCliStream(eng, prompt, agentCwdRef.current, cont)
+    } catch (error) {
+      done([{ t: 'note', text: `本地 ${eng === 'claude' ? 'Claude Code' : 'Codex'} 启动失败：${String(error)}` }])
+      return
+    }
     if (!r.ok || !r.runId) { done([{ t: 'note', text: `本地 ${eng === 'claude' ? 'Claude Code' : 'Codex'} 启动失败：${r.error || '未知错误'}` }]); return }
     const runId = r.runId
     const live: AgentLive = { engine: eng, think: '', steps: [], text: '' }
@@ -1191,12 +1202,41 @@ export function App(): React.JSX.Element {
     })
   }, [])
 
+  const patchAskBranchMessages = useCallback((branchId: number, patch: (messages: ChatMessage[]) => ChatMessage[]): void => {
+    if (activeAskBranchRef.current.id === branchId) {
+      setThreads((all) => ({ ...all, ask: patch(all.ask || []) }))
+      return
+    }
+    setAskSessions((sessions) => sessions.map((session) => session.id === branchId
+      ? { ...session, msgs: patch(session.msgs), updatedAt: Date.now() }
+      : session))
+  }, [])
+
+  const patchAskBranchMeta = useCallback((branchId: number, patch: (branch: AskBranchMeta) => AskBranchMeta): void => {
+    if (activeAskBranchRef.current.id === branchId) {
+      setActiveAskBranch((branch) => {
+        const next = patch(branch)
+        activeAskBranchRef.current = next
+        return next
+      })
+      return
+    }
+    setAskSessions((sessions) => sessions.map((session) => {
+      if (session.id !== branchId) return session
+      const { msgs, ...meta } = session
+      return { ...patch(meta), msgs }
+    }))
+  }, [])
+
   // 拉取 AI 回复（带多轮上下文）：history 为"本轮提问之前"的对话历史
-  const fetchReply = useCallback((key: string, text: string, atts: Composer['attachments'], deep: boolean, history: { role: 'user' | 'assistant'; content: string }[]): void => {
+  const fetchReply = useCallback((key: string, text: string, atts: Composer['attachments'], deep: boolean, history: { role: 'user' | 'assistant'; content: string }[], branchId?: number): void => {
     const L = llmRef.current
     const cfg = { baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }
-    const finish = (reply: ChatMessage): void =>
-      setThreads((th) => ({ ...th, [key]: [...(th[key] || []).filter((m) => !m.typing), { ...reply, ts: Date.now() }] }))
+    const finish = (reply: ChatMessage): void => {
+      const patch = (messages: ChatMessage[]): ChatMessage[] => [...messages.filter((message) => !message.typing && !message.live), { ...reply, ts: Date.now() }]
+      if (key === 'ask' && branchId !== undefined) patchAskBranchMessages(branchId, patch)
+      else setThreads((all) => ({ ...all, [key]: patch(all[key] || []) }))
+    }
 
     // 本地 Agent 引擎不依赖云端 Key；仅云端模式做配置校验
     const useLocalAgent = key === 'ask' && askEngineRef.current !== 'llm'
@@ -1211,11 +1251,10 @@ export function App(): React.JSX.Element {
     // 本地 Agent 引擎（仅问答区）：流式——思考/工具/技能/MCP 步骤实时进气泡，与终端里工作方式一致
     if (useLocalAgent) {
       const eng = askEngineRef.current as 'claude' | 'codex'
-      const cont = eng === 'claude' && history.length > 0 // claude -c 续聊；codex 每问独立
-      // 活消息占位：替换 typing/上一帧活消息，追加到线程尾；仅最新一代可写（旧进程晚到的收尾事件丢弃）
-      const gen = ++agentGenRef.current
-      const patch = (m: ChatMessage): void => { if (gen !== agentGenRef.current) return; setThreads((th) => ({ ...th, [key]: [...(th[key] || []).filter((x) => !x.typing && !x.live), { ...m, ts: Date.now() }] })) }
-      void runAgentStream(eng, fullText, cont, images.length > 0, patch, (blocks) => patch({ role: 'agent', blocks }))
+      const instruction = activeAskBranchRef.current.instruction?.trim() || ''
+      const prompt = buildAgentContextPrompt(history, fullText, instruction)
+      const patch = (message: ChatMessage): void => finish(message)
+      void runAgentStream(eng, prompt, false, images.length > 0, patch, (blocks) => patch({ role: 'agent', blocks }))
       return
     }
     const userPayload: string | Array<Record<string, unknown>> = images.length
@@ -1232,11 +1271,11 @@ export function App(): React.JSX.Element {
       } else {
         finish({ role: 'agent', blocks: [{ t: 'note', text: '请求失败：' + (res.error || '未知错误') }] })
       }
-    })
-  }, [runAgentStream])
+    }).catch((error) => finish({ role: 'agent', blocks: [{ t: 'note', text: '请求失败：' + String(error) }] }))
+  }, [patchAskBranchMessages, runAgentStream])
 
   // 知识库检索式作答（RAG）：向量检索 top-k → 只依据命中片段作答 → 末尾附出处。settle 收敛到调用方的气泡。
-  const runKbReply = useCallback(async (query: string, deep: boolean, history: { role: 'user' | 'assistant'; content: string }[], settle: (blocks: ChatMessage['blocks']) => void): Promise<void> => {
+  const runKbReply = useCallback(async (query: string, deep: boolean, history: { role: 'user' | 'assistant'; content: string }[], instruction: string, settle: (blocks: ChatMessage['blocks']) => void): Promise<void> => {
     const L = llmRef.current
     const cfg = { baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }
     if (!cfg.apiKey || !cfg.model) { settle([{ t: 'note', text: '请先在 设置 › 问答助手模型 里配置端点、型号与 API Key。' }]); return }
@@ -1244,8 +1283,7 @@ export function App(): React.JSX.Element {
     if (!em) { settle([{ t: 'note', text: '📚 知识库检索需要向量模型：点输入区「⚙ 库」打开知识库面板，填入 Embedding 模型（如 text-embedding-3-small / bge-m3）。' }]); return }
     const sr = await island.kbSearch({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: em }, query, 8)
     if (!sr.ok || !sr.hits?.length) { settle([{ t: 'note', text: '📚 ' + (sr.error || '知识库里没有检索到相关内容，可在知识库面板添加更多资料。') }]); return }
-    const instruction = activeAskBranchRef.current.instruction?.trim()
-    const system = KB_SYSTEM + (instruction ? `\n\n本会话额外指令（持续生效）：\n${instruction}` : '')
+    const system = KB_SYSTEM + (instruction.trim() ? `\n\n本会话额外指令（持续生效）：\n${instruction.trim()}` : '')
     const res = await island.llmComplete(cfg, system, kbGroundPrompt(query, sr.hits), deep, history)
     if (!res.ok) { settle([{ t: 'note', text: '请求失败：' + (res.error || '未知错误') }]); return }
     let blocks = parseBlocks(res.text) || looseBlocks(res.text)
@@ -1258,21 +1296,25 @@ export function App(): React.JSX.Element {
   // 引用片段：气泡里作为卡片单独展示；发给模型的文本把引用+疑问组装进上下文
   const pushAndReply = useCallback((key: string, text: string, atts: Composer['attachments'], deep = false, qs: QuoteRef[] = []): void => {
     if (!text && atts.length === 0 && qs.length === 0) return
+    const currentMessages = threadsRef.current[key] || []
+    if (key === 'ask' && conversationBusy(currentMessages)) { showToast('当前回答尚未完成，请等待完成或停止本机 Agent 后再发送'); return }
+    const branchId = key === 'ask' ? activeAskBranchRef.current.id : undefined
     if (key === 'ask') setActiveAskBranch((branch) => ({ ...branch, title: branch.title === '新会话' ? (text.trim().replace(/\s+/g, ' ').slice(0, 28) || '附件会话') : branch.title, updatedAt: Date.now() }))
     const memory = key === 'ask' ? activeAskBranchRef.current.memory || '' : ''
-    const history = historyFromThread(threadsRef.current[key] || [], 12, memory)
+    const history = historyFromThread(currentMessages, 12, memory)
     const llmText = qs.length ? buildQuotedPrompt(qs, text) : text
     setThreads((th) => ({ ...th, [key]: [...(th[key] || []), { role: 'user', text, attachments: atts, quotes: qs.length ? qs : undefined, ts: Date.now() }, { role: 'agent', typing: true }] }))
     setComposers((c) => ({ ...c, [key]: emptyComposer() }))
     if (qs.length) setQuotes((q) => ({ ...q, [key]: [] }))
     // 问答区开启"知识库模式"→ 走 RAG 接地作答（本地 Agent 引擎自带工具与上下文，跳过 KB）；其余照常
     if (key === 'ask' && kbModeRef.current && askEngineRef.current === 'llm') {
-      const settle = (blocks: ChatMessage['blocks']): void => setThreads((th) => ({ ...th, [key]: [...(th[key] || []).filter((m) => !m.typing), { role: 'agent', blocks, ts: Date.now() }] }))
-      void runKbReply(llmText, deep, history, settle)
+      const settle = (blocks: ChatMessage['blocks']): void => patchAskBranchMessages(branchId!, (messages) => [...messages.filter((message) => !message.typing && !message.live), { role: 'agent', blocks, ts: Date.now() }])
+      const instruction = activeAskBranchRef.current.instruction || ''
+      void runKbReply(llmText, deep, history, instruction, settle).catch((error) => settle([{ t: 'note', text: '知识库问答失败：' + String(error) }]))
     } else {
-      fetchReply(key, llmText, atts, deep, history)
+      fetchReply(key, llmText, atts, deep, history, branchId)
     }
-  }, [fetchReply, runKbReply])
+  }, [fetchReply, patchAskBranchMessages, runKbReply, showToast])
 
   // 引用追问：添加/移除待发送引用片段
   const addQuote = useCallback((key: string, q: { text: string; note?: string }): void => {
@@ -1282,33 +1324,23 @@ export function App(): React.JSX.Element {
     setQuotes((all) => ({ ...all, [key]: (all[key] || []).filter((x) => x.id !== id) }))
   }, [])
 
-  // 重试：丢弃最后一轮 AI 回复，用同一问题重新生成
-  const retryLast = useCallback((key: string, deep = false): void => {
-    const msgs = (threadsRef.current[key] || []).filter((m) => !m.typing)
-    const lastUserIdx = msgs.map((m) => m.role).lastIndexOf('user')
-    if (lastUserIdx === -1) return
-    const lastUser = msgs[lastUserIdx]
-    const kept = msgs.slice(0, lastUserIdx + 1)
-    // 重试时保留原引用上下文
-    const retryText = lastUser.quotes?.length ? buildQuotedPrompt(lastUser.quotes, (lastUser.text || '').trim()) : (lastUser.text || '').trim()
-    setThreads((th) => ({ ...th, [key]: [...kept, { role: 'agent', typing: true }] }))
-    fetchReply(key, retryText, lastUser.attachments || [], deep, historyFromThread(msgs.slice(0, lastUserIdx), 12, key === 'ask' ? activeAskBranchRef.current.memory || '' : ''))
-  }, [fetchReply])
   // ===== 问答分支树：稳定分支 id + 父子关系 + 分支级长期记忆/指令 =====
   const archiveCurrentAsk = useCallback((): AskSession | null => {
-    const msgs = (threadsRef.current['ask'] || []).filter((m) => !m.typing)
-    if (msgs.length === 0) return null
+    const msgs = threadsRef.current['ask'] || []
+    if (!msgs.some((message) => !message.typing && !message.live)) return null
     return {
       ...activeAskBranch,
       title: activeAskBranch.title === '新会话' ? conversationTitle(msgs) : activeAskBranch.title,
-      msgs: msgs.slice(-60),
+      msgs: compactChatMessages(msgs),
       updatedAt: Date.now()
     }
   }, [activeAskBranch])
   const askNew = useCallback((): void => {
     const arch = archiveCurrentAsk()
     if (arch) setAskSessions((list) => [arch, ...list.filter((item) => item.id !== arch.id)].slice(0, 40))
-    setActiveAskBranch(newAskBranch())
+    const next = newAskBranch()
+    activeAskBranchRef.current = next
+    setActiveAskBranch(next)
     setThreads((th) => ({ ...th, ask: [] }))
   }, [archiveCurrentAsk])
   const askSwitch = useCallback((id: number): void => {
@@ -1321,10 +1353,23 @@ export function App(): React.JSX.Element {
       return arch ? [arch, ...rest].slice(0, 40) : rest
     })
     const { msgs, ...meta } = target
+    activeAskBranchRef.current = meta
     setActiveAskBranch(meta)
     setThreads((th) => ({ ...th, ask: msgs }))
   }, [activeAskBranch.id, archiveCurrentAsk, askSessions])
-  const askDelete = useCallback((id: number): void => setAskSessions((l) => l.filter((s) => s.id !== id)), [])
+  const askDelete = useCallback((id: number): void => {
+    const deleted = askSessions.find((session) => session.id === id)
+    if (!deleted) return
+    setAskSessions((list) => list
+      .filter((session) => session.id !== id)
+      .map((session) => session.parentId === id ? { ...session, parentId: deleted.parentId, updatedAt: Date.now() } : session))
+    setActiveAskBranch((branch) => {
+      if (branch.parentId !== id) return branch
+      const next = { ...branch, parentId: deleted.parentId, updatedAt: Date.now() }
+      activeAskBranchRef.current = next
+      return next
+    })
+  }, [askSessions])
 
   const askFork = useCallback((msgIndex: number): void => {
     const msgs = threadsRef.current.ask || []
@@ -1333,7 +1378,9 @@ export function App(): React.JSX.Element {
     const original = archiveCurrentAsk()
     if (original) setAskSessions((list) => [original, ...list.filter((item) => item.id !== original.id)].slice(0, 40))
     const title = `${conversationTitle(forked)} · 分支`
-    setActiveAskBranch({ ...newAskBranch(title, activeAskBranch.id, msgIndex), memory: activeAskBranch.memory || '', instruction: activeAskBranch.instruction || '' })
+    const next = { ...newAskBranch(title, activeAskBranch.id, msgIndex), memory: activeAskBranch.memory || '', instruction: activeAskBranch.instruction || '' }
+    activeAskBranchRef.current = next
+    setActiveAskBranch(next)
     setThreads((all) => ({ ...all, ask: forked }))
     showToast('已从当前节点 Fork，新分支继承此前上下文')
   }, [activeAskBranch.id, archiveCurrentAsk, showToast])
@@ -1381,12 +1428,17 @@ export function App(): React.JSX.Element {
   const followUpReply = useCallback((key: string, msgIndex: number, text: string, deep = false): void => {
     const t = text.trim()
     if (!t) return
+    const branchId = key === 'ask' ? activeAskBranchRef.current.id : undefined
     const patchFollow = (fn: (fu: ChatMessage[]) => ChatMessage[]): void =>
-      setThreads((th) => {
-        const list = th[key] || []
-        if (!list[msgIndex]) return th
-        return { ...th, [key]: list.map((m, i) => (i === msgIndex ? { ...m, followups: fn(m.followups || []) } : m)) }
-      })
+      branchId === undefined
+        ? setThreads((th) => {
+            const list = th[key] || []
+            if (!list[msgIndex]) return th
+            return { ...th, [key]: list.map((m, i) => (i === msgIndex ? { ...m, followups: fn(m.followups || []) } : m)) }
+          })
+        : patchAskBranchMessages(branchId, (list) => list[msgIndex]
+          ? list.map((m, i) => (i === msgIndex ? { ...m, followups: fn(m.followups || []) } : m))
+          : list)
 
     // 1) 追问 + typing 占位挂进子线程
     patchFollow((fu) => [...fu, { role: 'user', text: t, ts: Date.now() }, { role: 'agent', typing: true }])
@@ -1396,27 +1448,30 @@ export function App(): React.JSX.Element {
     const settle = (blocks: ChatMessage['blocks']): void =>
       patchFollow((fu) => [...fu.filter((m) => !m.typing), { role: 'agent', blocks, ts: Date.now() }])
 
-    // 本地 Agent 引擎的追问：同样流式（claude 用 -c 接着最近会话续聊；codex 独立提问）
-    if (key === 'ask' && askEngineRef.current !== 'llm') {
-      const eng = askEngineRef.current as 'claude' | 'codex'
-      const gen = ++agentGenRef.current
-      const patchLive = (m: ChatMessage): void => { if (gen !== agentGenRef.current) return; patchFollow((fu) => [...fu.filter((x) => !x.typing && !x.live), { ...m, ts: Date.now() }]) }
-      void runAgentStream(eng, t, eng === 'claude', false, patchLive, (blocks) => patchLive({ role: 'agent', blocks }))
-      return
-    }
-    if (!cfg.apiKey || !cfg.model) {
-      settle([{ t: 'note', text: '请先在 Settings › 问答助手模型 里配置端点、型号与 API Key。' }])
-      return
-    }
     // 2) 上下文：主线程到该条为止 + 该气泡已有子线程（此刻 ref 尚未含新追问，正合适）
     const base = threadsRef.current[key] || []
     const history = [
       ...historyFromThread(base.slice(0, msgIndex + 1), 12, key === 'ask' ? activeAskBranchRef.current.memory || '' : ''),
       ...historyFromThread(base[msgIndex]?.followups || [])
     ]
+
+    // 本地 Agent 引擎的追问显式注入岛内上下文，不使用 CLI 全局“最近会话”。
+    if (key === 'ask' && askEngineRef.current !== 'llm') {
+      const eng = askEngineRef.current as 'claude' | 'codex'
+      const instruction = activeAskBranchRef.current.instruction?.trim() || ''
+      const prompt = buildAgentContextPrompt(history, t, instruction)
+      const patchLive = (m: ChatMessage): void => patchFollow((fu) => [...fu.filter((x) => !x.typing && !x.live), { ...m, ts: Date.now() }])
+      void runAgentStream(eng, prompt, false, false, patchLive, (blocks) => patchLive({ role: 'agent', blocks }))
+      return
+    }
+    if (!cfg.apiKey || !cfg.model) {
+      settle([{ t: 'note', text: '请先在 Settings › 问答助手模型 里配置端点、型号与 API Key。' }])
+      return
+    }
     // 知识库模式下的追问同样走 RAG 接地
     if (key === 'ask' && kbModeRef.current) {
-      void runKbReply(t, deep, history, settle)
+      const instruction = activeAskBranchRef.current.instruction || ''
+      void runKbReply(t, deep, history, instruction, settle).catch((error) => settle([{ t: 'note', text: '知识库追问失败：' + String(error) }]))
       return
     }
     const instruction = key === 'ask' ? activeAskBranchRef.current.instruction?.trim() : ''
@@ -1429,8 +1484,8 @@ export function App(): React.JSX.Element {
       } else {
         settle([{ t: 'note', text: '请求失败：' + (res.error || '未知错误') }])
       }
-    })
-  }, [runKbReply, runAgentStream])
+    }).catch((error) => settle([{ t: 'note', text: '请求失败：' + String(error) }]))
+  }, [patchAskBranchMessages, runKbReply, runAgentStream])
 
   const setAskContextMode = useCallback((msgIndex: number, mode: NonNullable<ChatMessage['contextMode']>): void => {
     setThreads((all) => ({
@@ -1444,32 +1499,34 @@ export function App(): React.JSX.Element {
     if (msgs.length < 4) { showToast('当前会话还不需要压缩上下文'); return }
     const L = llmRef.current
     if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+    const branchId = activeAskBranchRef.current.id
     showToast('正在压缩为长期会话记忆…')
     const system = '你是会话记忆压缩器。输出简体中文 Markdown，只保留后续对话必须记住的事实、偏好、约束、已确认结论、分歧和未解决问题；不要复述过程，不要添加新信息。'
     void island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, conversationToMarkdown(msgs).slice(0, 40000), false).then((res) => {
       if (!res.ok || !res.text?.trim()) { showToast(res.error || '会话记忆压缩失败'); return }
-      setActiveAskBranch((branch) => ({ ...branch, memory: res.text!.trim(), updatedAt: Date.now() }))
-      showToast('长期会话记忆已更新，后续轮次会持续携带')
-    })
-  }, [showToast])
+      patchAskBranchMeta(branchId, (branch) => ({ ...branch, memory: res.text!.trim(), updatedAt: Date.now() }))
+      showToast(activeAskBranchRef.current.id === branchId ? '长期会话记忆已更新，后续轮次会持续携带' : '记忆压缩已完成，结果保存在发起操作的会话分支')
+    }).catch((error) => showToast('会话记忆压缩失败：' + String(error)))
+  }, [patchAskBranchMeta, showToast])
 
   const mergeAskBranch = useCallback((id: number): void => {
     const source = askSessions.find((session) => session.id === id)
     if (!source) return
     const L = llmRef.current
     if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+    const targetBranchId = activeAskBranchRef.current.id
     showToast(`正在合并分支「${source.title}」…`)
     const system = '你是会话分支合并器。只输出可直接放进长期会话记忆的简体中文 Markdown，不要寒暄，不要编造。'
     void island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, branchMergePrompt(source.title, source.msgs), false).then((res) => {
       if (!res.ok || !res.text?.trim()) { showToast(res.error || '分支合并失败'); return }
-      setActiveAskBranch((branch) => ({
+      patchAskBranchMeta(targetBranchId, (branch) => ({
         ...branch,
         memory: [branch.memory?.trim(), `## 合并自「${source.title}」\n${res.text!.trim()}`].filter(Boolean).join('\n\n'),
         updatedAt: Date.now()
       }))
-      showToast('分支结论已合并进当前会话记忆')
-    })
-  }, [askSessions, showToast])
+      showToast(activeAskBranchRef.current.id === targetBranchId ? '分支结论已合并进当前会话记忆' : '分支合并已完成，结果保存在发起操作的目标分支')
+    }).catch((error) => showToast('分支合并失败：' + String(error)))
+  }, [askSessions, patchAskBranchMeta, showToast])
 
   const saveAskKnowledge = useCallback(async (scope: 'message' | 'conversation' | 'selection', msgIndex?: number, selectedText?: string): Promise<{ ok: boolean; message: string }> => {
     const L = llmRef.current
@@ -1491,42 +1548,62 @@ export function App(): React.JSX.Element {
       content = [activeAskBranchRef.current.instruction ? `# 会话指令\n${activeAskBranchRef.current.instruction}` : '', activeAskBranchRef.current.memory ? `# 长期记忆\n${activeAskBranchRef.current.memory}` : '', conversationToMarkdown(msgs)].filter(Boolean).join('\n\n')
     }
     if (!content.trim()) return { ok: false, message: '没有可保存的会话内容' }
-    const result = await island.kbAddText({ baseUrl: L.baseUrl, apiKey: L.apiKey, model }, title, content, sourceKey)
-    if (!result.ok) return { ok: false, message: result.error || '写入知识库失败' }
-    refreshKb()
-    return { ok: true, message: `已写入本地知识库 · ${result.added || 0} 个向量块` }
+    try {
+      const result = await island.kbAddText({ baseUrl: L.baseUrl, apiKey: L.apiKey, model }, title, content, sourceKey)
+      if (!result.ok) return { ok: false, message: result.error || '写入知识库失败' }
+      refreshKb()
+      return { ok: true, message: `已写入本地知识库 · ${result.added || 0} 个向量块` }
+    } catch (error) {
+      return { ok: false, message: '写入知识库失败：' + String(error) }
+    }
   }, [refreshKb])
 
-  const advanceAsk = useCallback((msgIndex: number, action: keyof typeof ADVANCE_PROMPTS, deep: boolean): void => {
+  const advanceAsk = useCallback(async (msgIndex: number, action: keyof typeof ADVANCE_PROMPTS, deep: boolean): Promise<void> => {
     const msgs = threadsRef.current.ask || []
     if (!msgs[msgIndex] || msgs[msgIndex].role !== 'agent') return
+    const branchId = activeAskBranchRef.current.id
     const target = conversationToMarkdown([msgs[msgIndex]]).slice(0, 18000)
     const prompt = `${ADVANCE_PROMPTS[action]}\n\n【本次要处理的目标回答】\n${target}`
+    const attachAnalysis = (blocks: Block[]): void => {
+      const createdAt = Date.now()
+      patchAskBranchMessages(branchId, (messages) => upsertAnswerAnalysis(messages, msgIndex, {
+        id: `${action}:${createdAt}`, action, label: ANSWER_ANALYSIS_LABELS[action], blocks, createdAt
+      }))
+    }
     if (action === 'suggest') {
       const L = llmRef.current
       if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
       const history = historyFromThread(msgs.slice(0, msgIndex + 1), 16, activeAskBranchRef.current.memory || '')
-      void island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, '只输出一个 JSON 字符串数组，不要解释。', prompt, false, history).then((res) => {
-        if (!res.ok || !res.text) { showToast(res.error || '下一问生成失败'); return }
-        let suggestions: string[] = []
-        try {
-          const start = res.text.indexOf('['), end = res.text.lastIndexOf(']')
-          const parsed = JSON.parse(start >= 0 && end > start ? res.text.slice(start, end + 1) : res.text)
-          if (Array.isArray(parsed)) suggestions = parsed.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 4)
-        } catch { suggestions = res.text.split(/\r?\n/).map((line) => line.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean).slice(0, 4) }
-        setThreads((all) => ({ ...all, ask: (all.ask || []).map((message, index) => index === msgIndex ? { ...message, suggestions } : message) }))
-      })
+      const res = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, '只输出一个 JSON 字符串数组，不要解释。', prompt, false, history)
+      if (!res.ok || !res.text) { showToast(res.error || '下一问生成失败'); return }
+      let suggestions: string[] = []
+      try {
+        const start = res.text.indexOf('['), end = res.text.lastIndexOf(']')
+        const parsed = JSON.parse(start >= 0 && end > start ? res.text.slice(start, end + 1) : res.text)
+        if (Array.isArray(parsed)) suggestions = parsed.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 4)
+      } catch { suggestions = res.text.split(/\r?\n/).map((line) => line.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean).slice(0, 4) }
+      patchAskBranchMessages(branchId, (messages) => messages.map((message, index) => index === msgIndex ? { ...message, suggestions } : message))
       return
     }
-    if (action === 'ground' && !kbModeRef.current) {
-      const history = historyFromThread(msgs.slice(0, msgIndex + 1), 16, activeAskBranchRef.current.memory || '')
-      setThreads((all) => ({ ...all, ask: [...(all.ask || []), { role: 'user', text: prompt, ts: Date.now() }, { role: 'agent', typing: true }] }))
-      const settle = (blocks: ChatMessage['blocks']): void => setThreads((all) => ({ ...all, ask: [...(all.ask || []).filter((message) => !message.typing), { role: 'agent', blocks, ts: Date.now() }] }))
-      void runKbReply(prompt, deep, history, settle)
+    const history = historyFromThread(msgs.slice(0, msgIndex + 1), 16, activeAskBranchRef.current.memory || '')
+    const branchInstruction = activeAskBranchRef.current.instruction || ''
+    if (action === 'ground') {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          void runKbReply(prompt, deep, history, branchInstruction, (blocks) => { attachAnalysis(blocks || []); resolve() }).catch(reject)
+        })
+      } catch (error) { showToast('知识库核验失败：' + String(error)) }
       return
     }
-    pushAndReply('ask', prompt, [], deep)
-  }, [pushAndReply, runKbReply, showToast])
+    const L = llmRef.current
+    if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+    const system = '你是回答分析助手。只处理用户指定的目标回答，输出简体中文 Markdown；不要假装这是一次新的用户提问。' + (branchInstruction.trim() ? `\n\n本会话规则：\n${branchInstruction.trim()}` : '')
+    const res = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, prompt, deep, history)
+    if (!res.ok || !res.text) { showToast(res.error || `${ANSWER_ANALYSIS_LABELS[action]}失败`); return }
+    let blocks = parseBlocks(res.text) || looseBlocks(res.text)
+    if (res.reasoning) blocks = [{ t: 'think' as const, text: res.reasoning }, ...blocks]
+    attachAnalysis(blocks)
+  }, [patchAskBranchMessages, runKbReply, showToast])
 
   const councilModels = useMemo(() => {
     const current = llm.apiKey && llm.model ? [{ id: 'current', label: llm.model }] : []
@@ -1536,9 +1613,12 @@ export function App(): React.JSX.Element {
     return [...current, ...saved].slice(0, 8)
   }, [llm.apiKey, llm.baseUrl, llm.model, llm.saved])
 
-  const runAskCouncil = useCallback((mode: 'parallel' | 'consensus' | 'debate', modelIds: string[], deep: boolean): void => {
-    const msgs = (threadsRef.current.ask || []).filter((message) => !message.typing && !message.live)
-    const lastUser = [...msgs].reverse().find((message) => message.role === 'user' && message.text?.trim())
+  const runAskCouncil = useCallback(async (mode: 'parallel' | 'consensus' | 'debate', modelIds: string[], deep: boolean): Promise<void> => {
+    const branchId = activeAskBranchRef.current.id
+    const stableMessages = (threadsRef.current.ask || []).map((message, index) => ({ message, index })).filter(({ message }) => !message.typing && !message.live)
+    const msgs = stableMessages.map(({ message }) => message)
+    const lastUserEntry = [...stableMessages].reverse().find(({ message }) => message.role === 'user' && message.text?.trim())
+    const lastUser = lastUserEntry?.message
     if (!lastUser?.text) { showToast('先提出一个问题，再启动多模型讨论'); return }
     const L = llmRef.current
     const allConfigs = [
@@ -1547,31 +1627,42 @@ export function App(): React.JSX.Element {
     ]
     const configs = modelIds.map((id) => allConfigs.find((config) => config.id === id)).filter((config): config is NonNullable<typeof config> => !!config?.apiKey && !!config.model)
     if (configs.length < 2) { showToast('多模型讨论至少需要两个已配置模型'); return }
-    const lastUserIndex = msgs.lastIndexOf(lastUser)
-    const history = historyFromThread(msgs.slice(0, lastUserIndex), 16, activeAskBranchRef.current.memory || '')
+    const lastUserStableIndex = stableMessages.indexOf(lastUserEntry!)
+    const targetAgentEntry = stableMessages.find(({ message }, index) => index > lastUserStableIndex && message.role === 'agent')
+    if (!targetAgentEntry) { showToast('当前问题还没有可附着的回答'); return }
+    const history = historyFromThread(msgs.slice(0, lastUserStableIndex), 16, activeAskBranchRef.current.memory || '')
     const instruction = activeAskBranchRef.current.instruction?.trim()
     const system = systemFor('ask', deep) + (instruction ? `\n\n本会话额外指令：\n${instruction}` : '')
-    setThreads((all) => ({ ...all, ask: [...(all.ask || []), { role: 'agent', typing: true }] }))
-    void Promise.all(configs.map(async (config) => {
-      const result = await island.llmComplete(config, system, lastUser.text!, deep, history)
-      let blocks = result.ok ? (parseBlocks(result.text) || looseBlocks(result.text)) : [{ t: 'note' as const, text: result.error || `${config.label} 请求失败` }]
-      if (result.reasoning) blocks = [{ t: 'think' as const, text: result.reasoning }, ...blocks]
-      return { id: config.id, label: config.label, blocks }
-    })).then(async (variants) => {
-      let blocks: Block[] = [{ t: 'note', text: `已完成 ${variants.length} 个模型的并行回答，可切换查看。` }]
+    try {
+      const variants = await Promise.all(configs.map(async (config) => {
+        const result = await island.llmComplete(config, system, lastUser.text!, deep, history)
+        let blocks = result.ok ? (parseBlocks(result.text) || looseBlocks(result.text)) : [{ t: 'note' as const, text: result.error || `${config.label} 请求失败` }]
+        if (result.reasoning) blocks = [{ t: 'think' as const, text: result.reasoning }, ...blocks]
+        return { id: config.id, label: config.label, blocks }
+      }))
+      let summaryBlocks: Block[] | undefined
       if (mode !== 'parallel') {
         const body = variants.map((variant, index) => `【候选 ${index + 1} · ${variant.label}】\n${conversationToMarkdown([{ role: 'agent', blocks: variant.blocks }])}`).join('\n\n')
         const moderator = mode === 'consensus'
           ? '比较这些候选回答，提炼共识，保留必要分歧，给出一份更可靠且可执行的最终回答。'
           : '主持一轮模型辩论：指出候选答案的核心分歧、各自最强论据、共同盲区，并给出你的裁决。'
         const result = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, `${moderator}\n\n原问题：${lastUser.text}\n\n${body.slice(0, 45000)}`, deep, history)
-        blocks = result.ok ? (parseBlocks(result.text) || looseBlocks(result.text)) : [{ t: 'note', text: result.error || '主持模型请求失败' }]
+        summaryBlocks = result.ok ? (parseBlocks(result.text) || looseBlocks(result.text)) : [{ t: 'note', text: result.error || '主持模型请求失败' }]
       }
-      setThreads((all) => ({ ...all, ask: [...(all.ask || []).filter((message) => !message.typing), { role: 'agent', blocks, variants, ts: Date.now() }] }))
-    }).catch((error: unknown) => {
-      setThreads((all) => ({ ...all, ask: [...(all.ask || []).filter((message) => !message.typing), { role: 'agent', blocks: [{ t: 'note', text: `多模型讨论失败：${String(error)}` }], ts: Date.now() }] }))
-    })
-  }, [showToast])
+      const createdAt = Date.now()
+      patchAskBranchMessages(branchId, (messages) => {
+        const withVariants = messages.map((message, index) => index === targetAgentEntry.index ? { ...message, variants } : message)
+        return summaryBlocks
+          ? upsertAnswerAnalysis(withVariants, targetAgentEntry.index, { id: `council:${createdAt}`, action: 'council', label: mode === 'consensus' ? '多模型汇总' : '分歧比较', blocks: summaryBlocks, createdAt })
+          : withVariants
+      })
+      showToast(activeAskBranchRef.current.id === branchId
+        ? (mode === 'parallel' ? '候选回答已附加到原回答' : '多模型结论已附加到原回答')
+        : '多模型讨论已完成，结果保存在发起讨论的会话分支')
+    } catch (error) {
+      showToast(`多模型讨论失败：${String(error)}`)
+    }
+  }, [patchAskBranchMessages, showToast])
 
   const adoptAskVariant = useCallback((msgIndex: number, variantId: string): void => {
     setThreads((all) => ({
@@ -1629,7 +1720,8 @@ export function App(): React.JSX.Element {
     onCouncil: key === 'ask' ? (mode, ids) => runAskCouncil(mode, ids, deep) : undefined,
     onAdoptVariant: key === 'ask' ? adoptAskVariant : undefined,
     onAdvance: key === 'ask' ? (index, action) => advanceAsk(index, action, deep) : undefined,
-    onUseSuggestion: key === 'ask' ? (value) => patchComposer(key, { text: value }) : undefined
+    onUseSuggestion: key === 'ask' ? (value) => patchComposer(key, { text: value }) : undefined,
+    busy: key === 'ask' ? conversationBusy(threads[key] || []) : undefined
   }), [threads, quotes, getComposer, sendPreset, followUpReply, patchComposer, sendMessage, onAttach, onRemoveAtt, addQuote, removeQuote, settings.largeSize, fullscreen, activeAskBranch, askSessions, askFork, askSwitch, renameAskBranch, mergeAskBranch, compressAskContext, setAskContextMode, saveAskKnowledge, councilModels, runAskCouncil, adoptAskVariant, advanceAsk])
 
   // ===== LLM 设置 =====
@@ -1664,7 +1756,7 @@ export function App(): React.JSX.Element {
     island.llmListModels({ baseUrl, apiKey, model }).then((r) => {
       setLlm((s) => {
         // 用户可能在请求期间切换了供应商，旧请求不得污染新面板。
-        if (s.provider !== provider) return s
+        if (s.provider !== provider || s.baseUrl !== baseUrl || s.apiKey !== apiKey) return s
         if (!r.ok || !r.models?.length) {
           return { ...s, testStatus: 'fail', testMsg: r.error || '未读取到可用模型' }
         }
@@ -1679,7 +1771,7 @@ export function App(): React.JSX.Element {
         }
       })
     }).catch((e: unknown) => {
-      setLlm((s) => s.provider === provider
+      setLlm((s) => s.provider === provider && s.baseUrl === baseUrl && s.apiKey === apiKey
         ? { ...s, testStatus: 'fail', testMsg: String(e) }
         : s)
     })
@@ -1688,18 +1780,18 @@ export function App(): React.JSX.Element {
     const { provider, baseUrl, apiKey, model } = llm
     setLlm((s) => ({ ...s, testStatus: 'testing', testMsg: '正在连接…' }))
     island.llmTest({ baseUrl, apiKey, model }).then((r) => {
-      setLlm((s) => s.provider === provider
+      setLlm((s) => s.provider === provider && s.baseUrl === baseUrl && s.apiKey === apiKey && s.model === model
         ? { ...s, testStatus: r.ok ? 'ok' : 'fail', testMsg: r.msg }
         : s)
     }).catch((e: unknown) => {
-      setLlm((s) => s.provider === provider
+      setLlm((s) => s.provider === provider && s.baseUrl === baseUrl && s.apiKey === apiKey && s.model === model
         ? { ...s, testStatus: 'fail', testMsg: String(e) }
         : s)
     })
   }
   const saveLlm = (): void => setLlm((s) => {
     const label = (PROVIDERS.find((x) => x.key === s.provider) || {}).label || s.provider
-    const cfg = { id: now + Math.floor(focusRemaining), provider: s.provider, model: s.model, baseUrl: s.baseUrl, apiKey: s.apiKey, name: label + ' · ' + (s.model || '未命名') }
+    const cfg = { id: Math.max(Date.now(), ...s.saved.map((item) => item.id + 1)), provider: s.provider, model: s.model, baseUrl: s.baseUrl, apiKey: s.apiKey, name: label + ' · ' + (s.model || '未命名') }
     const saved = s.saved.filter((c) => !(c.provider === s.provider && c.model === s.model && c.baseUrl === s.baseUrl))
     // 上限 12：支持每家厂商保存多个模型，在问答头部下拉自由切换
     const next = { ...s, saved: [cfg, ...saved].slice(0, 12) }
@@ -2390,7 +2482,7 @@ export function App(): React.JSX.Element {
                   // 当前厂商的型号列表：同端点同 Key，切换零成本
                   ...(llm.modelLists[llm.provider] || []).map((m) => ({ id: 'm:' + m, name: m, active: m === llm.model })),
                   // 已保存的跨厂商配置（排除与当前端点重复的）
-                  ...llm.saved.filter((c) => !(c.provider === llm.provider && c.baseUrl === llm.baseUrl)).map((c) => ({ id: 'c:' + c.id, name: c.name, active: false }))
+                  ...llm.saved.filter((c) => !(c.provider === llm.provider && c.baseUrl === llm.baseUrl && c.apiKey === llm.apiKey)).map((c) => ({ id: 'c:' + c.id, name: c.name, active: false }))
                 ]}
                 onSwitchModel={(id) => (id.startsWith('m:') ? pickModel(id.slice(2)) : loadLlm(Number(id.slice(2))))}
                 empty={askEmpty}
@@ -2404,9 +2496,8 @@ export function App(): React.JSX.Element {
                   go: () => sendPreset('ask', ambientSuggestionPrompt(item), askMode === 'deep')
                 }))}
                 conv={convFor('ask', askMode === 'deep' ? '深度思考模式 · 提问后展示思维链…' : '有问题随时问，支持追问（AI 记得上文）…', undefined, askMode === 'deep')}
-                sessions={askSessions.map((s) => ({ id: s.id, title: s.title }))}
+                sessions={askSessions.map((s) => ({ id: s.id, title: s.title, busy: conversationBusy(s.msgs) }))}
                 onNew={askNew} onSwitch={askSwitch} onDeleteSession={askDelete}
-                onRetry={() => retryLast('ask', askMode === 'deep')}
                 prompts={quickPrompts}
                 onSavePrompt={promptSave} onDeletePrompt={promptDelete} onResetPrompts={promptsReset}
                 clips={clips}

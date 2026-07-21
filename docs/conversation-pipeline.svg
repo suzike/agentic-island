@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
-  <title id="title">Agentic-Island v0.6.0 问答会话增强管线</title>
+  <title id="title">Agentic-Island v0.6.1 问答会话增强管线</title>
   <desc id="desc">从活动分支、上下文组装、多模型协作到知识库沉淀的完整数据流。</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#d59a50"/></marker>
@@ -31,9 +31,9 @@
 
   <rect class="b" x="770" y="130" width="190" height="122" fill="#201b2d" stroke="#806bb0"/>
   <text class="t l" x="793" y="166">模型执行层</text>
-  <text class="t m s" x="793" y="194">主模型单轮 / 多轮</text>
-  <text class="t m s" x="793" y="216">2-4 模型并行会诊</text>
-  <text class="t m s" x="793" y="238">共识 / 分歧辩论</text>
+  <text class="t m s" x="793" y="194">OpenAI / Anthropic</text>
+  <text class="t m s" x="793" y="216">本地 Agent / 多模型</text>
+  <text class="t m s" x="793" y="238">快深模式 / 会诊辩论</text>
 
   <rect class="b" x="1015" y="130" width="140" height="122" fill="#302019" stroke="#a96549"/>
   <text class="t l" x="1038" y="166">回答结果</text>
@@ -47,13 +47,13 @@
   <text class="t l" x="154" y="384">分支持久化</text>
   <text class="t m s" x="154" y="412">threads.ask：当前消息</text>
   <text class="t m s" x="154" y="434">askSessions：归档分支树</text>
-  <text class="t m s" x="154" y="456">兼容旧版 askThread 自动迁移</text>
+  <text class="t m s" x="154" y="456">重要优先 · 临时状态清理</text>
 
   <rect class="b" x="462" y="350" width="275" height="112" fill="#181430" stroke="#4e417e"/>
-  <text class="t l" x="486" y="384">回答继续推进</text>
-  <text class="t m s" x="486" y="412">自检 / 假设 / 替代路径 / 拆解</text>
-  <text class="t m s" x="486" y="434">苏格拉底澄清 / 知识核验</text>
-  <text class="t m s" x="486" y="456">新消息追加，不覆盖原回答</text>
+  <text class="t l" x="486" y="384">回答内继续协作</text>
+  <text class="t m s" x="486" y="412">followups：气泡内追问支线</text>
+  <text class="t m s" x="486" y="434">analyses / variants：附着原回答</text>
+  <text class="t m s" x="486" y="456">不污染主会话模型历史</text>
 
   <rect class="b" x="794" y="350" width="275" height="112" fill="#181430" stroke="#4e417e"/>
   <text class="t l" x="818" y="384">本地知识沉淀</text>
@@ -65,5 +65,5 @@
 
   <rect x="158" y="540" width="884" height="58" rx="13" fill="#201b2d" stroke="#806bb0"/>
   <text class="t l" x="185" y="574">一致性保证</text>
-  <text class="t m s" x="315" y="574">供应商配置隔离 · 上游错误脱敏 · Electron IPC 写入知识库 · 旧会话兼容 · 原消息不可变</text>
+  <text class="t m s" x="315" y="574">稳定分支 ID 回写 · 供应商协议隔离 · 错误脱敏 · 重要上下文保留 · 旧会话兼容</text>
 </svg>

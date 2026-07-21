@@ -1,6 +1,6 @@
 # Agentic-Island 发布指南
 
-本文档对应 `0.6.0` 的 Windows NSIS 发布流程。
+本文档对应 `0.6.1` 的 Windows NSIS 发布流程。
 
 ## 1. 发布前审查
 
