@@ -59,7 +59,7 @@ export async function complete(
       // 本轮带图但端点拒绝 image_url（模型不支持视觉）——给出可操作提示，而非生肉 400
       const hasImage = Array.isArray(user) && user.some((p) => p && (p as { type?: string }).type === 'image_url')
       if (hasImage && (res.status === 400 || /image_url|vision|multimodal|deserialize/i.test(body))) {
-        return { ok: false, error: `当前模型「${cfg.model}」不支持图片输入。请到「设置 › 问答助手模型」切换/新增一个支持视觉的模型（如 glm-4v、qwen-vl-max、gpt-4o、gemini 等）后再试。` }
+        return { ok: false, error: `当前模型「${cfg.model}」不支持图片输入。请到「设置 › 问答助手模型」切换或新增当前账号可用的视觉多模态模型后再试。` }
       }
       return { ok: false, error: requestError(res.status, body, cfg.model, cfg.baseUrl, cfg.apiKey) }
     }

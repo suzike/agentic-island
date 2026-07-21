@@ -11,7 +11,7 @@ import {
 import type { DisplayInfo, RuntimeInfo } from '../../../shared/protocol'
 import type { BarConfig } from '../types'
 import { SOUNDS, SOUND_TYPES, type SoundMap } from '../logic/sounds'
-import { PROVIDERS, type ProviderSettingsSnapshot } from '../logic/providers'
+import { PROVIDERS, providerConfigEquals, type ProviderSettingsSnapshot } from '../logic/providers'
 import { normalizeThemeTokens, THEMES, type ThemeDef } from '../logic/themes'
 import { Badge, Button, Chip, Group, IconButton, Input, SectionHeader, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
@@ -230,6 +230,10 @@ function CollapsibleSection(props: {
 
 /** 组内小标签 */
 const labelSm: React.CSSProperties = { fontSize: FS.tiny, fontWeight: 600, color: ink(2) }
+const endpointHost = (baseUrl: string): string => {
+  try { return new URL(baseUrl).host || baseUrl }
+  catch { return baseUrl }
+}
 
 /** 密码类输入框（共享 Input 不支持 type=password）——样式与 surface.inset 对齐 */
 const secretInput: React.CSSProperties = {
@@ -578,16 +582,19 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
           <div style={separatorRow()} />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={labelSm}>已保存的配置</div>
-            <Button sm variant="ghost" icon={Plus} onClick={p.onSaveLlm}>保存当前</Button>
+            <Button sm variant="ghost" icon={Plus} disabled={!p.llm.model.trim() || !p.llm.baseUrl.trim() || !p.llm.apiKey.trim()} onClick={p.onSaveLlm}>保存当前</Button>
           </div>
           {p.llm.saved.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {p.llm.saved.map((c) => {
-                const active = c.provider === p.llm.provider && c.model === p.llm.model && c.baseUrl === p.llm.baseUrl
+                const active = providerConfigEquals(c, { provider: p.llm.provider, model: p.llm.model, baseUrl: p.llm.baseUrl, apiKey: p.llm.apiKey })
                 return (
                   <div key={c.id} onClick={() => p.onLoadLlm(c.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: R.sm, background: active ? semBg(accent(), 0.1) : fill(1), border: active ? `0.5px solid ${accent(0.7, 0.4)}` : 'none', cursor: 'pointer' }}>
                     <div style={{ width: 6, height: 6, borderRadius: 999, background: active ? accent() : ink(4), boxShadow: active ? `0 0 6px ${accent()}` : 'none' }} />
-                    <span style={{ ...text.mono(FS.small), color: ink(1), flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <span style={{ ...text.mono(FS.small), color: ink(1), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                      <span style={{ ...text.faint(), fontSize: 9 }}>{endpointHost(c.baseUrl)} · 配置 {String(c.id).slice(-4)}</span>
+                    </span>
                     {active && <span style={{ color: accent(), fontSize: 10, fontWeight: 700 }}>使用中</span>}
                     <span onClick={(e) => { e.stopPropagation(); p.onDeleteLlm(c.id) }} style={{ display: 'inline-flex', color: ink(3), cursor: 'pointer' }}>
                       <X size={12} strokeWidth={2} />

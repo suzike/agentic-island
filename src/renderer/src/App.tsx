@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import type { AgentCliEvent, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, RuntimeInfo } from '../../shared/protocol'
+import type { AgentCliEvent, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo } from '../../shared/protocol'
 import type { ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AskBranchMeta, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
@@ -22,7 +22,7 @@ import { KB_SYSTEM, kbGroundPrompt, citeSources } from './logic/kbAsk'
 import { MarkdownStudio } from './components/MarkdownStudio'
 import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
-import { PROVIDERS, migrateProviderSettings, patchProviderDraft, switchProviderSettings } from './logic/providers'
+import { PROVIDERS, loadProviderSettings, migrateEmbeddingSettings, migrateProviderSettings, patchProviderDraft, providerConfigEquals, providerModelChoices, saveProviderSettings, switchProviderSettings } from './logic/providers'
 import { ADVANCE_PROMPTS, branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
 import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
 import { ThemeDesigner, type Tokens } from './components/ThemeDesigner'
@@ -68,6 +68,10 @@ const TABS: { key: Tab; label: string; icon: (typeof Ico)[keyof typeof Ico] }[] 
   { key: 'settings', label: '设置', icon: Ico.settings }
 ]
 const DEFAULT_LLM_SETTINGS = migrateProviderSettings({ provider: 'deepseek' })
+const llmModelLabel = (state: Pick<LlmState, 'provider' | 'model'>): string => {
+  const provider = PROVIDERS.find((item) => item.key === state.provider)
+  return `${provider?.label || state.provider} · ${state.model || '未设置'}`
+}
 const AMBIENT_SUGGESTION_LABELS: Record<string, string> = {
   quotes: '名言', exp: '经验', agent: 'Agent', thermal: '热管理', github: 'GitHub', custom: '自定义', brief: '工作简报'
 }
@@ -172,14 +176,16 @@ export function App(): React.JSX.Element {
   const [capsuleOpen, setCapsuleOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [brainOpen, setBrainOpen] = useState(false)
-  // 第二大脑向量模型（留空=关键词检索）
-  const [embedModel, setEmbedModel] = useState('')
+  // 第二大脑向量连接与问答模型完全独立，避免切换聊天供应商后破坏 RAG。
+  const [embedConfig, setEmbedConfig] = useState<LlmRequestConfig>({ baseUrl: '', apiKey: '', model: '' })
+  const embedModel = embedConfig.model
+  const setEmbedModel = useCallback((model: string): void => setEmbedConfig((value) => ({ ...value, model })), [])
   // 知识库（本地 RAG）：管理浮层 + 问答"知识库模式"开关 + 已接入源（供问答计数/检索）
   const [kbOpen, setKbOpen] = useState(false)
   const [kbMode, setKbMode] = useState(false)
   const [kbSources, setKbSources] = useState<KbSourceView[]>([])
   const kbModeRef = useRef(false); kbModeRef.current = kbMode
-  const embedModelRef = useRef(''); embedModelRef.current = embedModel
+  const embedConfigRef = useRef(embedConfig); embedConfigRef.current = embedConfig
   const refreshKb = useCallback((): void => { void island.kbList().then(setKbSources) }, [])
   // 问答引擎：llm=云端模型；claude/codex=本机 CLI 无头模式（继承本地全部技能/工具/MCP 配置）
   const [askEngine, setAskEngine] = useState<'llm' | 'claude' | 'codex'>('llm')
@@ -299,6 +305,7 @@ export function App(): React.JSX.Element {
       if (hydrated.current) return
       hydrated.current = true
       if (s) {
+        const hydratedLlm = s.llm ? migrateProviderSettings(s.llm) : DEFAULT_LLM_SETTINGS
         if (s.settings) setSettings((v) => ({ ...v, ...(s.settings as Partial<SettingsFlags>) }))
         if (s.soundMap && typeof s.soundMap === 'object') setSoundMap((v) => ({ ...v, ...(s.soundMap as Partial<SoundMap>) }))
         if (typeof s.activeMonitor === 'number') setActiveMonitor(s.activeMonitor)
@@ -315,7 +322,7 @@ export function App(): React.JSX.Element {
         if (typeof s.agentCwd === 'string') setAgentCwd(s.agentCwd)
         if (s.srsState && typeof s.srsState === 'object') setSrsState(s.srsState as Record<number, SrsCard>)
         if (Array.isArray(s.radar)) setRadar(s.radar as RadarItem[])
-        if (typeof s.embedModel === 'string') setEmbedModel(s.embedModel)
+        setEmbedConfig(migrateEmbeddingSettings(s.embeddingConfig, s.embedModel, hydratedLlm))
         if (Array.isArray(s.askThread)) {
           const askThread = s.askThread as ChatMessage[]
           setThreads((th) => ({ ...th, ask: askThread }))
@@ -356,7 +363,7 @@ export function App(): React.JSX.Element {
         if (typeof s.fullscreen === 'boolean') setFullscreen(s.fullscreen)
         if (typeof s.fontChoice === 'string') setFontChoice(s.fontChoice)
         if (typeof s.uiZoom === 'number') setUiZoom(Math.max(0.9, Math.min(1.3, s.uiZoom)))
-        if (s.llm) setLlm((v) => ({ ...v, ...migrateProviderSettings(s.llm), open: false, testStatus: 'idle', testMsg: '' }))
+        if (s.llm) setLlm((v) => ({ ...v, ...hydratedLlm, open: false, testStatus: 'idle', testMsg: '' }))
       }
       // 权威同步一次多屏偏好：主进程默认 follow=true，与渲染层默认 multiMonitor=false 不一致，
       // 以水合后的持久化值为准纠正岛所在屏（修复"设置显示固定主屏、实际岛却跟鼠标跳屏"）
@@ -601,6 +608,7 @@ export function App(): React.JSX.Element {
       srsState,
       radar,
       embedModel,
+      embeddingConfig: embedConfig,
       // 问答历史持久化（截尾 60 条、剔除 typing 占位与本地 Agent 进行中的 live 消息，含就地追问子线程）+ 归档会话
       askThread: compactChatMessages(threads['ask'] || []),
       askSessions: askSessions.slice(0, 40).map((session) => ({ ...session, msgs: compactChatMessages(session.msgs) })),
@@ -639,7 +647,7 @@ export function App(): React.JSX.Element {
         providerCatalogVersion: llm.providerCatalogVersion
       }
     })
-  }, [settings, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedModel, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
+  }, [settings, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
 
   // 字体与缩放应用（--font 变量 + 主进程 zoomFactor）
   useEffect(() => {
@@ -1232,6 +1240,7 @@ export function App(): React.JSX.Element {
   const fetchReply = useCallback((key: string, text: string, atts: Composer['attachments'], deep: boolean, history: { role: 'user' | 'assistant'; content: string }[], branchId?: number): void => {
     const L = llmRef.current
     const cfg = { baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }
+    const requestModelLabel = llmModelLabel(L)
     const finish = (reply: ChatMessage): void => {
       const patch = (messages: ChatMessage[]): ChatMessage[] => [...messages.filter((message) => !message.typing && !message.live), { ...reply, ts: Date.now() }]
       if (key === 'ask' && branchId !== undefined) patchAskBranchMessages(branchId, patch)
@@ -1267,11 +1276,11 @@ export function App(): React.JSX.Element {
         let blocks = parseBlocks(res.text) || looseBlocks(res.text)
         // 推理型模型单独返回的思维链，作为 think block 置于最前
         if (res.reasoning) blocks = [{ t: 'think' as const, text: res.reasoning }, ...blocks]
-        finish({ role: 'agent', blocks })
+        finish({ role: 'agent', blocks, modelLabel: requestModelLabel })
       } else {
-        finish({ role: 'agent', blocks: [{ t: 'note', text: '请求失败：' + (res.error || '未知错误') }] })
+        finish({ role: 'agent', blocks: [{ t: 'note', text: '请求失败：' + (res.error || '未知错误') }], modelLabel: requestModelLabel })
       }
-    }).catch((error) => finish({ role: 'agent', blocks: [{ t: 'note', text: '请求失败：' + String(error) }] }))
+    }).catch((error) => finish({ role: 'agent', blocks: [{ t: 'note', text: '请求失败：' + String(error) }], modelLabel: requestModelLabel }))
   }, [patchAskBranchMessages, runAgentStream])
 
   // 知识库检索式作答（RAG）：向量检索 top-k → 只依据命中片段作答 → 末尾附出处。settle 收敛到调用方的气泡。
@@ -1279,9 +1288,9 @@ export function App(): React.JSX.Element {
     const L = llmRef.current
     const cfg = { baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }
     if (!cfg.apiKey || !cfg.model) { settle([{ t: 'note', text: '请先在 设置 › 问答助手模型 里配置端点、型号与 API Key。' }]); return }
-    const em = embedModelRef.current.trim()
-    if (!em) { settle([{ t: 'note', text: '📚 知识库检索需要向量模型：点输入区「⚙ 库」打开知识库面板，填入 Embedding 模型（如 text-embedding-3-small / bge-m3）。' }]); return }
-    const sr = await island.kbSearch({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: em }, query, 8)
+    const em = embedConfigRef.current
+    if (!em.baseUrl.trim() || !em.apiKey.trim() || !em.model.trim()) { settle([{ t: 'note', text: '知识库检索需要独立的向量连接：请打开知识库面板，填写 Base URL、Embedding 模型和 API Key。' }]); return }
+    const sr = await island.kbSearch(em, query, 8)
     if (!sr.ok || !sr.hits?.length) { settle([{ t: 'note', text: '📚 ' + (sr.error || '知识库里没有检索到相关内容，可在知识库面板添加更多资料。') }]); return }
     const system = KB_SYSTEM + (instruction.trim() ? `\n\n本会话额外指令（持续生效）：\n${instruction.trim()}` : '')
     const res = await island.llmComplete(cfg, system, kbGroundPrompt(query, sr.hits), deep, history)
@@ -1308,7 +1317,8 @@ export function App(): React.JSX.Element {
     if (qs.length) setQuotes((q) => ({ ...q, [key]: [] }))
     // 问答区开启"知识库模式"→ 走 RAG 接地作答（本地 Agent 引擎自带工具与上下文，跳过 KB）；其余照常
     if (key === 'ask' && kbModeRef.current && askEngineRef.current === 'llm') {
-      const settle = (blocks: ChatMessage['blocks']): void => patchAskBranchMessages(branchId!, (messages) => [...messages.filter((message) => !message.typing && !message.live), { role: 'agent', blocks, ts: Date.now() }])
+      const requestModelLabel = llmModelLabel(llmRef.current)
+      const settle = (blocks: ChatMessage['blocks']): void => patchAskBranchMessages(branchId!, (messages) => [...messages.filter((message) => !message.typing && !message.live), { role: 'agent', blocks, modelLabel: requestModelLabel, ts: Date.now() }])
       const instruction = activeAskBranchRef.current.instruction || ''
       void runKbReply(llmText, deep, history, instruction, settle).catch((error) => settle([{ t: 'note', text: '知识库问答失败：' + String(error) }]))
     } else {
@@ -1445,8 +1455,9 @@ export function App(): React.JSX.Element {
 
     const L = llmRef.current
     const cfg = { baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }
+    const requestModelLabel = llmModelLabel(L)
     const settle = (blocks: ChatMessage['blocks']): void =>
-      patchFollow((fu) => [...fu.filter((m) => !m.typing), { role: 'agent', blocks, ts: Date.now() }])
+      patchFollow((fu) => [...fu.filter((m) => !m.typing), { role: 'agent', blocks, modelLabel: cfg.apiKey && cfg.model ? requestModelLabel : undefined, ts: Date.now() }])
 
     // 2) 上下文：主线程到该条为止 + 该气泡已有子线程（此刻 ref 尚未含新追问，正合适）
     const base = threadsRef.current[key] || []
@@ -1529,9 +1540,8 @@ export function App(): React.JSX.Element {
   }, [askSessions, patchAskBranchMeta, showToast])
 
   const saveAskKnowledge = useCallback(async (scope: 'message' | 'conversation' | 'selection', msgIndex?: number, selectedText?: string): Promise<{ ok: boolean; message: string }> => {
-    const L = llmRef.current
-    const model = embedModelRef.current.trim()
-    if (!L.apiKey || !model) return { ok: false, message: '请先在知识库面板配置向量模型' }
+    const embed = embedConfigRef.current
+    if (!embed.baseUrl.trim() || !embed.apiKey.trim() || !embed.model.trim()) return { ok: false, message: '请先在知识库面板配置完整的向量连接' }
     const msgs = threadsRef.current.ask || []
     let title = activeAskBranchRef.current.title || '问答会话'
     let content = ''
@@ -1549,7 +1559,7 @@ export function App(): React.JSX.Element {
     }
     if (!content.trim()) return { ok: false, message: '没有可保存的会话内容' }
     try {
-      const result = await island.kbAddText({ baseUrl: L.baseUrl, apiKey: L.apiKey, model }, title, content, sourceKey)
+      const result = await island.kbAddText(embed, title, content, sourceKey)
       if (!result.ok) return { ok: false, message: result.error || '写入知识库失败' }
       refreshKb()
       return { ok: true, message: `已写入本地知识库 · ${result.added || 0} 个向量块` }
@@ -1606,12 +1616,13 @@ export function App(): React.JSX.Element {
   }, [patchAskBranchMessages, runKbReply, showToast])
 
   const councilModels = useMemo(() => {
-    const current = llm.apiKey && llm.model ? [{ id: 'current', label: llm.model }] : []
+    const currentConfig = { provider: llm.provider, model: llm.model, baseUrl: llm.baseUrl, apiKey: llm.apiKey }
+    const current = llm.apiKey && llm.model ? [{ id: 'current', label: llmModelLabel(llm) }] : []
     const saved = llm.saved
-      .filter((config) => config.apiKey && config.model && !(config.model === llm.model && config.baseUrl === llm.baseUrl))
+      .filter((config) => config.apiKey && config.model && !providerConfigEquals(config, currentConfig))
       .map((config) => ({ id: `saved:${config.id}`, label: config.name }))
     return [...current, ...saved].slice(0, 8)
-  }, [llm.apiKey, llm.baseUrl, llm.model, llm.saved])
+  }, [llm.apiKey, llm.baseUrl, llm.model, llm.provider, llm.saved])
 
   const runAskCouncil = useCallback(async (mode: 'parallel' | 'consensus' | 'debate', modelIds: string[], deep: boolean): Promise<void> => {
     const branchId = activeAskBranchRef.current.id
@@ -1622,10 +1633,13 @@ export function App(): React.JSX.Element {
     if (!lastUser?.text) { showToast('先提出一个问题，再启动多模型讨论'); return }
     const L = llmRef.current
     const allConfigs = [
-      { id: 'current', label: L.model, baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model },
-      ...L.saved.map((config) => ({ id: `saved:${config.id}`, label: config.name, baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model }))
+      { id: 'current', label: llmModelLabel(L), provider: L.provider, baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model },
+      ...L.saved.map((config) => ({ id: `saved:${config.id}`, label: config.name, provider: config.provider, baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model }))
     ]
-    const configs = modelIds.map((id) => allConfigs.find((config) => config.id === id)).filter((config): config is NonNullable<typeof config> => !!config?.apiKey && !!config.model)
+    const configs = modelIds
+      .map((id) => allConfigs.find((config) => config.id === id))
+      .filter((config): config is NonNullable<typeof config> => !!config?.apiKey && !!config.model)
+      .filter((config, index, values) => values.findIndex((candidate) => providerConfigEquals(candidate, config)) === index)
     if (configs.length < 2) { showToast('多模型讨论至少需要两个已配置模型'); return }
     const lastUserStableIndex = stableMessages.indexOf(lastUserEntry!)
     const targetAgentEntry = stableMessages.find(({ message }, index) => index > lastUserStableIndex && message.role === 'agent')
@@ -1646,7 +1660,9 @@ export function App(): React.JSX.Element {
         const moderator = mode === 'consensus'
           ? '比较这些候选回答，提炼共识，保留必要分歧，给出一份更可靠且可执行的最终回答。'
           : '主持一轮模型辩论：指出候选答案的核心分歧、各自最强论据、共同盲区，并给出你的裁决。'
-        const result = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, `${moderator}\n\n原问题：${lastUser.text}\n\n${body.slice(0, 45000)}`, deep, history)
+        // 当前设置可能在讨论期间被清空或未被选中；主持请求使用本轮已校验的第一个配置。
+        const moderatorConfig = configs[0]
+        const result = await island.llmComplete(moderatorConfig, system, `${moderator}\n\n原问题：${lastUser.text}\n\n${body.slice(0, 45000)}`, deep, history)
         summaryBlocks = result.ok ? (parseBlocks(result.text) || looseBlocks(result.text)) : [{ t: 'note', text: result.error || '主持模型请求失败' }]
       }
       const createdAt = Date.now()
@@ -1789,20 +1805,8 @@ export function App(): React.JSX.Element {
         : s)
     })
   }
-  const saveLlm = (): void => setLlm((s) => {
-    const label = (PROVIDERS.find((x) => x.key === s.provider) || {}).label || s.provider
-    const cfg = { id: Math.max(Date.now(), ...s.saved.map((item) => item.id + 1)), provider: s.provider, model: s.model, baseUrl: s.baseUrl, apiKey: s.apiKey, name: label + ' · ' + (s.model || '未命名') }
-    const saved = s.saved.filter((c) => !(c.provider === s.provider && c.model === s.model && c.baseUrl === s.baseUrl))
-    // 上限 12：支持每家厂商保存多个模型，在问答头部下拉自由切换
-    const next = { ...s, saved: [cfg, ...saved].slice(0, 12) }
-    return { ...next, ...patchProviderDraft(next, { model: s.model, baseUrl: s.baseUrl, apiKey: s.apiKey }) }
-  })
-  const loadLlm = (id: number): void => setLlm((s) => {
-    const c = s.saved.find((x) => x.id === id)
-    if (!c) return s
-    const profiles = { ...s.profiles, [c.provider]: { model: c.model, baseUrl: c.baseUrl, apiKey: c.apiKey } }
-    return { ...s, provider: c.provider, model: c.model, baseUrl: c.baseUrl, apiKey: c.apiKey, profiles, testStatus: 'idle', testMsg: '' }
-  })
+  const saveLlm = (): void => setLlm((s) => ({ ...s, ...saveProviderSettings(s), testStatus: 'idle', testMsg: '' }))
+  const loadLlm = (id: number): void => setLlm((s) => ({ ...s, ...loadProviderSettings(s, id), testStatus: 'idle', testMsg: '' }))
   const deleteLlm = (id: number): void => setLlm((s) => ({ ...s, saved: s.saved.filter((x) => x.id !== id) }))
 
   // ===== 灵感便签：AI 生成 / AI 语义搜索 / 手动增删改 =====
@@ -2478,12 +2482,7 @@ export function App(): React.JSX.Element {
             {tab === 'ask' && (
               <AskTab
                 modelLabel={askModelLabel} onOpenLlmSettings={() => { setTab('settings'); setLlm((s) => ({ ...s, open: true })) }}
-                models={[
-                  // 当前厂商的型号列表：同端点同 Key，切换零成本
-                  ...(llm.modelLists[llm.provider] || []).map((m) => ({ id: 'm:' + m, name: m, active: m === llm.model })),
-                  // 已保存的跨厂商配置（排除与当前端点重复的）
-                  ...llm.saved.filter((c) => !(c.provider === llm.provider && c.baseUrl === llm.baseUrl && c.apiKey === llm.apiKey)).map((c) => ({ id: 'c:' + c.id, name: c.name, active: false }))
-                ]}
+                models={providerModelChoices(llm)}
                 onSwitchModel={(id) => (id.startsWith('m:') ? pickModel(id.slice(2)) : loadLlm(Number(id.slice(2))))}
                 empty={askEmpty}
                 mode={askMode} onSetMode={setAskMode}
@@ -2723,14 +2722,13 @@ export function App(): React.JSX.Element {
         llmReady={llmReady}
         embedModel={embedModel}
         onSetEmbedModel={setEmbedModel}
-        onEmbed={(texts) => island.llmEmbed({ baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: embedModel }, texts).then((r) => (r.ok && r.vectors ? r.vectors : null))}
+        onEmbed={(texts) => island.llmEmbed(embedConfig, texts).then((r) => (r.ok && r.vectors ? r.vectors : null))}
       />
       <KnowledgePanel
         open={kbOpen}
         onClose={() => setKbOpen(false)}
-        embedCfg={{ baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: embedModel }}
-        embedModel={embedModel}
-        onSetEmbedModel={setEmbedModel}
+        embedCfg={embedConfig}
+        onSetEmbedConfig={(patch) => setEmbedConfig((value) => ({ ...value, ...patch }))}
         onChanged={refreshKb}
         onAI={(system, user) => island.llmComplete({ baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: llm.model }, system, user, false)}
         llmReady={llmReady}

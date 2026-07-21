@@ -183,6 +183,16 @@ function AnswerBody({ blocks }: { blocks?: Block[] }): React.JSX.Element {
   )
 }
 
+function ModelStamp({ label }: { label?: string }): React.JSX.Element | null {
+  if (!label) return null
+  return (
+    <div title="本条回答实际使用的模型" style={{ display: 'flex', alignItems: 'center', gap: 4, color: ink(3), fontSize: 9.5, lineHeight: 1.2 }}>
+      <Brain size={10} strokeWidth={1.8} style={{ flex: 'none' }} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    </div>
+  )
+}
+
 /** 多模型候选保持在同一条会话消息内，切换不会复制或污染主上下文。 */
 function AnswerVariants({ variants, onAdopt }: { variants: NonNullable<ChatMessage['variants']>; onAdopt?: (id: string) => void }): React.JSX.Element {
   const [active, setActive] = useState(variants[0]?.id || '')
@@ -671,6 +681,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                 >
                   {m.typing && <TypingDots />}
                   {m.live && <AgentLiveBody live={m.live} />}
+                  {!m.typing && !m.live && <ModelStamp label={m.modelLabel} />}
                   <AnswerBody blocks={m.blocks} />
                   <ContextStatus mode={m.contextMode} />
                   {(m.variants?.length || 0) > 0 && <AnswerVariants variants={m.variants!} onAdopt={p.onAdoptVariant ? (id) => p.onAdoptVariant?.(mi, id) : undefined} />}
@@ -700,6 +711,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                           </div>
                         ) : (
                           <div key={fi} onContextMenu={p.enableQuote ? onAiSelect : undefined} style={{ display: 'flex', flexDirection: 'column', gap: 6, userSelect: p.enableQuote ? 'text' : undefined }}>
+                            <ModelStamp label={fm.modelLabel} />
                             <AnswerBody blocks={fm.blocks} />
                           </div>
                         )

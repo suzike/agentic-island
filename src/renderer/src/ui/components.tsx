@@ -218,13 +218,14 @@ export function Badge(props: { children?: React.ReactNode; color?: string; style
 export function Input(props: {
   value: string
   onChange: (v: string) => void
+  type?: React.HTMLInputTypeAttribute
   placeholder?: string
   onKeyDown?: (e: React.KeyboardEvent) => void
   icon?: LucideIcon
   style?: React.CSSProperties
   autoFocus?: boolean
 }) {
-  const { value, onChange, placeholder, onKeyDown, icon: Icon, style, autoFocus } = props
+  const { value, onChange, type = 'text', placeholder, onKeyDown, icon: Icon, style, autoFocus } = props
   return (
     <div
       style={{
@@ -240,6 +241,7 @@ export function Input(props: {
     >
       {Icon && <Icon size={13} strokeWidth={1.75} style={{ color: ink(3), flex: 'none' }} />}
       <input
+        type={type}
         value={value}
         autoFocus={autoFocus}
         placeholder={placeholder}

@@ -26,16 +26,16 @@ const demoState = {
     ruleMeetingNote: true, desktopWidget: false
   },
   workbenchProjects: [{
-    id: 'docs-project', name: 'Agentic-Island v0.6.1', repoPath: 'C:\\Work\\Agentic-Island',
+    id: 'docs-project', name: 'Agentic-Island v0.6.2', repoPath: 'C:\\Work\\Agentic-Island',
     objective: '完成桌面 Agent 工作台的产品化发布', status: 'active', colorHue: 155,
     createdAt: now - 12 * day, updatedAt: now
   }],
   activeProjectId: 'docs-project',
   todos: [
-    { id: 1, text: '完成问答会话增强发布回归', done: false, status: 'doing', priority: 1, projectId: 'docs-project', project: 'Agentic-Island v0.6.1', tags: ['发布', '问答'], energy: 'deep', acceptance: '分支、上下文、多模型会诊和知识沉淀全部通过', estimate: 90, spent: 58, due: now + 3_600_000, createdAt: now - day },
-    { id: 2, text: '核对模型供应商协议与配置迁移', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.1', tags: ['模型', '安全'], energy: 'normal', acceptance: 'DeepSeek、Kimi 与 Claude 请求协议和密钥边界全部通过', estimate: 45, createdAt: now - day },
-    { id: 3, text: '更新架构图、截图与功能矩阵', done: true, status: 'done', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.1', tags: ['文档'], estimate: 60, spent: 52, doneAt: now - 2_000_000, createdAt: now - 2 * day },
-    { id: 4, text: '验证 NSIS 安装包与 SHA-256', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.1', tags: ['发布'], energy: 'light', estimate: 25, createdAt: now }
+    { id: 1, text: '完成问答与模型切换发布回归', done: false, status: 'doing', priority: 1, projectId: 'docs-project', project: 'Agentic-Island v0.6.2', tags: ['发布', '问答'], energy: 'deep', acceptance: '气泡追问、分支、账号切换和独立 RAG 全部通过', estimate: 90, spent: 58, due: now + 3_600_000, createdAt: now - day },
+    { id: 2, text: '核对最新模型协议与配置迁移', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.2', tags: ['模型', '安全'], energy: 'normal', acceptance: 'GPT-5.6、Claude 5、DeepSeek 与 Kimi 请求协议全部通过', estimate: 45, createdAt: now - day },
+    { id: 3, text: '更新架构图、截图与功能矩阵', done: true, status: 'done', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.2', tags: ['文档'], estimate: 60, spent: 52, doneAt: now - 2_000_000, createdAt: now - 2 * day },
+    { id: 4, text: '验证 NSIS 安装包与 SHA-256', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.2', tags: ['发布'], energy: 'light', estimate: 25, createdAt: now }
   ],
   notes: [
     { id: 11, emoji: '🧭', title: '产品原则', md: '## 不打断，但始终可控\n\n- Agent 状态必须实时可见\n- 外部操作时主动让出桌面焦点\n- 数据默认留在本机', color: 'sky', tags: ['产品', '原则'], pinned: true, createdAt: now - 4 * day, updatedAt: now },
@@ -43,8 +43,8 @@ const demoState = {
     { id: 13, emoji: '⚙️', title: '发布检查清单', md: '- [x] typecheck\n- [x] unit tests\n- [ ] NSIS installer\n- [ ] GitHub Release', color: 'mint', tags: ['发布'], later: true, createdAt: now - day, updatedAt: now }
   ],
   activeAskBranch: {
-    id: 602, title: 'v0.6.1 发布决策', parentId: 601, forkAt: 1,
-    memory: '当前目标是完成 v0.6.1 发布；必须保留既有模块能力，并以真实测试和安装包为准。',
+    id: 602, title: 'v0.6.2 发布决策', parentId: 601, forkAt: 1,
+    memory: '当前目标是完成 v0.6.2 发布；必须保留气泡内追问和既有模块能力，并以真实测试和安装包为准。',
     instruction: '结论优先，风险按严重度排序；所有建议必须给出可执行验证方式。',
     createdAt: now - 180_000, updatedAt: now
   },
@@ -57,7 +57,7 @@ const demoState = {
     ]
   }],
   askThread: [
-    { role: 'user', text: '请基于当前代码和发布门禁，判断 v0.6.1 是否可以发布。', contextMode: 'pinned', ts: now - 120_000 },
+    { role: 'user', text: '请基于当前代码和发布门禁，判断 v0.6.2 是否可以发布。', contextMode: 'pinned', ts: now - 120_000 },
     {
       role: 'agent',
       blocks: [{ t: 'think', text: '先核对会话分支、上下文注入、多模型讨论和知识库写入，再检查供应商协议、配置迁移与发布门禁。' }, { t: 'h', text: '发布判断' }, { t: 'p', text: '功能面已形成完整会话闭环，当前进入发布验证阶段。必须以类型检查、33 项离线测试、三端构建、真实 Electron 可视检查和 NSIS 安装验证全部通过作为放行条件。' }, { t: 'ul', items: ['分支 Fork、切换、合并和重要上下文持久化', '气泡内追问、分析附着和异步分支隔离', 'DeepSeek/Kimi/Claude 请求协议与配置迁移', '安装包、自动更新清单和 SHA-256 一致'] }],
@@ -70,7 +70,8 @@ const demoState = {
         { role: 'user', text: '那本地阶段还缺哪一项？', ts: now - 60_000 },
         { role: 'agent', blocks: [{ t: 'p', text: '还需检查安装后首次启动、旧配置迁移和卸载清理。' }], ts: now - 50_000 }
       ],
-      suggestions: ['检查本轮变更是否完整覆盖测试', '生成 v0.6.1 发布风险矩阵'],
+      suggestions: ['检查本轮变更是否完整覆盖测试', '生成 v0.6.2 发布风险矩阵'],
+      modelLabel: 'DeepSeek · deepseek-v4-pro',
       ts: now - 110_000
     }
   ],
@@ -79,17 +80,19 @@ const demoState = {
     saved: [
       { id: 701, provider: 'deepseek', model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'not-a-real-key', name: 'DeepSeek · deepseek-v4-pro' },
       { id: 702, provider: 'kimi-code', model: 'k3', baseUrl: 'https://api.kimi.com/coding/v1', apiKey: 'not-a-real-key', name: 'Kimi Code · k3' },
-      { id: 703, provider: 'claude', model: 'claude-sonnet-4-6', baseUrl: 'https://api.anthropic.com/v1', apiKey: 'not-a-real-key', name: 'Claude · claude-sonnet-4-6' }
+      { id: 703, provider: 'claude', model: 'claude-sonnet-5', baseUrl: 'https://api.anthropic.com/v1', apiKey: 'not-a-real-key', name: 'Claude · claude-sonnet-5' }
     ],
-    modelLists: { deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'], 'kimi-code': ['kimi-for-coding', 'kimi-for-coding-highspeed', 'k3'], kimi: ['kimi-k2.6', 'kimi-k2.5'], qwen: ['qwen-plus'], openai: ['gpt-4o'], claude: ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5'], custom: [] },
+    modelLists: { deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'], 'kimi-code': ['kimi-for-coding', 'kimi-for-coding-highspeed', 'k3'], kimi: ['kimi-k2.6', 'kimi-k2.5'], qwen: ['qwen-plus'], openai: ['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-luna'], claude: ['claude-sonnet-5', 'claude-opus-4-8', 'claude-fable-5', 'claude-haiku-4-5'], custom: [] },
     profiles: {
       deepseek: { model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'not-a-real-key' },
       'kimi-code': { model: 'k3', baseUrl: 'https://api.kimi.com/coding/v1', apiKey: 'not-a-real-key' },
       kimi: { model: 'kimi-k2.6', baseUrl: 'https://api.moonshot.cn/v1', apiKey: 'not-a-real-key' },
-      claude: { model: 'claude-sonnet-4-6', baseUrl: 'https://api.anthropic.com/v1', apiKey: 'not-a-real-key' }
+      openai: { model: 'gpt-5.6', baseUrl: 'https://api.openai.com/v1', apiKey: 'not-a-real-key' },
+      claude: { model: 'claude-sonnet-5', baseUrl: 'https://api.anthropic.com/v1', apiKey: 'not-a-real-key' }
     },
-    providerCatalogVersion: 5
+    providerCatalogVersion: 6
   },
+  embeddingConfig: { model: 'text-embedding-3-small', baseUrl: 'https://api.openai.com/v1', apiKey: 'not-a-real-key' },
   feedSources: [
     { id: 'openai', name: 'OpenAI', url: 'https://openai.com/news/rss.xml', enabled: true },
     { id: 'hn', name: 'Hacker News', url: 'https://hnrss.org/frontpage', enabled: true },
@@ -243,14 +246,14 @@ try {
     process.stdout.write(`captured ${filename}\n`)
   }
 
-  await capture('问答', 'ask-v061.png')
+  await capture('问答', 'ask-v062.png')
   if (captureOnly !== 'ask') {
-    await capture('快捷', 'shortcuts-v061.png')
-    await capture('待办', 'todos-v061.png')
-    await capture('灵感便签', 'notes-v061.png')
-    await capture('资讯', 'news-v061.png')
-    await capture('复盘', 'review-v061.png')
-    await capture('设置', 'settings-v061.png')
+    await capture('快捷', 'shortcuts-v062.png')
+    await capture('待办', 'todos-v062.png')
+    await capture('灵感便签', 'notes-v062.png')
+    await capture('资讯', 'news-v062.png')
+    await capture('复盘', 'review-v062.png')
+    await capture('设置', 'settings-v062.png')
 
     await evaluate(`(() => {
       const button = [...document.querySelectorAll('[title]')].find((item) => item.title?.includes('录屏工坊'))
@@ -269,8 +272,8 @@ try {
       format: 'png', fromSurface: true, captureBeyondViewport: false,
       clip: { ...recordingRect, scale: 1 }
     })
-    await writeFile(join(outputDir, 'recording-v061.png'), Buffer.from(recordingShot.data, 'base64'))
-    process.stdout.write('captured recording-v061.png\n')
+    await writeFile(join(outputDir, 'recording-v062.png'), Buffer.from(recordingShot.data, 'base64'))
+    process.stdout.write('captured recording-v062.png\n')
   }
 } finally {
   cdp?.close()

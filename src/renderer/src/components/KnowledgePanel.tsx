@@ -16,9 +16,8 @@ import { accent, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text, tran
 interface Props {
   open: boolean
   onClose: () => void
-  embedCfg: LlmRequestConfig // { baseUrl, apiKey, model: embedModel }
-  embedModel: string
-  onSetEmbedModel: (m: string) => void
+  embedCfg: LlmRequestConfig
+  onSetEmbedConfig: (patch: Partial<LlmRequestConfig>) => void
   onChanged: () => void // 通知 App 刷新 kbSources（问答模式用）
   onAI: (system: string, user: string) => Promise<{ ok: boolean; text?: string; error?: string }>
   llmReady: boolean
@@ -33,7 +32,7 @@ const WIKI_SYSTEM =
   '## 高频概念/术语（列表，每条「术语 — 一句解释」）\n## 可以问它的问题（5 条示范提问，引导善用知识库）\n' +
   '要综合、去重、成体系、突出主线；只依据片段，不编造。'
 
-export function KnowledgePanel({ open, onClose, embedCfg, embedModel, onSetEmbedModel, onChanged, onAI, llmReady }: Props): React.JSX.Element | null {
+export function KnowledgePanel({ open, onClose, embedCfg, onSetEmbedConfig, onChanged, onAI, llmReady }: Props): React.JSX.Element | null {
   const [sources, setSources] = useState<KbSourceView[]>([])
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState('')
@@ -68,7 +67,7 @@ export function KnowledgePanel({ open, onClose, embedCfg, embedModel, onSetEmbed
     } else setErr(g.error || '生成失败')
   }
 
-  const embedReady = !!embedModel.trim() && !!embedCfg.baseUrl && !!embedCfg.apiKey
+  const embedReady = !!embedCfg.model.trim() && !!embedCfg.baseUrl.trim() && !!embedCfg.apiKey.trim()
   const totalDocs = sources.reduce((a, s) => a + s.docCount, 0)
 
   const after = (label: string, r: { ok?: boolean; canceled?: boolean; added?: number; skipped?: number; changed?: number; error?: string }): void => {
@@ -121,14 +120,16 @@ export function KnowledgePanel({ open, onClose, embedCfg, embedModel, onSetEmbed
           <IconButton icon={Ico.close} onClick={onClose} title="关闭" size={26} />
         </div>
 
-        {/* Embedding 模型（检索必须向量嵌入） */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 15px', borderBottom: `0.5px solid ${hairline(0.09)}`, background: embedReady ? fill(1) : semBg(sem.warn, 0.1) }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: embedReady ? ink(2) : sem.warn, fontSize: FS.tiny, fontWeight: 600, flex: 'none' }}>
-            <Ico.brain size={12} strokeWidth={1.75} />向量模型
-          </span>
-          <Input value={embedModel} onChange={onSetEmbedModel} placeholder="必填，如 text-embedding-3-small / bge-m3 / embedding-3" style={{ flex: 1, fontFamily: "'Cascadia Code', Consolas, ui-monospace, monospace" }} />
+        {/* 向量连接独立于问答模型，避免切换聊天供应商后让知识库失效。 */}
+        <div style={{ display: 'grid', gridTemplateColumns: '76px minmax(0, 1fr)', alignItems: 'center', gap: '7px 9px', padding: '10px 15px', borderBottom: `0.5px solid ${hairline(0.09)}`, background: embedReady ? fill(1) : semBg(sem.warn, 0.1) }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: embedReady ? ink(2) : sem.warn, fontSize: FS.tiny, fontWeight: 600 }}><Ico.brain size={12} strokeWidth={1.75} />模型</span>
+          <Input value={embedCfg.model} onChange={(model) => onSetEmbedConfig({ model })} placeholder="text-embedding-3-small / bge-m3 / embedding-3" style={{ fontFamily: "'Cascadia Code', Consolas, ui-monospace, monospace" }} />
+          <span style={{ color: ink(3), fontSize: FS.tiny, fontWeight: 600 }}>Base URL</span>
+          <Input value={embedCfg.baseUrl} onChange={(baseUrl) => onSetEmbedConfig({ baseUrl })} placeholder="https://api.openai.com/v1" style={{ fontFamily: "'Cascadia Code', Consolas, ui-monospace, monospace" }} />
+          <span style={{ color: ink(3), fontSize: FS.tiny, fontWeight: 600 }}>API Key</span>
+          <Input type="password" value={embedCfg.apiKey} onChange={(apiKey) => onSetEmbedConfig({ apiKey })} placeholder="仅保存在本机加密配置中" style={{ fontFamily: "'Cascadia Code', Consolas, ui-monospace, monospace" }} />
         </div>
-        {!embedReady && <div style={{ padding: '7px 15px', color: sem.warn, fontSize: FS.tiny, background: semBg(sem.warn, 0.08), lineHeight: 1.5 }}>先填向量模型并在「设置 › 问答助手模型」配好端点/Key，才能建立与检索知识库（复用同一端点）。</div>}
+        {!embedReady && <div style={{ padding: '7px 15px', color: sem.warn, fontSize: FS.tiny, background: semBg(sem.warn, 0.08), lineHeight: 1.5 }}>请完整填写独立的向量连接。它不会随问答模型切换，已有知识库可保持稳定检索。</div>}
 
         {/* 添加动作 */}
         <div style={{ display: 'flex', gap: 8, padding: '12px 15px 8px' }}>

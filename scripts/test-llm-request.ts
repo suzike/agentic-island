@@ -42,6 +42,16 @@ const genericBody = buildChatRequestBody({
 ok(genericBody.max_tokens === 900 && genericBody.temperature === 0.4, '其他 OpenAI 兼容供应商应保留原请求参数')
 ok(!('max_completion_tokens' in genericBody), '其他供应商不应被 Kimi 兼容逻辑污染')
 
+const gptFast = buildChatRequestBody({
+  baseUrl: 'https://api.openai.com/v1', apiKey: 'openai-key', model: 'gpt-5.6'
+}, 'system', 'ping', false, [])
+const gptDeep = buildChatRequestBody({
+  baseUrl: 'https://api.openai.com/v1', apiKey: 'openai-key', model: 'gpt-5.6-terra'
+}, 'system', 'ping', true, [])
+ok(gptFast.max_completion_tokens === 900 && gptFast.reasoning_effort === 'low', 'GPT-5.6 快速模式应使用低推理强度')
+ok(gptDeep.max_completion_tokens === 3000 && gptDeep.reasoning_effort === 'max', 'GPT-5.6 深度模式应使用最大推理强度')
+ok(!('temperature' in gptFast) && !('max_tokens' in gptFast), 'GPT-5.6 不应收到旧完成参数或 temperature')
+
 const deepSeekFast = buildChatRequestBody({
   baseUrl: 'https://api.deepseek.com/v1', apiKey: 'deep-key', model: 'deepseek-v4-flash'
 }, 'system', 'ping', false, [])
@@ -70,9 +80,19 @@ const claudeParts = claudeMessages.at(-1)?.content as Array<{ type: string; sour
 ok(isAnthropicRequest(claudeCfg) && claudeBody.system === 'system' && claudeBody.max_tokens === 3000, 'Anthropic 官方端点应使用原生 Messages 请求体')
 ok(claudeParts[1]?.type === 'image' && claudeParts[1]?.source?.media_type === 'image/png' && claudeParts[1]?.source?.data === 'AAAA', 'OpenAI 图片 part 应转换为 Anthropic base64 图片源')
 
-const currentClaudeBody = buildAnthropicRequestBody({ ...claudeCfg, model: 'claude-sonnet-4-6' }, 'system', 'ping', true, [])
-ok(JSON.stringify(currentClaudeBody.thinking) === JSON.stringify({ type: 'adaptive', display: 'summarized' }), '当前 Claude 深度模式应启用 adaptive thinking 摘要')
-ok(JSON.stringify(currentClaudeBody.output_config) === JSON.stringify({ effort: 'max' }), '当前 Claude 深度模式应映射 max effort')
+const currentClaudeFast = buildAnthropicRequestBody({ ...claudeCfg, model: 'claude-sonnet-5' }, 'system', 'ping', false, [])
+const currentClaudeDeep = buildAnthropicRequestBody({ ...claudeCfg, model: 'claude-sonnet-5' }, 'system', 'ping', true, [])
+ok(JSON.stringify(currentClaudeFast.thinking) === JSON.stringify({ type: 'disabled' }), 'Claude Sonnet 5 快速模式应关闭默认 adaptive thinking')
+ok(JSON.stringify(currentClaudeDeep.thinking) === JSON.stringify({ type: 'adaptive', display: 'summarized' }), 'Claude Sonnet 5 深度模式应启用 adaptive thinking 摘要')
+ok(JSON.stringify(currentClaudeDeep.output_config) === JSON.stringify({ effort: 'max' }), 'Claude Sonnet 5 深度模式应映射 max effort')
+
+const fableFast = buildAnthropicRequestBody({ ...claudeCfg, model: 'claude-fable-5' }, 'system', 'ping', false, [])
+const fableDeep = buildAnthropicRequestBody({ ...claudeCfg, model: 'claude-fable-5' }, 'system', 'ping', true, [])
+ok(!('thinking' in fableFast) && JSON.stringify(fableFast.output_config) === JSON.stringify({ effort: 'low' }), 'Claude Fable 5 快速模式应保留服务端常开思考并降低 effort')
+ok(JSON.stringify(fableDeep.thinking) === JSON.stringify({ type: 'adaptive', display: 'summarized' }), 'Claude Fable 5 深度模式应使用 adaptive thinking')
+
+const haikuDeep = buildAnthropicRequestBody({ ...claudeCfg, model: 'claude-haiku-4-5' }, 'system', 'ping', true, [])
+ok(JSON.stringify(haikuDeep.thinking) === JSON.stringify({ type: 'enabled', budget_tokens: 1024 }), 'Claude Haiku 4.5 深度模式应使用手动 extended thinking')
 
 const pinnedHistory = Array.from({ length: 20 }, (_, index) => ({ role: (index % 2 ? 'assistant' : 'user') as 'user' | 'assistant', content: `pinned-${index}` }))
 const historyBody = buildChatRequestBody({

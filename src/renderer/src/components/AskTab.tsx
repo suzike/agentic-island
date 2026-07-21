@@ -21,7 +21,7 @@ interface AskTabProps {
   modelLabel: string
   onOpenLlmSettings: () => void
   /** 可切换的模型（当前厂商型号列表 + 已保存的跨厂商配置） */
-  models: { id: string; name: string; active: boolean }[]
+  models: { id: string; name: string; detail?: string; active: boolean }[]
   onSwitchModel: (id: string) => void
   empty: boolean
   mode: 'fast' | 'deep'
@@ -236,7 +236,10 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: R.md, background: m.active ? semBg(accent(), 0.14) : fill(1), border: m.active ? `0.5px solid ${accent(0.7, 0.4)}` : 'none', cursor: 'pointer' }}
             >
               <span style={{ width: 6, height: 6, flex: 'none', borderRadius: 999, background: m.active ? accent() : ink(4) }} />
-              <span style={{ flex: 1, color: ink(1), fontSize: 11, fontFamily: "ui-monospace,'Cascadia Code',monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</span>
+              <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <span style={{ color: ink(1), fontSize: 11, fontFamily: "ui-monospace,'Cascadia Code',monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</span>
+                {m.detail && <span style={{ color: ink(3), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.detail}</span>}
+              </span>
               {m.active && <span style={{ color: accent(), fontSize: 10, fontWeight: 700 }}>使用中</span>}
             </div>
           ))}

@@ -109,6 +109,8 @@ export interface ChatMessage {
   typing?: boolean
   /** 消息时间戳 */
   ts?: number
+  /** 云端回答实际发起请求时使用的供应商与模型；切换模型后仍保留原始归属。 */
+  modelLabel?: string
   /** 本条用户消息携带的引用片段（发送时从输入区带上） */
   quotes?: QuoteRef[]
   /** 就地追问子线程：嵌套在本条回答气泡内的 Q&A（交替 user/agent），上下文仍含整段主对话 */

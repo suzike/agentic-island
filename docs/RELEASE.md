@@ -1,6 +1,6 @@
 # Agentic-Island 发布指南
 
-本文档对应 `0.6.1` 的 Windows NSIS 发布流程。
+本文档对应 `0.6.2` 的 Windows NSIS 发布流程。
 
 ## 1. 发布前审查
 
@@ -9,7 +9,7 @@
 - README、CHANGELOG、架构说明、截图和版本 Release Note 一致。
 - `npm audit --omit=dev` 无已知生产依赖漏洞。
 - 本地模型、FFmpeg、hooks 和图标资源均存在。
-- 问答分支、上下文、知识库写入与供应商配置迁移的回归测试通过。
+- 问答分支、气泡内追问、上下文、知识库写入、独立 Embedding 连接与供应商/账号配置迁移的回归测试通过。
 
 ## 2. 发布门禁
 

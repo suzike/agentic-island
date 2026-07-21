@@ -54,9 +54,13 @@ export function buildAnthropicRequestBody(
     system,
     messages: [...history, { role: 'user', content: anthropicContent(user) }]
   }
-  if (/^claude-(?:sonnet-4-6|opus-4-(?:6|7|8)|sonnet-5)$/i.test(cfg.model)) {
+  const model = cfg.model.toLowerCase()
+  if (/^claude-(?:fable-5|sonnet-5|sonnet-4-6|opus-4-(?:6|7|8))$/.test(model)) {
     body.output_config = { effort: deep ? 'max' : 'low' }
     if (deep) body.thinking = { type: 'adaptive', display: 'summarized' }
+    else if (model === 'claude-sonnet-5') body.thinking = { type: 'disabled' }
+  } else if (model === 'claude-haiku-4-5' && deep) {
+    body.thinking = { type: 'enabled', budget_tokens: 1024 }
   }
   return body
 }
@@ -74,6 +78,10 @@ function isKimiCodeRequest(cfg: LlmRequestConfig): boolean {
 
 function isDeepSeekV4Request(cfg: LlmRequestConfig): boolean {
   return /^deepseek-v4-(?:pro|flash)$/i.test(cfg.model) || requestHost(cfg) === 'api.deepseek.com' && /^deepseek-v4-/i.test(cfg.model)
+}
+
+function isOpenAiReasoningRequest(cfg: LlmRequestConfig): boolean {
+  return /^gpt-5(?:\.|$)/i.test(cfg.model) && requestHost(cfg) === 'api.openai.com'
 }
 
 /** 上游报错可能回显密钥或 Authorization；返回渲染层前统一脱敏。 */
@@ -110,6 +118,9 @@ export function buildChatRequestBody(
     body.thinking = { type: deep ? 'enabled' : 'disabled' }
     if (deep) body.reasoning_effort = 'max'
     else body.temperature = 0.4
+  } else if (isOpenAiReasoningRequest(cfg)) {
+    body.max_completion_tokens = deep ? 3000 : 900
+    body.reasoning_effort = deep && /^gpt-5\.6(?:-|$)/i.test(cfg.model) ? 'max' : deep ? 'high' : 'low'
   } else {
     body.max_tokens = deep ? 3000 : 900
     body.temperature = deep ? 0.6 : 0.4

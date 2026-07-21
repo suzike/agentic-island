@@ -1,6 +1,6 @@
 # Agentic-Island 开发指南
 
-本文档对应 `0.6.1`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
+本文档对应 `0.6.2`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
 
 ## 1. 环境
 
@@ -28,7 +28,7 @@ npm run dev
 |---|---|
 | `npm run dev` | electron-vite 开发运行 |
 | `npm run typecheck` | 检查 main/preload/shared 与 renderer/shared |
-| `npm test` | 顺序执行 32 个离线测试脚本 |
+| `npm test` | 顺序执行 33 个离线测试脚本 |
 | `npm run build` | 构建 main、preload 和 renderer |
 | `npm run docs:capture` | 使用隔离演示数据重建真实 Electron 截图 |
 | `npm run package` | 构建 NSIS 安装包到 `dist/` |
@@ -73,9 +73,10 @@ npm run dev
 - 保存 `askThread/askSessions` 前必须调用 `compactChatMessages`：递归清除临时占位，在 60 条限额内优先保留重要消息，再补最近消息；附件进入历史时遵守单文件与总字符预算。
 - 删除归档父分支时必须把直接子分支重挂到其父级；历史删除必须先展示不可恢复及执行中结果丢失提示。
 - 对话知识沉淀通过 `kbAddText` 进入主进程知识库，来源类型固定为 `conversation`，不得在渲染层伪造临时搜索结果。
-- 供应商切换必须经过 `logic/providers.ts`，保证 model/Base URL/API Key 同步切换；上游错误进入 UI 前必须脱敏。
+- 供应商切换必须经过 `logic/providers.ts`，保证 model/Base URL/API Key 同步切换；配置相等判断必须包含供应商、模型、归一化 Base URL 和 API Key，同模型不同账号不得覆盖或误去重；上游错误进入 UI 前必须脱敏。
 - Kimi Code 会员服务与 Kimi 开放平台必须保持独立供应商配置；不得把 `api.kimi.com/coding/v1` 的会员密钥发送到 `api.moonshot.cn/v1`，反向同理。
-- DeepSeek V4 快速/深度模式必须显式映射 thinking；Kimi K3 必须保持 thinking 并映射 effort；Anthropic 官方端点必须使用原生 Messages 协议和 `x-api-key`，不得按 OpenAI Chat Completions 发送。
+- DeepSeek V4 快速/深度模式必须显式映射 thinking；Kimi K3 必须保持 thinking 并映射 effort；GPT-5.6 使用 `max_completion_tokens` 和 reasoning effort，不发送旧 `max_tokens`/`temperature`；Anthropic 官方端点必须使用原生 Messages 协议和 `x-api-key`，Claude 5/4.8 的思考控制必须按型号能力映射。
+- Embedding 的 Base URL、模型和 API Key 独立于聊天配置；知识库搜索、索引、重建和会话写入只读取 `embeddingConfig`，不得重新复用当前 `llm` 连接。
 - 模型测试和目录同步的异步结果必须校验发起时的 provider/Base URL/API Key/model，编辑配置后不得让旧响应覆盖新状态。
 - 问答逻辑变更至少运行 `test-quote.ts`；供应商目录、迁移或密钥隔离变更至少运行 `test-providers.ts`，请求参数兼容变更还需运行 `test-llm-request.ts`。
 

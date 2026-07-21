@@ -1,6 +1,6 @@
 {
   "name": "agentic-island",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "常驻 Windows 屏幕顶部的 AI 编码 Agent 状态监控、审批与协作面板",
   "main": "./out/main/index.js",
   "author": "Agentic-Island",

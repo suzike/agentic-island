@@ -1,8 +1,13 @@
 import {
   PROVIDERS,
   PROVIDER_CATALOG_VERSION,
+  loadProviderSettings,
+  migrateEmbeddingSettings,
   migrateProviderSettings,
   patchProviderDraft,
+  providerConfigEquals,
+  providerModelChoices,
+  saveProviderSettings,
   switchProviderSettings
 } from '../src/renderer/src/logic/providers.ts'
 
@@ -92,8 +97,53 @@ const migratedClaude = migrateProviderSettings({
   apiKey: 'claude-key',
   saved: [{ id: 10, provider: 'claude', model: 'claude-opus-4', baseUrl: 'https://api.anthropic.com/v1', apiKey: 'claude-key', name: 'Claude 旧配置' }]
 })
-ok(migratedClaude.model === 'claude-sonnet-4-6', 'Claude 旧默认模型应迁移到当前官方 ID')
+ok(migratedClaude.model === 'claude-sonnet-5', 'Claude 旧默认模型应迁移到当前官方 ID')
 ok(migratedClaude.saved[0].model === 'claude-opus-4-8', '已保存的 Claude 旧模型也应迁移')
-ok(migratedClaude.modelLists.claude.slice(0, 3).join(',') === 'claude-sonnet-4-6,claude-opus-4-8,claude-haiku-4-5', 'Claude 目录应优先当前官方模型')
+ok(migratedClaude.modelLists.claude.slice(0, 4).join(',') === 'claude-sonnet-5,claude-opus-4-8,claude-fable-5,claude-haiku-4-5', 'Claude 目录应优先当前官方模型')
+ok(PROVIDERS.find((item) => item.key === 'openai')?.models.join(',') === 'gpt-5.6,gpt-5.6-terra,gpt-5.6-luna', 'OpenAI 目录应使用当前 GPT-5.6 系列')
+
+let switching = migrateProviderSettings({ provider: 'deepseek' })
+switching = patchProviderDraft(switching, { model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com/v1/', apiKey: 'account-a' })
+switching = saveProviderSettings(switching, 100)
+const firstId = switching.saved[0].id
+switching = patchProviderDraft(switching, { apiKey: 'account-b' })
+switching = saveProviderSettings(switching, 101)
+ok(switching.saved.length === 2, '同一供应商、型号和地址的不同密钥配置不得互相覆盖')
+ok(!providerConfigEquals(switching.saved[0], switching.saved[1]), '不同密钥必须识别为不同配置')
+ok(providerConfigEquals(switching.saved[0], { provider: 'deepseek', model: 'deepseek-v4-pro', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'account-b' }), '配置比较应忽略 Base URL 尾斜杠')
+
+const choices = providerModelChoices(switching)
+ok(choices.some((choice) => choice.id === `c:${firstId}` && choice.detail.includes('配置')), '问答模型菜单应保留同模型的另一账号配置并给出可辨识信息')
+ok(choices.filter((choice) => choice.active).length === 1, '问答模型菜单只能有一个使用中选项')
+
+const loadedFirst = loadProviderSettings(switching, firstId)
+ok(loadedFirst.apiKey === 'account-a' && loadedFirst.provider === 'deepseek', '从问答或设置页载入配置应原子切换供应商、模型、地址和密钥')
+ok(providerModelChoices(loadedFirst).some((choice) => choice.active && choice.id === 'm:deepseek-v4-pro'), '载入配置后当前连接型号应立即成为唯一活动项')
+const savedAgain = saveProviderSettings(loadedFirst, 200)
+ok(savedAgain.saved.length === 2 && savedAgain.saved[0].id === firstId, '重复保存同一完整配置应复用原记录而不是制造重复项')
+
+const migratedSavedModel = migrateProviderSettings({
+  providerCatalogVersion: PROVIDER_CATALOG_VERSION,
+  provider: 'custom',
+  model: 'current-model',
+  baseUrl: 'https://example.test/v1',
+  apiKey: 'custom-key',
+  modelLists: { custom: ['current-model'] },
+  saved: [{ id: 88, provider: 'custom', model: 'saved-only-model', baseUrl: 'https://example.test/v1', apiKey: 'custom-key', name: '仅保存模型' }]
+})
+ok(migratedSavedModel.modelLists.custom.includes('saved-only-model'), '仅存在于已保存配置的型号也必须进入问答切换列表')
+
+const legacyEmbedding = migrateEmbeddingSettings(undefined, 'text-embedding-3-small', {
+  model: 'gpt-5.6', baseUrl: 'https://api.openai.com/v1', apiKey: 'legacy-key'
+})
+ok(legacyEmbedding.model === 'text-embedding-3-small' && legacyEmbedding.apiKey === 'legacy-key', '旧向量模型应一次性复制原问答连接，避免升级后失效')
+const independentEmbedding = migrateEmbeddingSettings({
+  model: 'bge-m3', baseUrl: 'https://embed.example/v1', apiKey: 'embed-key'
+}, '', { model: 'claude-sonnet-5', baseUrl: 'https://api.anthropic.com/v1', apiKey: 'chat-key' })
+ok(independentEmbedding.baseUrl === 'https://embed.example/v1' && independentEmbedding.apiKey === 'embed-key', '独立向量连接不得被当前问答模型覆盖')
+const intentionallyClearedEmbedding = migrateEmbeddingSettings({ model: '', baseUrl: '', apiKey: '' }, 'legacy', {
+  model: 'gpt-5.6', baseUrl: 'https://api.openai.com/v1', apiKey: 'chat-key'
+})
+ok(!intentionallyClearedEmbedding.model && !intentionallyClearedEmbedding.apiKey, '用户清空独立向量配置后不得再次从聊天连接回填')
 
 console.log('provider settings migration tests passed')
