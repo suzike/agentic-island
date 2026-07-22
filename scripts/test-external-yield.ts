@@ -49,8 +49,8 @@ assert.equal(calls.includes('top:true'), false, '销毁后不得再操作窗口'
 
 const mainSource = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 assert.equal((mainSource.match(/dialog\.show(?:Open|Save)Dialog/g) || []).length, 4, '原生文件对话框只能在两个统一包装器中调用')
-assert.equal((mainSource.match(/showOwnedOpenDialog\(/g) || []).length, 6, 'Markdown、终端目录、知识库与截图工坊的打开入口必须接入统一包装器')
-assert.equal((mainSource.match(/showOwnedSaveDialog\(/g) || []).length, 6, 'Markdown、PDF、文本、录屏和图片保存入口必须接入统一包装器')
+assert.equal((mainSource.match(/showOwnedOpenDialog\(/g) || []).length, 7, 'Markdown、终端目录/工作区、知识库与截图工坊的打开入口必须接入统一包装器')
+assert.equal((mainSource.match(/showOwnedSaveDialog\(/g) || []).length, 7, 'Markdown、PDF、文本、录屏、图片和终端工作区保存入口必须接入统一包装器')
 assert.match(mainSource, /ipcMain\.handle\('pick-directory',[\s\S]*?showOwnedOpenDialog\([\s\S]*?properties:\s*\['openDirectory'/, 'PowerShell 工作目录必须使用可确认选择的系统目录对话框')
 assert.equal((mainSource.match(/shell\.(?:openExternal|openPath)\(/g) || []).length, 2, '外部网页和路径只能在统一让位包装器中调用')
 assert.match(mainSource, /function openScreenshot\([^)]*\): void \{[\s\S]*?yieldToExternalApp\(\)/, '系统截图界面打开前必须让位')

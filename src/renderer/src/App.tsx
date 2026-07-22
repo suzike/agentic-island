@@ -138,6 +138,12 @@ export function App(): React.JSX.Element {
   // 点按钮导致内容收缩、光标瞬间落到面板外时，岛不再"回缩又弹回"地抖）
   const panelRef = useRef<HTMLDivElement>(null)
   const lastClickRef = useRef(0)
+  const keyboardFocusRef = useRef(false)
+  const releasePanelKeyboardFocus = useCallback((): void => {
+    keyboardFocusRef.current = false
+    const active = document.activeElement
+    if (active instanceof HTMLElement && panelRef.current?.contains(active)) active.blur()
+  }, [])
   // 待办
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [dueCount, setDueCount] = useState(0)
@@ -495,17 +501,22 @@ export function App(): React.JSX.Element {
   const forceAttention = (hasPending || hasWaiting || hasDueTodo) && !focusActive && !pomoWorking && !dndActive && !snoozed
 
   const isShown = revealed || forceAttention || pinned
+  useEffect(() => {
+    if (!isShown) releasePanelKeyboardFocus()
+  }, [isShown, releasePanelKeyboardFocus])
   const attentionSigRef = useRef(''); attentionSigRef.current = attentionSig
   const snoozeNow = useCallback((): void => {
+    releasePanelKeyboardFocus()
     setSnoozeSig(attentionSigRef.current)
     setPinned(false)
     setRevealed(false)
-  }, [])
+  }, [releasePanelKeyboardFocus])
 
   // 打开文件夹、网页、会议或外部终端前主动让位：完整面板收起，当前提醒静默到下一条新事件。
   // 主进程同时会临时取消 screen-saver 级置顶；这里同步 lastIgnore，避免下次唤出时缓存与真实窗口状态失步。
   useEffect(() => island.onExternalYield(() => {
     const recordingWorkspaceOpen = !!document.querySelector('[data-recording-studio], [data-recording-compact]')
+    releasePanelKeyboardFocus()
     setSnoozeSig(attentionSigRef.current)
     setPinned(false)
     setRevealed(false)
@@ -522,7 +533,7 @@ export function App(): React.JSX.Element {
     if (!recordingWorkspaceOpen) setShotStudio(null)
     setDropActive(false)
     if (!recordingWorkspaceOpen) lastIgnore.current = true
-  }), [])
+  }), [releasePanelKeyboardFocus])
 
   // 供 mousemove 处理器读取的最新值（处理器只注册一次）
   const forcedRef = useRef(false); forcedRef.current = forceAttention || pinned
@@ -1036,6 +1047,21 @@ export function App(): React.JSX.Element {
     const setIgnore = (ig: boolean): void => {
       if (ig !== lastIgnore.current) { lastIgnore.current = ig; island.setIgnoreMouse(ig) }
     }
+    const clearHideTimer = (): void => {
+      if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = undefined }
+    }
+    const panelHasKeyboardFocus = (): boolean => {
+      const active = document.activeElement
+      return !!active && !!panelRef.current?.contains(active)
+    }
+    const scheduleHide = (delay: number): void => {
+      if (hideTimer.current) return
+      hideTimer.current = setTimeout(() => {
+        hideTimer.current = undefined
+        if (panelHasKeyboardFocus() || keyboardFocusRef.current || forcedRef.current || pendingRef.current || overlayRef.current) return
+        setRevealed(false)
+      }, delay)
+    }
     const onMove = (e: MouseEvent): void => {
       const compactRecording = !!document.querySelector('[data-recording-compact]')
       if (compactRecording) {
@@ -1050,7 +1076,8 @@ export function App(): React.JSX.Element {
       const overSolid = !!el?.closest('[data-solid]')
       const overAmbient = !!el?.closest('[data-ambient-bar]')
       const edgeReveal = atTopEdge && !overAmbient
-      const forced = forcedRef.current || pendingRef.current
+      // 键盘焦点只能维持已经展开的面板，不能把用户刚收起的面板重新唤出。
+      const forced = forcedRef.current || pendingRef.current || (revealedRef.current && keyboardFocusRef.current)
       // 已经打开时的"保持区"：按面板实际矩形外扩 48px 判定（面板可高达 1020px，硬编码 260 会在下半区点按钮时误收起）；
       // 面板内点击后 1.2s 内一律保持（内容收缩把光标"甩出"面板的瞬间不触发回缩）
       const recentClick = Date.now() - lastClickRef.current < 1200
@@ -1064,25 +1091,46 @@ export function App(): React.JSX.Element {
       setIgnore(!interactive)
 
       if (edgeReveal || (overSolid && !overAmbient) || forced) {
-        if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = undefined }
+        clearHideTimer()
         if (!revealedRef.current) setRevealed(true)
       } else if (interactive) {
         // keepOpen 区内：维持显示，取消隐藏计时
-        if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = undefined }
+        clearHideTimer()
       } else if (!hideTimer.current) {
-        hideTimer.current = setTimeout(() => { hideTimer.current = undefined; setRevealed(false) }, 260)
+        scheduleHide(260)
       }
     }
     // 鼠标移出窗口：若非强制态，恢复穿透并延时隐藏（兜底，避免状态卡住）；点击后 1.2s 内同样豁免
     const onLeave = (): void => {
       if (document.querySelector('[data-recording-compact]')) { setIgnore(true); return }
-      if (forcedRef.current || pendingRef.current || overlayRef.current || Date.now() - lastClickRef.current < 1200) return
+      if (keyboardFocusRef.current || panelHasKeyboardFocus() || forcedRef.current || pendingRef.current || overlayRef.current || Date.now() - lastClickRef.current < 1200) return
       setIgnore(true)
-      if (!hideTimer.current) hideTimer.current = setTimeout(() => { hideTimer.current = undefined; setRevealed(false) }, 400)
+      scheduleHide(400)
+    }
+    const onFocusIn = (event: FocusEvent): void => {
+      if (!revealedRef.current || !panelRef.current?.contains(event.target as Node)) return
+      keyboardFocusRef.current = true
+      clearHideTimer()
+      setIgnore(false)
+    }
+    const onFocusOut = (): void => {
+      setTimeout(() => {
+        if (panelHasKeyboardFocus()) return
+        keyboardFocusRef.current = false
+        if (!forcedRef.current && !pendingRef.current && !overlayRef.current) scheduleHide(400)
+      }, 0)
     }
     window.addEventListener('mousemove', onMove)
     document.addEventListener('mouseleave', onLeave)
-    return () => { window.removeEventListener('mousemove', onMove); document.removeEventListener('mouseleave', onLeave) }
+    document.addEventListener('focusin', onFocusIn)
+    document.addEventListener('focusout', onFocusOut)
+    return () => {
+      clearHideTimer()
+      window.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseleave', onLeave)
+      document.removeEventListener('focusin', onFocusIn)
+      document.removeEventListener('focusout', onFocusOut)
+    }
   }, [])
 
   // 主面板展开（贴住/待审批/已显示）或任一覆盖层打开时 → "无条件"取消穿透（窗口可交互），无需先晃鼠标。
@@ -2644,7 +2692,7 @@ export function App(): React.JSX.Element {
                 onAutoRunDone={() => setShortcutRunId(null)}
               />
             )}
-            {tab === 'term' && <TerminalTab tall={settings.largeSize || fullscreen} full={fullscreen} agents={agents} />}
+            {tab === 'term' && <TerminalTab tall={settings.largeSize || fullscreen} full={fullscreen} agents={agents} llm={{ model: llm.model, baseUrl: llm.baseUrl, apiKey: llm.apiKey }} />}
             {tab === 'settings' && (
               <SettingsTab
                 runtimeInfo={runtimeInfo} bridgeConnected={bridgeConnected}

@@ -15,6 +15,8 @@ export interface TerminalHistoryEntry {
   command: string
   cwd?: string
   ts: number
+  exitCode?: number
+  durationMs?: number
 }
 
 export interface TerminalCwdEntry {
@@ -59,9 +61,91 @@ export function updateTerminalCwd<T extends TerminalCwdEntry>(entries: T[], id: 
 }
 
 export function extractPowerShellCwd(output: string): string | null {
-  const clean = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\r/g, '')
+  // 提示符前会带 OSC 633 退出码标记；必须在完整尾部再次清理，兼容控制序列跨 PTY chunk 拆分。
+  const clean = stripTerminalAnsi(output)
   const matches = [...clean.matchAll(/(?:^|\n)PS\s+([^\n>]+)>/g)]
   return matches.length ? matches[matches.length - 1][1].trim() : null
+}
+
+export function extractTerminalExitCode(output: string): number | null {
+  const matches = [...output.matchAll(/\x1b\]633;D;(-?\d+)\x07/g)]
+  return matches.length ? Number(matches[matches.length - 1][1]) : null
+}
+
+export function stripTerminalAnsi(output: string): string {
+  return output
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\r/g, '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+}
+
+export function terminalOutputTail(previous: string, chunk: string, maxChars: number): string {
+  const clean = stripTerminalAnsi(chunk)
+  if (!clean) return previous
+  return (previous + clean).slice(-Math.max(2_000, maxChars))
+}
+
+export function terminalProjectId(cwd?: string): string | undefined {
+  const value = cwd?.trim().replace(/[\\/]+$/, '')
+  return value ? value.toLowerCase() : undefined
+}
+
+export function isDangerousTerminalCommand(command: string): boolean {
+  const clean = command.trim().toLowerCase()
+  return [
+    /\bremove-item\b[^\n]*(?:-recurse|-force)/,
+    /\b(?:del|erase|rd|rmdir)\b[^\n]*(?:\/s|\/q)/,
+    /\bgit\s+(?:reset\s+--hard|clean\s+-[^\s]*f|push\s+[^\n]*--force)/,
+    /\bformat(?:-volume)?\b/,
+    /\bclear-disk\b/,
+    /\bstop-computer\b|\brestart-computer\b/,
+    /\b(?:npm|pnpm|yarn)\s+publish\b/
+  ].some((pattern) => pattern.test(clean))
+}
+
+export function summarizeTerminalOutput(output: string): { text: string; originalLines: number; visibleLines: number } {
+  const lines = stripTerminalAnsi(output).split('\n')
+  const compact: string[] = []
+  let previous = ''
+  let repeats = 0
+  const flush = (): void => {
+    if (repeats > 0) compact.push(`  … 相同行重复 ${repeats} 次`)
+    repeats = 0
+  }
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, '')
+    if (!line && compact.at(-1) === '') continue
+    if (line && line === previous) { repeats++; continue }
+    flush()
+    compact.push(line)
+    previous = line
+  }
+  flush()
+  return { text: compact.join('\n').trim(), originalLines: lines.length, visibleLines: compact.length }
+}
+
+export function buildTerminalDiagnosisPrompt(input: { cwd?: string; command?: string; output: string; project?: string }): string {
+  return [
+    '请作为资深 Windows/PowerShell 开发环境诊断助手分析以下终端现场。',
+    '要求：先给出最可能根因，再给出可验证步骤；建议命令必须解释风险，不得自动执行；不确定的信息明确标注。',
+    input.project ? `项目类型：${input.project}` : '',
+    input.cwd ? `工作目录：${input.cwd}` : '',
+    input.command ? `最近命令：${input.command}` : '',
+    '最近输出：',
+    input.output.slice(-12_000)
+  ].filter(Boolean).join('\n')
+}
+
+export function buildTerminalHandoffPrompt(input: { cwd?: string; history: TerminalHistoryEntry[]; output: string }): string {
+  const commands = input.history.slice(0, 12).reverse().map((item) => `- ${item.command}`).join('\n') || '- 无'
+  return [
+    '请把以下开发终端现场整理成下一次可直接继续工作的交接摘要。',
+    '固定结构：当前目标、已完成、当前状态、阻塞/风险、下一步、关键命令。不要编造未出现的事实。',
+    input.cwd ? `工作目录：${input.cwd}` : '',
+    `最近命令：\n${commands}`,
+    `最近输出：\n${input.output.slice(-12_000)}`
+  ].filter(Boolean).join('\n\n')
 }
 
 /** 只采集普通可见输入；控制键和方向键不会污染历史。 */

@@ -13,7 +13,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ```bash
 npm run dev          # 开发运行（app ready 会自动安装全局 hooks；AIISLAND_SKIP_HOOKS=1 可跳过）
 npm run typecheck    # 两套 tsconfig（node=main/preload+shared, web=renderer+shared）
-npm test             # 顺序执行 33 个离线 test-*.ts（排除真实 Claude 登录探针）
+npm test             # 顺序执行 35 个离线 test-*.ts（排除真实 Claude 登录探针）
 npm run build        # electron-vite 三端构建
 npm run package      # NSIS 安装包（原生模块经 asarUnpack **/*.node）
 npm run verify:package # 隔离启动 unpacked、静默安装/启动/卸载 NSIS
@@ -37,6 +37,9 @@ node --experimental-strip-types scripts/test-recording.ts   # 录屏几何、时
 node --experimental-strip-types scripts/test-recording-session.ts # 分片落盘与异常恢复
 node --experimental-strip-types scripts/test-recording-project.ts # v2 工程保存、复制与迁移
 node --experimental-strip-types scripts/test-recording-export-e2e.ts # 真实 FFmpeg 导出
+node --experimental-strip-types scripts/test-terminal-workspace.ts # 终端现场迁移、加密与脱敏
+node --experimental-strip-types scripts/test-terminal-project.ts # 项目任务发现与健康检查
+npm run audit:terminal # 隔离 Electron 验证输入、退出码、危险确认与恢复
 ```
 
 ## 架构总览
@@ -93,7 +96,7 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 ## 数据与持久化
 
 - 渲染层状态经 `save-state` IPC 持久化到 `userData/config.json`（DPAPI 加密，含 API Key/CalDAV 密码）。**水合只执行一次且覆盖式**（StrictMode 双调用曾致待办翻倍）。
-- 运行时发现文件/缓存：`~/.agentic-island/`（bridge.json、events.log、sound.log、tc-*.json 终端句柄缓存）。
+- 运行时发现文件/缓存：`~/.agentic-island/`（bridge.json、events.log、sound.log、tc-*.json 终端句柄缓存）。终端开发现场单独保存在 Electron `userData/terminal-workspace.json`，Windows DPAPI 可用时整体加密；输出快照默认关闭。
 - 录屏素材与工程：Electron `userData/recordings`、`userData/recording-projects`（分片 manifest + 非破坏编辑参数）。
 - AI 能力统一走 `llm-proxy`（OpenAI 兼容 /chat/completions，多轮 history，deep 模式 3000 tokens，reasoning_content 捕获，多模态 parts 带图）。
 

@@ -1,5 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import type { DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget } from '../shared/protocol'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
 
 const api: IslandBridgeApi = {
   getRuntimeInfo: () => ipcRenderer.invoke('runtime-info'),
@@ -151,7 +151,7 @@ const api: IslandBridgeApi = {
   mediaInfo: () => ipcRenderer.invoke('media-info'),
   lyricsFetch: (title: string, artist: string) => ipcRenderer.invoke('lyrics-fetch', title, artist),
   mediaKey: (cmd: string): void => ipcRenderer.send('media-key', cmd),
-  ptyEnsure: (id: string, cols: number, rows: number) => ipcRenderer.invoke('pty-ensure', id, cols, rows),
+  ptyEnsure: (id: string, cols: number, rows: number, cwd?: string, profile?: TerminalShellProfile, env?: Record<string, string>) => ipcRenderer.invoke('pty-ensure', id, cols, rows, cwd, profile, env),
   ptyInput: (id: string, data: string): void => ipcRenderer.send('pty-input', id, data),
   ptyResize: (id: string, cols: number, rows: number): void => ipcRenderer.send('pty-resize', id, cols, rows),
   ptyKill: (id: string): void => ipcRenderer.send('pty-kill', id),
@@ -160,6 +160,13 @@ const api: IslandBridgeApi = {
     ipcRenderer.on('pty-data', handler)
     return () => ipcRenderer.removeListener('pty-data', handler)
   },
+  loadTerminalWorkspace: (): Promise<TerminalWorkspaceState> => ipcRenderer.invoke('terminal-workspace-load'),
+  saveTerminalWorkspace: (state: TerminalWorkspaceState): void => ipcRenderer.send('terminal-workspace-save', state),
+  clearTerminalSnapshots: (): Promise<TerminalWorkspaceState> => ipcRenderer.invoke('terminal-workspace-clear-snapshots'),
+  inspectTerminalProject: (cwd: string) => ipcRenderer.invoke('terminal-project-inspect', cwd),
+  exportTerminalWorkspace: (state: TerminalWorkspaceState) => ipcRenderer.invoke('terminal-workspace-export', state),
+  importTerminalWorkspace: () => ipcRenderer.invoke('terminal-workspace-import'),
+  pathForFile: (file: unknown): string => webUtils.getPathForFile(file as Parameters<typeof webUtils.getPathForFile>[0]),
   onClipboard: (cb: (item: { kind: 'text' | 'image'; text?: string; dataUrl?: string }) => void): (() => void) => {
     const handler = (_e: unknown, item: { kind: 'text' | 'image'; text?: string; dataUrl?: string }): void => cb(item)
     ipcRenderer.on('clipboard-new', handler)

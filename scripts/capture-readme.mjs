@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -26,16 +26,16 @@ const demoState = {
     ruleMeetingNote: true, desktopWidget: false
   },
   workbenchProjects: [{
-    id: 'docs-project', name: 'Agentic-Island v0.6.3', repoPath: 'C:\\Work\\Agentic-Island',
+    id: 'docs-project', name: 'Agentic-Island v0.6.4', repoPath: 'C:\\Work\\Agentic-Island',
     objective: '完成桌面 Agent 工作台的产品化发布', status: 'active', colorHue: 155,
     createdAt: now - 12 * day, updatedAt: now
   }],
   activeProjectId: 'docs-project',
   todos: [
-    { id: 1, text: '完成终端输入与目录选择发布回归', done: false, status: 'doing', priority: 1, projectId: 'docs-project', project: 'Agentic-Island v0.6.3', tags: ['发布', '终端'], energy: 'deep', acceptance: '连续输入无卡顿、无尺寸抖动，目录选择可确认并切换', estimate: 90, spent: 58, due: now + 3_600_000, createdAt: now - day },
-    { id: 2, text: '复核模型与问答既有能力', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.3', tags: ['模型', '回归'], energy: 'normal', acceptance: '分支、气泡追问、模型切换和独立 RAG 保持通过', estimate: 45, createdAt: now - day },
-    { id: 3, text: '更新架构图、截图与功能矩阵', done: true, status: 'done', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.3', tags: ['文档'], estimate: 60, spent: 52, doneAt: now - 2_000_000, createdAt: now - 2 * day },
-    { id: 4, text: '验证 NSIS 安装包与 SHA-256', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.3', tags: ['发布'], energy: 'light', estimate: 25, createdAt: now }
+    { id: 1, text: '完成终端现场恢复与输入稳定性发布回归', done: false, status: 'doing', priority: 1, projectId: 'docs-project', project: 'Agentic-Island v0.6.4', tags: ['发布', '终端'], energy: 'deep', acceptance: '连续输入无抖动，主动收起不回弹，重启可恢复开发现场', estimate: 90, spent: 74, due: now + 3_600_000, createdAt: now - day },
+    { id: 2, text: '复核模型与问答既有能力', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.4', tags: ['模型', '回归'], energy: 'normal', acceptance: '分支、气泡追问、模型切换和独立 RAG 保持通过', estimate: 45, createdAt: now - day },
+    { id: 3, text: '更新架构图、截图与功能矩阵', done: true, status: 'done', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.4', tags: ['文档'], estimate: 60, spent: 52, doneAt: now - 2_000_000, createdAt: now - 2 * day },
+    { id: 4, text: '验证 NSIS 安装包与 SHA-256', done: false, status: 'todo', priority: 2, projectId: 'docs-project', project: 'Agentic-Island v0.6.4', tags: ['发布'], energy: 'light', estimate: 25, createdAt: now }
   ],
   notes: [
     { id: 11, emoji: '🧭', title: '产品原则', md: '## 不打断，但始终可控\n\n- Agent 状态必须实时可见\n- 外部操作时主动让出桌面焦点\n- 数据默认留在本机', color: 'sky', tags: ['产品', '原则'], pinned: true, createdAt: now - 4 * day, updatedAt: now },
@@ -43,8 +43,8 @@ const demoState = {
     { id: 13, emoji: '⚙️', title: '发布检查清单', md: '- [x] typecheck\n- [x] unit tests\n- [ ] NSIS installer\n- [ ] GitHub Release', color: 'mint', tags: ['发布'], later: true, createdAt: now - day, updatedAt: now }
   ],
   activeAskBranch: {
-    id: 602, title: 'v0.6.3 发布决策', parentId: 601, forkAt: 1,
-    memory: '当前目标是完成 v0.6.3 发布；必须保留气泡内追问和既有模块能力，并以真实测试和安装包为准。',
+    id: 602, title: 'v0.6.4 发布决策', parentId: 601, forkAt: 1,
+    memory: '当前目标是完成 v0.6.4 发布；必须保留气泡内追问和既有模块能力，并以真实测试和安装包为准。',
     instruction: '结论优先，风险按严重度排序；所有建议必须给出可执行验证方式。',
     createdAt: now - 180_000, updatedAt: now
   },
@@ -57,7 +57,7 @@ const demoState = {
     ]
   }],
   askThread: [
-    { role: 'user', text: '请基于当前代码和发布门禁，判断 v0.6.3 是否可以发布。', contextMode: 'pinned', ts: now - 120_000 },
+    { role: 'user', text: '请基于当前代码和发布门禁，判断 v0.6.4 是否可以发布。', contextMode: 'pinned', ts: now - 120_000 },
     {
       role: 'agent',
       blocks: [{ t: 'think', text: '先核对会话分支、上下文注入、多模型讨论和知识库写入，再检查供应商协议、配置迁移与发布门禁。' }, { t: 'h', text: '发布判断' }, { t: 'p', text: '功能面已形成完整会话闭环，当前进入发布验证阶段。必须以类型检查、33 项离线测试、三端构建、真实 Electron 可视检查和 NSIS 安装验证全部通过作为放行条件。' }, { t: 'ul', items: ['分支 Fork、切换、合并和重要上下文持久化', '气泡内追问、分析附着和异步分支隔离', 'DeepSeek/Kimi/Claude 请求协议与配置迁移', '安装包、自动更新清单和 SHA-256 一致'] }],
@@ -70,7 +70,7 @@ const demoState = {
         { role: 'user', text: '那本地阶段还缺哪一项？', ts: now - 60_000 },
         { role: 'agent', blocks: [{ t: 'p', text: '还需检查安装后首次启动、旧配置迁移和卸载清理。' }], ts: now - 50_000 }
       ],
-      suggestions: ['检查本轮变更是否完整覆盖测试', '生成 v0.6.3 发布风险矩阵'],
+      suggestions: ['检查本轮变更是否完整覆盖测试', '生成 v0.6.4 发布风险矩阵'],
       modelLabel: 'DeepSeek · deepseek-v4-pro',
       ts: now - 110_000
     }
@@ -170,7 +170,13 @@ async function waitForTarget() {
 
 const child = spawn(electron, [root, `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`], {
   cwd: root,
-  env: { ...process.env, AIISLAND_SKIP_HOOKS: '1' },
+  env: {
+    ...process.env,
+    AIISLAND_SKIP_HOOKS: '1',
+    AIISLAND_ALLOW_AUDIT_INSTANCE: '1',
+    AIISLAND_AUDIT_USER_DATA: profile,
+    AIISLAND_BRIDGE_FILE: join(profile, 'bridge.json')
+  },
   stdio: 'ignore',
   windowsHide: false
 })
@@ -217,13 +223,28 @@ try {
     })()`)
     if (!active) throw new Error(`Main tab did not switch to ${tab}`)
     if (tab === '终端') {
-      await evaluate(`window.island.ptyInput('t1', "Write-Host 'Agentic-Island v0.6.3 · ConPTY ready' -ForegroundColor Cyan; Get-Location; Get-Command git,node,npm | Select-Object Name,Version,Source\\r"); true`)
+      const terminalCwd = 'C:\\Windows\\System32'
+      const toolsOpened = await evaluate(`(() => { const button=[...document.querySelectorAll('[title]')].find((item)=>item.title?.includes('命令工具、历史与收藏')); button?.click(); return Boolean(button) })()`)
+      if (!toolsOpened) throw new Error('Terminal tools drawer was not available for documentation capture')
+      let terminalReady = false
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        terminalReady = await evaluate(`Boolean(document.querySelector('[data-terminal-workspace] input'))`)
+        if (terminalReady) break
+        await sleep(250)
+      }
+      if (!terminalReady) {
+        const diagnostic = await evaluate(`({ recovery:Boolean(document.querySelector('[data-terminal-recovery]')), workspace:Boolean(document.querySelector('[data-terminal-workspace]')), text:document.body.innerText.slice(-800) })`)
+        throw new Error(`Terminal workspace did not become ready for documentation capture: ${JSON.stringify(diagnostic)}`)
+      }
+      const cwdChanged = await evaluate(`(() => { const inputs=[...document.querySelectorAll('input')]; const input=inputs.find((item)=>item.placeholder?.includes('项目路径')) || inputs.find((item)=>item.value?.match(/^[A-Za-z]:/)); if (!input) return { value:'', inputs:inputs.map((item)=>({value:item.value,placeholder:item.placeholder})) }; const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set; setter.call(input,${JSON.stringify(terminalCwd)}); input.dispatchEvent(new Event('input',{bubbles:true})); return { value:input.value, inputs:[] } })()`)
+      if (cwdChanged?.value !== terminalCwd) throw new Error(`Terminal cwd input was not available for documentation capture: ${JSON.stringify(cwdChanged?.inputs || [])}`)
+      await sleep(100)
+      const cwdSwitched = await evaluate(`(() => { const button=document.querySelector('button[title="切换 PowerShell 当前目录"]'); button?.click(); return Boolean(button) })()`)
+      if (!cwdSwitched) throw new Error('Terminal cwd switch button was not available for documentation capture')
+      await sleep(300)
+      await evaluate(`(() => { const id = document.querySelector('[data-terminal-host]')?.dataset.terminalSessionId; if (!id) return false; window.island.ptyInput(id, "Clear-Host; Write-Host 'Agentic-Island · ConPTY ready' -ForegroundColor Cyan; Get-Location; Get-Command git,node,npm | Select-Object Name,Version,Source\\r"); return true })()`)
       await sleep(700)
-      await evaluate(`(() => {
-        const button = [...document.querySelectorAll('[title]')].find((item) => item.title?.includes('命令工具、历史与收藏'))
-        button?.click()
-        return Boolean(button)
-      })()`)
+      await evaluate(`(() => { const button=[...document.querySelectorAll('[title]')].find((item)=>item.title?.includes('命令工具、历史与收藏')); button?.click(); return Boolean(button) })()`)
       await sleep(300)
     }
     if (tab === '设置') {
@@ -257,18 +278,18 @@ try {
   }
 
   if (captureOnly === 'terminal') {
-    await capture('终端', 'terminal-v063.png')
+    await capture('终端', 'terminal-v064.png')
   } else {
-    await capture('问答', 'ask-v063.png')
+    await capture('问答', 'ask-v064.png')
   }
   if (!captureOnly) {
-    await capture('快捷', 'shortcuts-v063.png')
-    await capture('待办', 'todos-v063.png')
-    await capture('灵感便签', 'notes-v063.png')
-    await capture('资讯', 'news-v063.png')
-    await capture('复盘', 'review-v063.png')
-    await capture('设置', 'settings-v063.png')
-    await capture('终端', 'terminal-v063.png')
+    await capture('快捷', 'shortcuts-v064.png')
+    await capture('待办', 'todos-v064.png')
+    await capture('灵感便签', 'notes-v064.png')
+    await capture('资讯', 'news-v064.png')
+    await capture('复盘', 'review-v064.png')
+    await capture('设置', 'settings-v064.png')
+    await capture('终端', 'terminal-v064.png')
 
     await evaluate(`(() => {
       const button = [...document.querySelectorAll('[title]')].find((item) => item.title?.includes('录屏工坊'))
@@ -287,8 +308,8 @@ try {
       format: 'png', fromSurface: true, captureBeyondViewport: false,
       clip: { ...recordingRect, scale: 1 }
     })
-    await writeFile(join(outputDir, 'recording-v063.png'), Buffer.from(recordingShot.data, 'base64'))
-    process.stdout.write('captured recording-v063.png\n')
+    await writeFile(join(outputDir, 'recording-v064.png'), Buffer.from(recordingShot.data, 'base64'))
+    process.stdout.write('captured recording-v064.png\n')
   }
 } finally {
   try {
@@ -304,7 +325,10 @@ try {
       sleep(3_000)
     ])
   }
-  if (child.exitCode === null) child.kill()
+  if (child.exitCode === null) {
+    spawnSync('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+    await sleep(500)
+  }
   let cleanupError
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {

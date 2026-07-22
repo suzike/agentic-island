@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, screen, shell, Tray, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, safeStorage, screen, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
 import { copyFile, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
@@ -29,6 +29,8 @@ import { getMediaInfo, mediaKey } from './media'
 import { fetchRss } from './rss'
 import { netFetch } from './http-client'
 import { setPtySink, ptyEnsure, ptyInput, ptyResize, ptyKill, ptyKillAll } from './term-pty'
+import { createTerminalWorkspaceStore, terminalWorkspaceExportState } from './terminal-workspace-store'
+import { inspectTerminalProject } from './terminal-project'
 import { startClipboardWatch } from './clipboard-watch'
 import { startDndWatch } from './dnd-watch'
 import { createExternalYieldController, type ExternalYieldController } from './external-yield'
@@ -37,7 +39,7 @@ import { recordingExportSubtitleSegments, recordingHasEdits, startRecordingFfmpe
 import { RecordingSessionStore } from './recording-session-store'
 import { RecordingProjectStore } from './recording-project-store'
 import { transcribeRecordingFile } from './recording-transcription'
-import type { DecisionMessage, LlmRequestConfig, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotTarget } from '../shared/protocol'
+import type { DecisionMessage, LlmRequestConfig, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
 import { recordingWindowHandle } from '../shared/recording-source'
 
 // 允许 WebAudio 无需用户手势即可播放（提示音/试听）
@@ -52,6 +54,11 @@ let win: BrowserWindow | null = null
 let externalYield: ExternalYieldController | null = null
 let rendererDialogRelease: (() => void) | null = null
 const store = new AgentsStore()
+const terminalWorkspace = createTerminalWorkspaceStore({
+  filePath: () => join(app.getPath('userData'), 'terminal-workspace.json'),
+  encrypt: (plain) => safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(plain).toString('base64') : plain,
+  decrypt: (cipher) => safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(Buffer.from(cipher, 'base64')) : cipher
+})
 // 文档截图、安装验证和审计实例必须能隔离 discovery，避免覆盖真实 bridge.json。
 const bridge = new BridgeServer(store, gitSummary, process.env.AIISLAND_BRIDGE_FILE || undefined)
 // Codex 实时接入：跟随其 rollout 会话日志（Windows 上 hooks/notify 都不通，这是唯一可靠通道）
@@ -857,10 +864,34 @@ function wireIpc(): void {
 
   // 内嵌真 PTY 终端（ConPTY PowerShell，多标签）
   setPtySink((id, data) => win?.webContents.send('pty-data', { id, data }))
-  ipcMain.handle('pty-ensure', (_e, id: string, cols: number, rows: number) => ptyEnsure(String(id), Number(cols), Number(rows)))
+  ipcMain.handle('pty-ensure', (_e, id: string, cols: number, rows: number, cwd?: string, profile?: TerminalShellProfile, environment?: Record<string, string>) => {
+    const env = environment && typeof environment === 'object' ? Object.fromEntries(Object.entries(environment).filter(([key, value]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && typeof value === 'string').slice(0, 40)) : undefined
+    return ptyEnsure(String(id), Number(cols), Number(rows), typeof cwd === 'string' ? cwd : undefined, profile, env)
+  })
   ipcMain.on('pty-input', (_e, id: string, data: string) => ptyInput(String(id), String(data)))
   ipcMain.on('pty-resize', (_e, id: string, cols: number, rows: number) => ptyResize(String(id), Number(cols), Number(rows)))
   ipcMain.on('pty-kill', (_e, id: string) => ptyKill(String(id)))
+  ipcMain.handle('terminal-workspace-load', () => terminalWorkspace.load())
+  ipcMain.on('terminal-workspace-save', (_e, state: TerminalWorkspaceState) => terminalWorkspace.save(state))
+  ipcMain.handle('terminal-workspace-clear-snapshots', () => terminalWorkspace.clearSnapshots())
+  ipcMain.handle('terminal-project-inspect', (_e, cwd: string) => inspectTerminalProject(String(cwd || '')))
+  ipcMain.handle('terminal-workspace-export', async (_e, state: TerminalWorkspaceState) => {
+    try {
+      const clean = terminalWorkspaceExportState(state)
+      const result = await showOwnedSaveDialog({ title: '导出终端工作区', defaultPath: 'agentic-island-terminal-workspace.json', filters: [{ name: 'JSON', extensions: ['json'] }] })
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+      await writeFile(result.filePath, JSON.stringify(clean, null, 2), 'utf8')
+      return { ok: true, path: result.filePath }
+    } catch (error) { return { ok: false, error: String(error) } }
+  })
+  ipcMain.handle('terminal-workspace-import', async () => {
+    try {
+      const result = await showOwnedOpenDialog({ title: '导入终端工作区', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] })
+      if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true }
+      const raw = JSON.parse(await readFile(result.filePaths[0], 'utf8')) as TerminalWorkspaceState
+      return { ok: true, state: terminalWorkspace.save(raw) }
+    } catch (error) { return { ok: false, error: String(error) } }
+  })
   app.on('will-quit', () => { stopClipboardWatch?.(); ptyKillAll(); globalShortcut.unregisterAll() })
 
   // 智能勿扰：渲染层把最终勿扰态告知主进程（真则不自动弹窗/响铃）

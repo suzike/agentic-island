@@ -360,6 +360,101 @@ export interface DisplayInfo {
   scaleFactor: number
 }
 
+export type TerminalShellProfile = 'powershell' | 'pwsh' | 'cmd' | 'wsl'
+
+export interface TerminalSavedSession {
+  id: string
+  name: string
+  cwd?: string
+  profile: TerminalShellProfile
+  projectId?: string
+  pinned?: boolean
+  createdAt: number
+  lastActiveAt: number
+  commandCount: number
+  lastCommand?: string
+  lastExitCode?: number
+  lastDurationMs?: number
+  outputSnapshot?: string
+  outputSavedAt?: number
+  handoff?: string
+  envProfileId?: string
+}
+
+export interface TerminalCommandRecord {
+  id: number
+  sessionId: string
+  sessionName: string
+  command: string
+  cwd?: string
+  ts: number
+  exitCode?: number
+  durationMs?: number
+}
+
+export interface TerminalStartupTask {
+  id: string
+  label: string
+  command: string
+  cwd?: string
+  enabled: boolean
+  createdAt: number
+}
+
+export interface TerminalWorkspaceGroup {
+  id: string
+  name: string
+  cwd: string
+  pinned?: boolean
+  lastOpenedAt: number
+}
+
+export interface TerminalEnvironmentProfile {
+  id: string
+  name: string
+  variables: { key: string; value: string }[]
+  createdAt: number
+}
+
+export interface TerminalWorkspaceSettings {
+  restoreMode: 'prompt' | 'auto' | 'fresh'
+  captureOutput: boolean
+  redactOutput: boolean
+  retentionDays: number
+  maxSnapshotChars: number
+}
+
+export interface TerminalWorkspaceState {
+  version: 2
+  sessions: TerminalSavedSession[]
+  activeSessionId?: string
+  history: TerminalCommandRecord[]
+  favorites: string[]
+  startupTasks: TerminalStartupTask[]
+  groups: TerminalWorkspaceGroup[]
+  envProfiles: TerminalEnvironmentProfile[]
+  settings: TerminalWorkspaceSettings
+  updatedAt: number
+}
+
+export interface TerminalProjectTask {
+  id: string
+  label: string
+  command: string
+  source: 'package' | 'vscode' | 'make' | 'python' | 'dotnet' | 'rust' | 'generic'
+}
+
+export interface TerminalProjectInspection {
+  ok: boolean
+  cwd: string
+  name: string
+  kind: string[]
+  packageManager?: string
+  tasks: TerminalProjectTask[]
+  checks: { label: string; status: 'ok' | 'warn' | 'info'; detail: string }[]
+  error?: string
+}
+
 /** preload 通过 contextBridge 暴露给渲染进程的 API */
 export interface IslandBridgeApi {
   getRuntimeInfo: () => Promise<RuntimeInfo>
@@ -547,11 +642,21 @@ export interface IslandBridgeApi {
   /** 媒体键：playpause / next / prev / volup / voldown */
   mediaKey: (cmd: string) => void
   /** 内嵌真 PTY 终端（ConPTY PowerShell，多标签）：与本地终端同源，TUI/交互式 CLI 原生支持 */
-  ptyEnsure: (id: string, cols: number, rows: number) => Promise<boolean>
+  ptyEnsure: (id: string, cols: number, rows: number, cwd?: string, profile?: TerminalShellProfile, env?: Record<string, string>) => Promise<boolean>
   ptyInput: (id: string, data: string) => void
   ptyResize: (id: string, cols: number, rows: number) => void
   ptyKill: (id: string) => void
   onPtyData: (cb: (id: string, data: string) => void) => () => void
+  /** 加密持久化的终端开发现场（标签、目录、历史、可选输出快照）。 */
+  loadTerminalWorkspace: () => Promise<TerminalWorkspaceState>
+  saveTerminalWorkspace: (state: TerminalWorkspaceState) => void
+  clearTerminalSnapshots: () => Promise<TerminalWorkspaceState>
+  /** 结构化扫描当前项目可运行任务与基础健康状态。 */
+  inspectTerminalProject: (cwd: string) => Promise<TerminalProjectInspection>
+  exportTerminalWorkspace: (state: TerminalWorkspaceState) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
+  importTerminalWorkspace: () => Promise<{ ok: boolean; state?: TerminalWorkspaceState; canceled?: boolean; error?: string }>
+  /** Electron 35+ 中从拖入的 File 安全获取本地路径。 */
+  pathForFile: (file: unknown) => string
   /** 剪贴板变化推送（clipWatch 开启时主进程轮询文本与图片） */
   onClipboard: (cb: (item: { kind: 'text' | 'image'; text?: string; dataUrl?: string }) => void) => () => void
   /** 托盘"展开灵动岛"事件 */

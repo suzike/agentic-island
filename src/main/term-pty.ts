@@ -3,6 +3,8 @@
 // （Claude Code / Codex）、颜色、光标控制全部原生支持。
 
 import { homedir } from 'os'
+import { existsSync } from 'fs'
+import type { TerminalShellProfile } from '../shared/protocol'
 
 // 类型最小声明（避免给原生包再引类型依赖）
 interface IPty {
@@ -43,8 +45,15 @@ export function setPtySink(cb: (id: string, data: string) => void): void {
   sink = cb
 }
 
+function shellCommand(profile: TerminalShellProfile): { file: string; args: string[] } {
+  if (profile === 'pwsh') return { file: 'pwsh.exe', args: ['-NoLogo'] }
+  if (profile === 'cmd') return { file: 'cmd.exe', args: ['/Q'] }
+  if (profile === 'wsl') return { file: 'wsl.exe', args: [] }
+  return { file: 'powershell.exe', args: ['-NoLogo'] }
+}
+
 /** 确保会话存活；返回是否可用（原生模块加载失败时 false） */
-export function ptyEnsure(id: string, cols: number, rows: number): boolean {
+export function ptyEnsure(id: string, cols: number, rows: number, cwd?: string, profile: TerminalShellProfile = 'powershell', environment?: Record<string, string>): boolean {
   const mod = loadPty()
   if (!mod) return false
   if (sessions.has(id)) {
@@ -52,14 +61,20 @@ export function ptyEnsure(id: string, cols: number, rows: number): boolean {
     return true
   }
   const size = normalizedSize(cols, rows)
-  const p = mod.spawn('powershell.exe', ['-NoLogo'], {
-    name: 'xterm-256color',
-    cols: size.cols,
-    rows: size.rows,
-    cwd: homedir(),
-    env: process.env,
-    useConpty: true
-  })
+  const shell = shellCommand(profile)
+  let p: IPty
+  try {
+    p = mod.spawn(shell.file, shell.args, {
+      name: 'xterm-256color',
+      cols: size.cols,
+      rows: size.rows,
+      cwd: cwd && existsSync(cwd) ? cwd : homedir(),
+      env: { ...process.env, ...environment, TERM: 'xterm-256color', PYTHONUTF8: '1' },
+      useConpty: true
+    })
+  } catch {
+    return false
+  }
   sessions.set(id, p)
   sessionSizes.set(id, size)
   p.onData((data) => sink?.(id, data))
@@ -70,6 +85,9 @@ export function ptyEnsure(id: string, cols: number, rows: number): boolean {
       sessionSizes.delete(id)
     }
   })
+  if (profile === 'powershell' || profile === 'pwsh') {
+    p.write('[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();$OutputEncoding=[Console]::OutputEncoding;$global:__AIIslandPrompt=(Get-Item Function:\\prompt).ScriptBlock;function global:prompt{$__ok=$?;$__native=$global:LASTEXITCODE;$__code=if($__ok){0}elseif($__native -is [int] -and $__native -ne 0){$__native}else{1};[Console]::Write(([char]27)+"]633;D;$__code"+([char]7));&$global:__AIIslandPrompt}\r')
+  }
   return true
 }
 

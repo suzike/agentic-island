@@ -1,6 +1,6 @@
 # Agentic-Island 开发指南
 
-本文档对应 `0.6.3`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
+本文档对应 `0.6.4`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
 
 ## 1. 环境
 
@@ -28,8 +28,9 @@ npm run dev
 |---|---|
 | `npm run dev` | electron-vite 开发运行 |
 | `npm run typecheck` | 检查 main/preload/shared 与 renderer/shared |
-| `npm test` | 顺序执行 33 个离线测试脚本 |
+| `npm test` | 顺序执行 35 个离线测试脚本 |
 | `npm run build` | 构建 main、preload 和 renderer |
+| `npm run audit:terminal` | 隔离 Electron 审计真实终端输入、退出码、危险确认与恢复 |
 | `npm run docs:capture` | 使用隔离演示数据重建真实 Electron 截图 |
 | `npm run package` | 构建 NSIS 安装包到 `dist/` |
 | `npm run verify:package` | 隔离启动 unpacked、静默安装/启动/卸载 NSIS |
@@ -58,6 +59,7 @@ npm run dev
 - 网络请求优先使用 Electron `net.fetch`，以继承 Windows 系统代理。
 - xterm 输出处理不得在每个字符回显时创建 React 状态；目录、尺寸等派生状态必须先比较值并保持无变化时的引用稳定。`ResizeObserver` 触发的 fit 必须逐帧合并，ConPTY resize 必须去重。
 - 终端目录选择必须使用 `IslandBridgeApi.pickDirectory` 的原生 `openDirectory` 对话框，并继续经过 External Yield；不要用 `shell.openPath` 代替可确认的目录选择。
+- 终端持久化只能通过 `terminal-workspace-store.ts`；输出默认不保存，开启快照后必须执行字符上限、保留期和脱敏。导出不得包含输出或环境变量值。
 - 不在仓库、日志、截图或测试数据中写入 API Key、密码、Token 和个人路径内容。
 - Electron 审计、截图和安装验证实例必须设置隔离的 `AIISLAND_BRIDGE_FILE`；生产入口会把它传给 `BridgeServer`，不得覆盖真实 `~/.agentic-island/bridge.json`。
 
@@ -81,7 +83,7 @@ npm run dev
 - Embedding 的 Base URL、模型和 API Key 独立于聊天配置；知识库搜索、索引、重建和会话写入只读取 `embeddingConfig`，不得重新复用当前 `llm` 连接。
 - 模型测试和目录同步的异步结果必须校验发起时的 provider/Base URL/API Key/model，编辑配置后不得让旧响应覆盖新状态。
 - 问答逻辑变更至少运行 `test-quote.ts`；供应商目录、迁移或密钥隔离变更至少运行 `test-providers.ts`，请求参数兼容变更还需运行 `test-llm-request.ts`。
-- 终端输入、尺寸或目录切换变更至少运行 `test-terminal.ts`；新增文件/目录对话框还必须运行 `test-external-yield.ts`。
+- 终端输入、尺寸或目录切换变更至少运行 `test-terminal.ts`；现场存储和项目扫描分别运行 `test-terminal-workspace.ts`、`test-terminal-project.ts`；新增文件/目录对话框还必须运行 `test-external-yield.ts`。终端 UI 变更完成后运行 `npm run audit:terminal`。
 
 ## 6. 录屏开发约束
 

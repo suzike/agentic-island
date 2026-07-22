@@ -1,6 +1,6 @@
 # Agentic-Island 发布指南
 
-本文档对应 `0.6.3` 的 Windows NSIS 发布流程。
+本文档对应 `0.6.4` 的 Windows NSIS 发布流程。
 
 ## 1. 发布前审查
 
@@ -10,7 +10,7 @@
 - `npm audit --omit=dev` 无已知生产依赖漏洞。
 - 本地模型、FFmpeg、hooks 和图标资源均存在。
 - 问答分支、气泡内追问、上下文、知识库写入、独立 Embedding 连接与供应商/账号配置迁移的回归测试通过。
-- 终端字符回显不会触发重复 React 状态，xterm/ConPTY 尺寸通知已去重，原生目录选择与 External Yield 回归通过。
+- 终端字符回显不会触发重复 React 状态，xterm/ConPTY 尺寸通知已去重；目录选择、工作区导入导出与 External Yield 回归通过；恢复、退出码、危险确认和工具分区通过隔离 Electron 审计。
 
 ## 2. 发布门禁
 
@@ -18,6 +18,7 @@
 npm run typecheck
 npm test
 npm run build
+npm run audit:terminal
 npm run docs:capture
 npm audit --omit=dev
 npm run package

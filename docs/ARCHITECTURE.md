@@ -1,6 +1,6 @@
-# Agentic-Island v0.6.3 架构说明
+# Agentic-Island v0.6.4 架构说明
 
-本文档描述当前 `0.6.3` 实现，以工作区源码和自动化测试为准。
+本文档描述当前 `0.6.4` 实现，以工作区源码和自动化测试为准。
 
 ## 1. 设计目标
 
@@ -161,6 +161,11 @@
 - xterm `FitAddon` 由 `ResizeObserver` 驱动，但连续通知会合并到同一绘制帧；实际尺寸变化由 xterm resize 事件发送，主进程再次按 `cols/rows` 去重后才调用 ConPTY resize。
 - 工作目录可手动输入，也可通过类型化 `pickDirectory` IPC 打开原生 Windows 目录选择器；选中路径使用 `Set-Location -LiteralPath` 和单引号转义切换。
 - 原生目录对话框复用 External Yield 的 `suspendTopmost` 引用计数，避免最高层灵动岛遮挡选择窗口。
+- `terminal-workspace-store.ts` 版本化保存标签、目录、Shell、历史、工作区、启动任务、环境配置和可选输出快照；原子写入 `userData/terminal-workspace.json`，Windows DPAPI 可用时整体加密。
+- 恢复中心只创建新 PTY 并从保存目录启动，不伪造已终止的进程；历史输出会明确标记为快照，旧命令只有在用户勾选启动任务后才运行。
+- PowerShell 5.1/7 提示符通过不可见 OSC 标记回传退出码，同时保留用户原提示符；CMD/WSL 不支持该标记时保持未知状态。
+- 项目任务扫描结构化读取 package scripts、VS Code tasks、Make、Python、Rust 和 .NET 入口；危险命令在渲染层进入行内二次确认。
+- 终端 AI 只读取当前目录、最近命令和有上限的输出尾部，生成诊断、交接或下一步建议，不自动执行命令。
 
 快捷编排支持以下步骤：
 
@@ -186,11 +191,13 @@
 
 Bridge 发现、诊断和终端窗口句柄缓存位于 `~/.agentic-island/`。知识库索引位于 Electron `userData`，不进入仓库。
 
+终端现场位于 `userData/terminal-workspace.json`。输出快照默认关闭；开启后按保留天数/字符上限裁剪并脱敏。工作区 JSON 导出不包含输出快照和环境变量值。
+
 录屏素材与工程位于 Electron `userData/recordings` 和 `userData/recording-projects`。录制会话使用顺序分片和 manifest，异常中断后可以恢复；工程只保存编辑参数和素材引用。
 
 ## 10. 测试策略
 
-`npm test` 当前顺序执行 33 个离线 `scripts/test-*.ts`，排除必须依赖真实 Claude 登录的 `test-real-claude.ts`。模型设置测试覆盖旧配置迁移、供应商与账号密钥隔离、Kimi 双端点、GPT-5.6、Claude 5/4.8、独立 Embedding 迁移和请求参数兼容；录屏测试覆盖几何合成、帧预算、暂停时钟、字幕、FFmpeg 参数、真实 FFmpeg 导出、分片会话与工程迁移。直接被 raw Node 加载的主进程模块不得在顶层运行时导入 Electron，也不得使用 strip-types 不支持的 TypeScript enum 或参数属性。
+`npm test` 当前顺序执行 35 个离线 `scripts/test-*.ts`，排除必须依赖真实 Claude 登录的 `test-real-claude.ts`。终端测试覆盖输入解析、危险命令、输出折叠、工作区迁移/脱敏和项目任务扫描；`npm run audit:terminal` 另行启动隔离 Electron 验证真实输入几何、退出码、危险确认和重启恢复。模型设置测试覆盖旧配置迁移、供应商与账号密钥隔离、Kimi 双端点、GPT-5.6、Claude 5/4.8、独立 Embedding 迁移和请求参数兼容；录屏测试覆盖几何合成、帧预算、暂停时钟、字幕、FFmpeg 参数、真实 FFmpeg 导出、分片会话与工程迁移。直接被 raw Node 加载的主进程模块不得在顶层运行时导入 Electron，也不得使用 strip-types 不支持的 TypeScript enum 或参数属性。
 
 发布门禁：
 
