@@ -545,6 +545,11 @@ export function App(): React.JSX.Element {
   const anyOverlay = capsuleOpen || paletteOpen || brainOpen || kbOpen || !!studio || themeDesignerOpen || calcOpen || learnOpen || !!shotImg || !!shotStudio
   const overlayRef = useRef(false); overlayRef.current = anyOverlay
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const holdPanelForTerminal = useCallback((): void => {
+    if (!revealedRef.current) return
+    keyboardFocusRef.current = true
+    if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = undefined }
+  }, [])
 
   // 记录每个待审批请求的起始时间
   useEffect(() => {
@@ -2692,7 +2697,7 @@ export function App(): React.JSX.Element {
                 onAutoRunDone={() => setShortcutRunId(null)}
               />
             )}
-            {tab === 'term' && <TerminalTab tall={settings.largeSize || fullscreen} full={fullscreen} agents={agents} llm={{ model: llm.model, baseUrl: llm.baseUrl, apiKey: llm.apiKey }} />}
+            {tab === 'term' && <TerminalTab tall={settings.largeSize || fullscreen} full={fullscreen} agents={agents} llm={{ model: llm.model, baseUrl: llm.baseUrl, apiKey: llm.apiKey }} onKeyboardActivity={holdPanelForTerminal} />}
             {tab === 'settings' && (
               <SettingsTab
                 runtimeInfo={runtimeInfo} bridgeConnected={bridgeConnected}

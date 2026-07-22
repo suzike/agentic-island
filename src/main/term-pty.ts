@@ -34,6 +34,8 @@ const sessions = new Map<string, IPty>()
 const sessionSizes = new Map<string, { cols: number; rows: number }>()
 let sink: ((id: string, data: string) => void) | null = null
 
+export const POWERSHELL_BOOTSTRAP = '[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();$OutputEncoding=[Console]::OutputEncoding;$global:__AIIslandPrompt=(Get-Item Function:\\prompt).ScriptBlock;function global:prompt{$__ok=$?;$__native=$global:LASTEXITCODE;$__code=if($__ok){0}elseif($__native -is [int] -and $__native -ne 0){$__native}else{1};[Console]::Write(([char]27)+"]633;D;$__code"+([char]7));&$global:__AIIslandPrompt}'
+
 function normalizedSize(cols: number, rows: number): { cols: number; rows: number } {
   return {
     cols: Math.max(20, Number.isFinite(cols) ? Math.round(cols) : 100),
@@ -46,10 +48,10 @@ export function setPtySink(cb: (id: string, data: string) => void): void {
 }
 
 function shellCommand(profile: TerminalShellProfile): { file: string; args: string[] } {
-  if (profile === 'pwsh') return { file: 'pwsh.exe', args: ['-NoLogo'] }
+  if (profile === 'pwsh') return { file: 'pwsh.exe', args: ['-NoLogo', '-NoExit', '-Command', POWERSHELL_BOOTSTRAP] }
   if (profile === 'cmd') return { file: 'cmd.exe', args: ['/Q'] }
   if (profile === 'wsl') return { file: 'wsl.exe', args: [] }
-  return { file: 'powershell.exe', args: ['-NoLogo'] }
+  return { file: 'powershell.exe', args: ['-NoLogo', '-NoExit', '-Command', POWERSHELL_BOOTSTRAP] }
 }
 
 /** 确保会话存活；返回是否可用（原生模块加载失败时 false） */
@@ -85,9 +87,6 @@ export function ptyEnsure(id: string, cols: number, rows: number, cwd?: string, 
       sessionSizes.delete(id)
     }
   })
-  if (profile === 'powershell' || profile === 'pwsh') {
-    p.write('[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();$OutputEncoding=[Console]::OutputEncoding;$global:__AIIslandPrompt=(Get-Item Function:\\prompt).ScriptBlock;function global:prompt{$__ok=$?;$__native=$global:LASTEXITCODE;$__code=if($__ok){0}elseif($__native -is [int] -and $__native -ne 0){$__native}else{1};[Console]::Write(([char]27)+"]633;D;$__code"+([char]7));&$global:__AIIslandPrompt}\r')
-  }
   return true
 }
 

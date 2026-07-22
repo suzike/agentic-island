@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { POWERSHELL_BOOTSTRAP } from '../src/main/term-pty.ts'
 import { buildTerminalDiagnosisPrompt, buildTerminalHandoffPrompt, consumeTerminalInput, extractPowerShellCwd, extractTerminalExitCode, isDangerousTerminalCommand, quotePowerShellLiteral, setLocationCommand, stripTerminalAnsi, summarizeTerminalOutput, terminalOutputTail, terminalProjectId, TERMINAL_COMMANDS, updateTerminalCwd } from '../src/renderer/src/logic/terminal.ts'
 
 assert.equal(quotePowerShellLiteral("E:\\O'Brien\\repo"), "'E:\\O''Brien\\repo'")
@@ -9,6 +10,8 @@ assert.equal(extractPowerShellCwd('\r\n\x1b]633;D;0\x07PS C:\\Windows\\System32>
 assert.equal(extractPowerShellCwd('普通输出'), null)
 assert.equal(extractTerminalExitCode('\x1b]633;D;17\x07'), 17)
 assert.equal(extractTerminalExitCode('普通输出'), null)
+assert.match(POWERSHELL_BOOTSTRAP, /\]633;D;/)
+assert.doesNotMatch(POWERSHELL_BOOTSTRAP, /`e/)
 
 const tabs = [{ id: 't1', cwd: 'E:\\work' }, { id: 't2' }]
 assert.equal(updateTerminalCwd(tabs, 't1', 'E:\\work'), tabs, '相同目录必须保持原引用，避免字符回显触发重渲染')

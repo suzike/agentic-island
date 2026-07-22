@@ -1,6 +1,6 @@
 # Agentic-Island 开发指南
 
-本文档对应 `0.6.4`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
+本文档对应 `0.6.5`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
 
 ## 1. 环境
 
@@ -83,7 +83,7 @@ npm run dev
 - Embedding 的 Base URL、模型和 API Key 独立于聊天配置；知识库搜索、索引、重建和会话写入只读取 `embeddingConfig`，不得重新复用当前 `llm` 连接。
 - 模型测试和目录同步的异步结果必须校验发起时的 provider/Base URL/API Key/model，编辑配置后不得让旧响应覆盖新状态。
 - 问答逻辑变更至少运行 `test-quote.ts`；供应商目录、迁移或密钥隔离变更至少运行 `test-providers.ts`，请求参数兼容变更还需运行 `test-llm-request.ts`。
-- 终端输入、尺寸或目录切换变更至少运行 `test-terminal.ts`；现场存储和项目扫描分别运行 `test-terminal-workspace.ts`、`test-terminal-project.ts`；新增文件/目录对话框还必须运行 `test-external-yield.ts`。终端 UI 变更完成后运行 `npm run audit:terminal`。
+- 终端输入、尺寸、Shell 启动或目录切换变更至少运行 `test-terminal.ts`；现场存储和项目扫描分别运行 `test-terminal-workspace.ts`、`test-terminal-project.ts`；新增文件/目录对话框还必须运行 `test-external-yield.ts`。终端 UI 变更完成后运行 `npm run audit:terminal`，确认第一、第二 PowerShell 会话逐字符输入均稳定且可回传退出码。
 
 ## 6. 录屏开发约束
 

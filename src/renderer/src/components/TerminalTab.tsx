@@ -293,7 +293,7 @@ function AgentCard({ a, now }: { a: AgentVM; now: number }): React.JSX.Element {
   )
 }
 
-export function TerminalTab({ tall, full, agents, llm }: { tall: boolean; full?: boolean; agents: AgentVM[]; llm: LlmRequestConfig }): React.JSX.Element {
+export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { tall: boolean; full?: boolean; agents: AgentVM[]; llm: LlmRequestConfig; onKeyboardActivity?: () => void }): React.JSX.Element {
   const [tabs, setTabs] = useState<TermTab[]>(persisted.tabs)
   const [active, setActive] = useState(persisted.active)
   const [workspaceReady, setWorkspaceReady] = useState(workspaceHandled)
@@ -591,11 +591,13 @@ export function TerminalTab({ tall, full, agents, llm }: { tall: boolean; full?:
     scheduleFit()
     const ro = new ResizeObserver(scheduleFit)
     ro.observe(host)
+    onKeyboardActivity?.()
     s.term.focus()
     return () => { if (fitFrame) cancelAnimationFrame(fitFrame); ro.disconnect() }
-  }, [active, tall, full, searchOpen, workspaceReady, recordCommand])
+  }, [active, tall, full, searchOpen, workspaceReady, recordCommand, onKeyboardActivity])
 
   const addTab = (): void => {
+    onKeyboardActivity?.()
     const tab = newTerminalTab(tabs.length + 1, activeTab?.cwd, shellProfile, selectedEnvProfile || undefined)
     setTabs((list) => [...list, tab])
     setActive(tab.id)
@@ -768,7 +770,7 @@ export function TerminalTab({ tall, full, agents, llm }: { tall: boolean; full?:
                 type="button"
                 role="tab"
                 aria-selected={sel}
-                onClick={() => setActive(t.id)}
+                onClick={() => { onKeyboardActivity?.(); setActive(t.id) }}
                 onDoubleClick={() => setRenaming(t.id)}
                 className="hv"
                 style={{ appearance: 'none', border: sel ? `0.5px solid ${accent(0.7, 0.35)}` : '0.5px solid transparent', flex: 'none', display: 'flex', alignItems: 'center', gap: 5, height: 27, padding: '0 8px', borderRadius: R.sm, cursor: 'pointer', transition: transition('background, border-color'), background: sel ? semBg(accent(), 0.16) : fill(1), color: sel ? ink(1) : ink(2), fontFamily: 'inherit' }}

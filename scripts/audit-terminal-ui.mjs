@@ -65,10 +65,17 @@ try {
   }
   const clickText = async (text) => evaluate(`(() => { const el = [...document.querySelectorAll('button')].find((item) => item.textContent?.trim().startsWith(${JSON.stringify(text)})); el?.click(); return Boolean(el) })()`)
   const ensurePanelOpen = async () => {
-    const shown = await evaluate(`document.querySelector('[role="tablist"]')?.closest('[data-solid]')?.style.transform.startsWith('translateY(0')`)
-    if (!shown) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (await evaluate(`Boolean(document.querySelector('[role="tablist"]'))`)) break
+      await sleep(100)
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (await evaluate(`document.querySelector('[role="tablist"]')?.closest('[data-solid]')?.style.transform.startsWith('translateY(0')`)) return
       await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'\\u0060',ctrlKey:true,bubbles:true}));true`)
-      await sleep(650)
+      for (let poll = 0; poll < 12; poll += 1) {
+        await sleep(100)
+        if (await evaluate(`document.querySelector('[role="tablist"]')?.closest('[data-solid]')?.style.transform.startsWith('translateY(0')`)) return
+      }
     }
     assert.equal(await evaluate(`document.querySelector('[role="tablist"]')?.closest('[data-solid]')?.style.transform.startsWith('translateY(0')`), true, '灵动岛应处于展开状态')
   }
@@ -99,6 +106,25 @@ try {
   const after = await evaluate(`(() => { const host=document.querySelector('[data-terminal-host]');const rect=host.getBoundingClientRect();const outer=host.closest('.ai-scroll');const frame=document.querySelector('[data-terminal-frame]').getBoundingClientRect();return {x:rect.x,y:rect.y,width:rect.width,height:rect.height,scrollTop:outer?.scrollTop,frameY:frame.y,text:document.body.innerText} })()`)
   assert.deepEqual({ x: after.x, y: after.y, width: after.width, height: after.height, scrollTop: after.scrollTop, frameY: after.frameY }, before, '终端输入不得引起画布晃动或缩放')
   assert.match(after.text, /exit 0/, 'PowerShell 提示符应回传命令退出码')
+
+  const firstSessionId = await evaluate(`document.querySelector('[data-terminal-host]')?.dataset.terminalSessionId`)
+  assert.equal(await evaluate(`(() => { const button=document.querySelector('[title^="新建终端标签"]');button?.click();return Boolean(button) })()`), true)
+  await sleep(140)
+  const secondSessionId = await evaluate(`document.querySelector('[data-terminal-host]')?.dataset.terminalSessionId`)
+  assert.notEqual(secondSessionId, firstSessionId, '新建终端标签后必须切换到独立会话')
+  assert.equal(await evaluate(`document.body.innerText.includes('__AIIslandPrompt')`), false, 'PowerShell 初始化脚本不得回显到新终端')
+  await evaluate(`document.querySelector('.xterm-helper-textarea')?.focus({preventScroll:true});true`)
+  const secondSamples = []
+  for (const character of "Write-Output 'second-terminal-audit'") {
+    await cdp.send('Input.insertText', { text: character })
+    await sleep(24)
+    secondSamples.push(await evaluate(`(() => { const host=document.querySelector('[data-terminal-host]');const frame=document.querySelector('[data-terminal-frame]');const screen=document.querySelector('.xterm-screen');const outer=host.closest('.ai-scroll');const hr=host.getBoundingClientRect();const fr=frame.getBoundingClientRect();const sr=screen.getBoundingClientRect();return {session:host.dataset.terminalSessionId,hostX:hr.x,hostY:hr.y,hostW:hr.width,hostH:hr.height,frameY:fr.y,screenW:sr.width,screenH:sr.height,scrollTop:outer?.scrollTop,transform:frame.closest('[data-solid]')?.style.transform} })()`))
+  }
+  assert.equal(new Set(secondSamples.map((sample) => JSON.stringify(sample))).size, 1, `第二终端逐字符输入期间几何发生变化：${JSON.stringify(secondSamples)}`)
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  await sleep(500)
+  assert.match(await evaluate('document.body.innerText'), /exit 0/, '第二终端输入必须被 PowerShell 接收并正常执行')
 
   assert.equal(await evaluate(`(() => { const button=[...document.querySelectorAll('[title]')].find((item)=>item.title?.includes('命令工具、历史与收藏'));button?.click();return Boolean(button) })()`), true)
   await sleep(250)
