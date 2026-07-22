@@ -749,6 +749,20 @@ function wireIpc(): void {
     if (!target || target.length > 4096 || hasNul(target)) return
     void openPathTarget(target)
   })
+  ipcMain.handle('pick-directory', async (_e, initialPath?: string) => {
+    try {
+      const suggested = String(initialPath || '').trim()
+      const r = await showOwnedOpenDialog({
+        title: '选择 PowerShell 工作目录',
+        properties: ['openDirectory', 'createDirectory'],
+        ...(suggested && suggested.length <= 4096 && !hasNul(suggested) ? { defaultPath: suggested } : {})
+      })
+      if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+      return { ok: true, path: r.filePaths[0] }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 
   ipcMain.handle('capture-screen', async () => {
     const url = await captureScreenDataUrl()

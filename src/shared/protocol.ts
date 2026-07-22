@@ -538,6 +538,8 @@ export interface IslandBridgeApi {
   gitStatus: (dir: string) => Promise<{ ok: boolean; branch?: string; dirty?: number; commit?: string; subject?: string; when?: string; ahead?: number; behind?: number; error?: string }>
   /** 在资源管理器打开文件夹 */
   openFolder: (dir: string) => void
+  /** 使用系统目录选择器选择工作文件夹 */
+  pickDirectory: (initialPath?: string) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   /** 系统正在播放的媒体（SMTC：标题/歌手/播放态/封面），无播放返回 null */
   mediaInfo: () => Promise<{ title: string; artist: string; playing: boolean; thumb: string } | null>
   /** 按曲名+歌手拉取 LRC 歌词（lrclib.net，失败返回 ok:false） */

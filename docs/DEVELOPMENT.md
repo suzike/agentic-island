@@ -1,6 +1,6 @@
 # Agentic-Island 开发指南
 
-本文档对应 `0.6.2`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
+本文档对应 `0.6.3`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
 
 ## 1. 环境
 
@@ -56,6 +56,8 @@ npm run dev
 - 新 UI 使用 `ui/tokens.ts` 和 `ui/components.tsx`；不在业务组件手写新的主题色体系。
 - 不使用浏览器原生 `prompt/alert/confirm`，Electron 渲染层必须提供行内或自定义弹层。
 - 网络请求优先使用 Electron `net.fetch`，以继承 Windows 系统代理。
+- xterm 输出处理不得在每个字符回显时创建 React 状态；目录、尺寸等派生状态必须先比较值并保持无变化时的引用稳定。`ResizeObserver` 触发的 fit 必须逐帧合并，ConPTY resize 必须去重。
+- 终端目录选择必须使用 `IslandBridgeApi.pickDirectory` 的原生 `openDirectory` 对话框，并继续经过 External Yield；不要用 `shell.openPath` 代替可确认的目录选择。
 - 不在仓库、日志、截图或测试数据中写入 API Key、密码、Token 和个人路径内容。
 - Electron 审计、截图和安装验证实例必须设置隔离的 `AIISLAND_BRIDGE_FILE`；生产入口会把它传给 `BridgeServer`，不得覆盖真实 `~/.agentic-island/bridge.json`。
 
@@ -79,6 +81,7 @@ npm run dev
 - Embedding 的 Base URL、模型和 API Key 独立于聊天配置；知识库搜索、索引、重建和会话写入只读取 `embeddingConfig`，不得重新复用当前 `llm` 连接。
 - 模型测试和目录同步的异步结果必须校验发起时的 provider/Base URL/API Key/model，编辑配置后不得让旧响应覆盖新状态。
 - 问答逻辑变更至少运行 `test-quote.ts`；供应商目录、迁移或密钥隔离变更至少运行 `test-providers.ts`，请求参数兼容变更还需运行 `test-llm-request.ts`。
+- 终端输入、尺寸或目录切换变更至少运行 `test-terminal.ts`；新增文件/目录对话框还必须运行 `test-external-yield.ts`。
 
 ## 6. 录屏开发约束
 

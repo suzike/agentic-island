@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import type { AgentVM } from '../types'
 import { island } from '../bridge'
-import { consumeTerminalInput, extractPowerShellCwd, setLocationCommand, TERMINAL_COMMANDS, type TerminalCommandGroup, type TerminalHistoryEntry } from '../logic/terminal'
+import { consumeTerminalInput, extractPowerShellCwd, setLocationCommand, TERMINAL_COMMANDS, updateTerminalCwd, type TerminalCommandGroup, type TerminalHistoryEntry } from '../logic/terminal'
 import { Badge, Button, Chip, IconButton, Input, Segmented } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
@@ -43,6 +43,7 @@ const historyStore: TerminalHistoryEntry[] = []
 let commandObserver: ((id: string, command: string) => void) | null = null
 let cwdObserver: ((id: string, cwd: string) => void) | null = null
 const outputTails = new Map<string, string>()
+const observedCwds = new Map<string, string>()
 let subscribed = false
 
 function getSession(id: string): Session {
@@ -107,7 +108,10 @@ function subscribeOnce(): void {
     const tail = ((outputTails.get(id) || '') + data).slice(-1200)
     outputTails.set(id, tail)
     const cwd = extractPowerShellCwd(tail)
-    if (cwd) cwdObserver?.(id, cwd)
+    if (cwd && observedCwds.get(id) !== cwd) {
+      observedCwds.set(id, cwd)
+      cwdObserver?.(id, cwd)
+    }
   })
 }
 
@@ -269,7 +273,7 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
 
   useEffect(() => {
     commandObserver = recordCommand
-    cwdObserver = (id, cwd) => setTabs((list) => list.map((tab) => tab.id === id && tab.cwd !== cwd ? { ...tab, cwd } : tab))
+    cwdObserver = (id, cwd) => setTabs((list) => updateTerminalCwd(list, id, cwd))
     return () => {
       if (commandObserver === recordCommand) commandObserver = null
       cwdObserver = null
@@ -290,7 +294,19 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
     const path = cwdDraft.trim()
     if (!path) return
     runCommand(setLocationCommand(path))
-    setTabs((list) => list.map((tab) => tab.id === active ? { ...tab, cwd: path } : tab))
+    setTabs((list) => updateTerminalCwd(list, active, path))
+  }
+
+  const chooseDirectory = async (): Promise<void> => {
+    const result = await island.pickDirectory(cwdDraft.trim() || activeTab?.cwd)
+    if (!result.ok || !result.path) {
+      getSession(active).term.focus()
+      return
+    }
+    const selectedPath = result.path
+    setCwdDraft(selectedPath)
+    runCommand(setLocationCommand(selectedPath))
+    setTabs((list) => updateTerminalCwd(list, active, selectedPath))
   }
 
   const toggleFavorite = (command: string): void => {
@@ -347,20 +363,30 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
     const s = getSession(active)
     host.innerHTML = ''
     host.appendChild(s.el)
+    let fitFrame = 0
+    let ensured = false
     const doFit = (): void => {
+      fitFrame = 0
       try {
         s.fit.fit()
-        setDims({ cols: s.term.cols, rows: s.term.rows })
-        void island.ptyEnsure(active, s.term.cols, s.term.rows).then((ok) => setPtyOk(ok))
-        island.ptyResize(active, s.term.cols, s.term.rows)
+        const cols = s.term.cols
+        const rows = s.term.rows
+        setDims((current) => current.cols === cols && current.rows === rows ? current : { cols, rows })
+        if (!ensured) {
+          ensured = true
+          void island.ptyEnsure(active, cols, rows).then((ok) => setPtyOk(ok))
+        }
       } catch { /* */ }
     }
-    // 等布局稳定再 fit
-    const raf = requestAnimationFrame(doFit)
-    const ro = new ResizeObserver(() => doFit())
+    const scheduleFit = (): void => {
+      if (!fitFrame) fitFrame = requestAnimationFrame(doFit)
+    }
+    // 等布局稳定再 fit；ResizeObserver 的连续通知合并到同一绘制帧。
+    scheduleFit()
+    const ro = new ResizeObserver(scheduleFit)
     ro.observe(host)
     s.term.focus()
-    return () => { cancelAnimationFrame(raf); ro.disconnect() }
+    return () => { if (fitFrame) cancelAnimationFrame(fitFrame); ro.disconnect() }
   }, [active, tall, full, searchOpen])
 
   const addTab = (): void => {
@@ -374,6 +400,7 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
     if (s) { s.term.dispose(); sessions.delete(id) }
     inputBuffers.delete(id)
     outputTails.delete(id)
+    observedCwds.delete(id)
     const remaining = tabs.filter((t) => t.id !== id)
     const next = remaining.length ? remaining : [{ id: 't' + Date.now(), name: 'PowerShell 1', createdAt: Date.now() }]
     setTabs(next)
@@ -440,7 +467,7 @@ export function TerminalTab({ tall, full, agents }: { tall: boolean; full?: bool
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                 <Input value={cwdDraft} onChange={setCwdDraft} onKeyDown={(e) => { if (e.key === 'Enter') changeDirectory() }} placeholder={activeTab?.cwd || '输入项目路径，例如 E:\\work\\repo'} icon={Folder} style={{ flex: 1, minWidth: 0 }} />
                 <Button sm icon={CornerDownRight} onClick={changeDirectory} disabled={!cwdDraft.trim()} title="切换 PowerShell 当前目录">切换</Button>
-                <IconButton icon={FolderOpen} onClick={() => activeTab?.cwd && island.openFolder(activeTab.cwd)} disabled={!activeTab?.cwd} title="在资源管理器打开当前目录" size={28} />
+                <IconButton icon={FolderOpen} onClick={() => { void chooseDirectory() }} title="选择并切换 PowerShell 工作目录" size={28} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <Segmented options={[{ key: 'commands' as const, label: '命令', icon: TerminalIcon }, { key: 'history' as const, label: `历史 ${history.length}`, icon: History }, { key: 'favorites' as const, label: `收藏 ${favorites.length}`, icon: Star }]} value={toolView} onChange={setToolView} />

@@ -29,7 +29,15 @@ function loadPty(): PtyModule | null {
 }
 
 const sessions = new Map<string, IPty>()
+const sessionSizes = new Map<string, { cols: number; rows: number }>()
 let sink: ((id: string, data: string) => void) | null = null
+
+function normalizedSize(cols: number, rows: number): { cols: number; rows: number } {
+  return {
+    cols: Math.max(20, Number.isFinite(cols) ? Math.round(cols) : 100),
+    rows: Math.max(5, Number.isFinite(rows) ? Math.round(rows) : 28)
+  }
+}
 
 export function setPtySink(cb: (id: string, data: string) => void): void {
   sink = cb
@@ -39,20 +47,28 @@ export function setPtySink(cb: (id: string, data: string) => void): void {
 export function ptyEnsure(id: string, cols: number, rows: number): boolean {
   const mod = loadPty()
   if (!mod) return false
-  if (sessions.has(id)) return true
+  if (sessions.has(id)) {
+    ptyResize(id, cols, rows)
+    return true
+  }
+  const size = normalizedSize(cols, rows)
   const p = mod.spawn('powershell.exe', ['-NoLogo'], {
     name: 'xterm-256color',
-    cols: Math.max(20, cols || 100),
-    rows: Math.max(5, rows || 28),
+    cols: size.cols,
+    rows: size.rows,
     cwd: homedir(),
     env: process.env,
     useConpty: true
   })
   sessions.set(id, p)
+  sessionSizes.set(id, size)
   p.onData((data) => sink?.(id, data))
   p.onExit(({ exitCode }) => {
     sink?.(id, `\r\n\x1b[90m[会话已退出 code=${exitCode}，输入任意内容自动重启]\x1b[0m\r\n`)
-    sessions.delete(id)
+    if (sessions.get(id) === p) {
+      sessions.delete(id)
+      sessionSizes.delete(id)
+    }
   })
   return true
 }
@@ -63,12 +79,19 @@ export function ptyInput(id: string, data: string): void {
 }
 
 export function ptyResize(id: string, cols: number, rows: number): void {
-  try { sessions.get(id)?.resize(Math.max(20, cols), Math.max(5, rows)) } catch { /* */ }
+  const size = normalizedSize(cols, rows)
+  const current = sessionSizes.get(id)
+  if (current?.cols === size.cols && current.rows === size.rows) return
+  try {
+    sessions.get(id)?.resize(size.cols, size.rows)
+    if (sessions.has(id)) sessionSizes.set(id, size)
+  } catch { /* */ }
 }
 
 export function ptyKill(id: string): void {
   try { sessions.get(id)?.kill() } catch { /* */ }
   sessions.delete(id)
+  sessionSizes.delete(id)
 }
 
 export function ptyKillAll(): void {

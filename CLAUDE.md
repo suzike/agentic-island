@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm run dev          # 开发运行（app ready 会自动安装全局 hooks；AIISLAND_SKIP_HOOKS=1 可跳过）
 npm run typecheck    # 两套 tsconfig（node=main/preload+shared, web=renderer+shared）
-npm test             # 顺序执行 32 个离线 test-*.ts（排除真实 Claude 登录探针）
+npm test             # 顺序执行 33 个离线 test-*.ts（排除真实 Claude 登录探针）
 npm run build        # electron-vite 三端构建
 npm run package      # NSIS 安装包（原生模块经 asarUnpack **/*.node）
 npm run verify:package # 隔离启动 unpacked、静默安装/启动/卸载 NSIS

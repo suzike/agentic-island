@@ -1,6 +1,6 @@
 # Screenshots
 
-`*-v060.png` 是 Agentic-Island `0.6.0` 的真实 Electron 界面截图。
+`*-v063.png` 是 Agentic-Island `0.6.3` 的真实 Electron 界面截图。
 
 这些图片由以下命令生成：
 
@@ -13,11 +13,12 @@ npm run docs:capture
 
 | 文件 | 页面 |
 |---|---|
-| `ask-v060.png` | 问答（会话分支、上下文、多模型协作） |
-| `shortcuts-v060.png` | 快捷 |
-| `todos-v060.png` | 待办 |
-| `notes-v060.png` | 灵感便签 |
-| `news-v060.png` | 资讯 |
-| `review-v060.png` | 复盘 |
-| `settings-v060.png` | 设置 |
-| `recording-v060.png` | 专业录屏工坊 |
+| `ask-v063.png` | 问答（会话分支、上下文、多模型协作） |
+| `shortcuts-v063.png` | 快捷 |
+| `todos-v063.png` | 待办 |
+| `notes-v063.png` | 灵感便签 |
+| `news-v063.png` | 资讯 |
+| `review-v063.png` | 复盘 |
+| `settings-v063.png` | 设置 |
+| `terminal-v063.png` | PowerShell ConPTY 终端与工作目录工具 |
+| `recording-v063.png` | 专业录屏工坊 |

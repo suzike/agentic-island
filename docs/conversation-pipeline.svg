@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
-  <title id="title">Agentic-Island v0.6.2 问答会话增强管线</title>
+  <title id="title">Agentic-Island v0.6.3 问答会话增强管线</title>
   <desc id="desc">从活动分支、上下文组装、多模型协作到知识库沉淀的完整数据流。</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#d59a50"/></marker>

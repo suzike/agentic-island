@@ -8,5 +8,5 @@
   <rect class="b" x="705" y="145" width="175" height="105" fill="#201b2d" stroke="#806bb0"/><text class="t l" x="728" y="180">打开外部目标</text><text class="t m s" x="728" y="207">系统浏览器 / Explorer</text><text class="t m s" x="728" y="229">原生文件选择器</text>
   <rect class="b" x="925" y="145" width="230" height="105" fill="#302019" stroke="#a96549"/><text class="t l" x="948" y="180">按场景恢复</text><text class="t m s" x="948" y="207">普通打开：1.4 秒后恢复顶部入口</text><text class="t m s" x="948" y="229">模态对话框：关闭后才恢复</text>
   <path class="p" d="M220 198H265"/><path class="p" d="M440 198H485"/><path class="p" d="M660 198H705"/><path class="p" d="M880 198H925"/>
-  <rect x="265" y="315" width="615" height="75" rx="13" fill="#181430" stroke="#332a52"/><text class="t l" x="290" y="345">一致性保证</text><text class="t m s" x="290" y="369">主进程统一包装外部入口；重复 hold 采用引用计数；dispose 清理计时器；完整面板不会自动重新展开</text>
+  <rect x="265" y="315" width="615" height="75" rx="13" fill="#181430" stroke="#332a52"/><text class="t l" x="290" y="345">一致性保证</text><text class="t m s" x="290" y="369">网页、路径、文件/目录对话框统一包装；hold 引用计数；dispose 清理；完整面板不自动重开</text>
 </svg>

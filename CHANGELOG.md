@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-07-22
+
+### Changed
+
+- PowerShell 工具栏的文件夹入口改为 Windows 原生目录选择器；确认后对路径进行 PowerShell literal 转义，并立即切换当前 ConPTY 会话的工作目录。
+- 目录选择器接入统一 External Yield 原生对话框包装，打开期间降低灵动岛最高层级，关闭后恢复。
+
+### Fixed
+
+- 修复 PTY 每次字符回显都会从旧提示符重复识别相同目录、创建新标签数组并触发终端模块重渲染的问题。
+- 修复 `ResizeObserver` 连续通知、xterm resize 事件和显式 IPC resize 叠加造成的输入行抖动与 ConPTY 无效重排。
+- 主进程现在记录每个 PTY 的最后尺寸并忽略重复 resize；会话退出或关闭时同步清理尺寸状态。
+
+### Verification
+
+- 新增终端目录状态引用稳定性和原生目录选择器 External Yield 接入回归。
+- 两套 TypeScript 检查、33 个离线测试、Electron 三端生产构建、真实 Electron 连续输入几何检查、NSIS 打包及隔离安装/启动/卸载验证通过。
+
 ## [0.6.2] - 2026-07-21
 
 ### Changed

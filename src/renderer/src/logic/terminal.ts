@@ -17,6 +17,11 @@ export interface TerminalHistoryEntry {
   ts: number
 }
 
+export interface TerminalCwdEntry {
+  id: string
+  cwd?: string
+}
+
 export const TERMINAL_COMMANDS: TerminalCommandPreset[] = [
   { id: 'location', group: '项目', label: '当前位置', command: 'Get-Location', description: '显示当前工作目录' },
   { id: 'files', group: '项目', label: '目录详情', command: 'Get-ChildItem -Force', description: '列出包含隐藏项的目录内容' },
@@ -42,6 +47,15 @@ export function quotePowerShellLiteral(value: string): string {
 
 export function setLocationCommand(path: string): string {
   return `Set-Location -LiteralPath ${quotePowerShellLiteral(path.trim())}`
+}
+
+/** 目录未变化时保留原数组引用，避免 PTY 每次字符回显都触发 React 重渲染。 */
+export function updateTerminalCwd<T extends TerminalCwdEntry>(entries: T[], id: string, cwd: string): T[] {
+  const index = entries.findIndex((entry) => entry.id === id)
+  if (index < 0 || entries[index].cwd === cwd) return entries
+  const next = entries.slice()
+  next[index] = { ...entries[index], cwd }
+  return next
 }
 
 export function extractPowerShellCwd(output: string): string | null {

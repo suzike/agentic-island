@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
-<title id="title">Agentic-Island v0.6.2 总体架构</title>
+<title id="title">Agentic-Island v0.6.3 总体架构</title>
   <desc id="desc">展示 Agent 接入、Electron 主进程、预加载桥、React 工作台和本地数据边界。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#f0a233"/></marker>
@@ -9,7 +9,7 @@
     </style>
   </defs>
   <rect width="1200" height="720" fill="#100d1a"/>
-<text class="t head" x="48" y="52">Agentic-Island v0.6.2 · Windows 本地优先桌面架构</text>
+<text class="t head" x="48" y="52">Agentic-Island v0.6.3 · Windows 本地优先桌面架构</text>
   <text class="t muted small" x="48" y="78">Electron 39 · React 19 · TypeScript · loopback bridge · contextIsolation · DPAPI</text>
 
   <g filter="url(#shadow)">
@@ -25,7 +25,7 @@
     <rect class="box" x="339" y="184" width="156" height="72" fill="#1c1733" stroke="#e89a2e"/><text class="t small" x="357" y="211">Bridge Server</text><text class="t muted small" x="357" y="232">随机端口 + token</text>
     <rect class="box" x="515" y="184" width="156" height="72" fill="#1c1733" stroke="#e89a2e"/><text class="t small" x="533" y="211">Agents Store</text><text class="t muted small" x="533" y="232">会话状态机 / 审批</text>
     <rect class="box" x="339" y="274" width="156" height="72" fill="#1f1a38" stroke="#c9884a"/><text class="t small" x="357" y="301">External Yield</text><text class="t muted small" x="357" y="322">外部应用焦点让位</text>
-<rect class="box" x="515" y="274" width="156" height="72" fill="#1f1a38" stroke="#c9884a"/><text class="t small" x="533" y="301">ConPTY / Media</text><text class="t muted small" x="533" y="322">终端 · 截图 · 录屏</text>
+<rect class="box" x="515" y="274" width="156" height="72" fill="#1f1a38" stroke="#c9884a"/><text class="t small" x="533" y="301">ConPTY / Native UI</text><text class="t muted small" x="533" y="322">终端 · 目录选择 · 媒体</text>
     <rect class="box" x="339" y="364" width="156" height="72" fill="#282414" stroke="#d9a441"/><text class="t small" x="357" y="391">LLM / RAG</text><text class="t muted small" x="357" y="412">独立聊天 / Embedding</text>
     <rect class="box" x="515" y="364" width="156" height="72" fill="#282414" stroke="#d9a441"/><text class="t small" x="533" y="391">Integrations</text><text class="t muted small" x="533" y="412">Git · RSS · 日历 · GitHub</text>
 <rect class="box" x="339" y="454" width="332" height="90" fill="#201b2d" stroke="#806bb0"/><text class="t small" x="357" y="482">Encrypted local state</text><text class="t muted small" x="357" y="505">safeStorage / Windows DPAPI · 原子写入</text><text class="t muted small" x="357" y="526">KB 索引 · 录屏素材/工程 · 诊断日志</text>

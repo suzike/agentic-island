@@ -147,6 +147,7 @@ const api: IslandBridgeApi = {
   saveText: (content: string, name: string, ext: string) => ipcRenderer.invoke('save-text', content, name, ext),
   gitStatus: (dir: string) => ipcRenderer.invoke('git-status', dir),
   openFolder: (dir: string): void => ipcRenderer.send('open-folder', dir),
+  pickDirectory: (initialPath?: string) => ipcRenderer.invoke('pick-directory', initialPath),
   mediaInfo: () => ipcRenderer.invoke('media-info'),
   lyricsFetch: (title: string, artist: string) => ipcRenderer.invoke('lyrics-fetch', title, artist),
   mediaKey: (cmd: string): void => ipcRenderer.send('media-key', cmd),

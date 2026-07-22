@@ -1,6 +1,6 @@
-# Agentic-Island v0.6.2 架构说明
+# Agentic-Island v0.6.3 架构说明
 
-本文档描述当前 `0.6.2` 实现，以工作区源码和自动化测试为准。
+本文档描述当前 `0.6.3` 实现，以工作区源码和自动化测试为准。
 
 ## 1. 设计目标
 
@@ -156,6 +156,11 @@
 ## 8. 终端与快捷执行
 
 终端基于 `@lydell/node-pty` N-API 预编译包和 Windows ConPTY。主进程持有 PTY 生命周期，渲染进程使用 xterm 展示和输入，多标签切换不会终止后台进程。
+
+- PTY 输出尾部只在 PowerShell 提示符目录真实变化时更新标签状态；相同目录保持原数组引用，避免每次字符回显触发 React 重渲染。
+- xterm `FitAddon` 由 `ResizeObserver` 驱动，但连续通知会合并到同一绘制帧；实际尺寸变化由 xterm resize 事件发送，主进程再次按 `cols/rows` 去重后才调用 ConPTY resize。
+- 工作目录可手动输入，也可通过类型化 `pickDirectory` IPC 打开原生 Windows 目录选择器；选中路径使用 `Set-Location -LiteralPath` 和单引号转义切换。
+- 原生目录对话框复用 External Yield 的 `suspendTopmost` 引用计数，避免最高层灵动岛遮挡选择窗口。
 
 快捷编排支持以下步骤：
 
