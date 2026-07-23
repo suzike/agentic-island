@@ -1,6 +1,6 @@
 # 快捷指令编排平台 · 第一阶段：图内核 Implementation Plan
 
-> **文档状态（2026-07-23）：历史实施基线。** 本文保留 2026-07-08 的阶段计划与决策过程，不作为 `v0.6.5` 当前能力清单。现行工程约束、模块边界和验证命令以 [开发指南](../../DEVELOPMENT.md) 与 [架构说明](../../ARCHITECTURE.md) 为准。
+> **文档状态（2026-07-23）：历史实施基线。** 本文保留 2026-07-08 的阶段计划与决策过程，不作为 `v0.6.6` 当前能力清单。现行工程约束、模块边界和验证命令以 [开发指南](../../DEVELOPMENT.md) 与 [架构说明](../../ARCHITECTURE.md) 为准。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

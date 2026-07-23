@@ -169,16 +169,6 @@ export function historyFromThread(msgs: ChatMessage[], limit = 12, memory = ''):
   return history
 }
 
-export const ADVANCE_PROMPTS = {
-  critique: '请严格审查你上一条回答：找出逻辑漏洞、遗漏、错误前提和不够可执行之处，然后给出修正后的结论。',
-  assumptions: '请把上一条回答中的显式假设、隐含假设、不确定信息和主要风险逐项列出，并说明如何验证。',
-  alternatives: '请不要重复上一条方案，提出至少三条原理不同的替代路径，比较适用条件、代价和失败模式。',
-  decompose: '请把上一条回答拆成可独立讨论的子问题，标出依赖关系，并先处理最关键的一个。',
-  socratic: '请切换为苏格拉底式协作：不要直接下结论，先提出能显著改变方案选择的关键问题。',
-  ground: '请结合当前已接入知识库重新核验上一条回答，只保留有知识依据的结论，明确指出无法证实的部分。',
-  suggest: '请基于当前完整会话生成 4 个高价值的下一问。问题要推动决策或实施，不重复已回答内容。只输出 JSON 字符串数组。'
-} as const
-
 export function branchMergePrompt(title: string, msgs: ChatMessage[]): string {
   return `请把分支「${title}」压缩成可合并进另一条会话的长期上下文。保留已确认事实、关键推理、分歧、约束和未解决问题；删除寒暄与重复。\n\n${conversationToMarkdown(msgs).slice(0, 30000)}`
 }

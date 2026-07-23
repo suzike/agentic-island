@@ -1,6 +1,6 @@
 # Agentic-Island 开发指南
 
-本文档对应 `0.6.5`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
+本文档对应 `0.6.6`。产品功能以源码、`README.md`、`docs/ARCHITECTURE.md` 和自动化测试为准。
 
 ## 1. 环境
 
@@ -28,7 +28,7 @@ npm run dev
 |---|---|
 | `npm run dev` | electron-vite 开发运行 |
 | `npm run typecheck` | 检查 main/preload/shared 与 renderer/shared |
-| `npm test` | 顺序执行 35 个离线测试脚本 |
+| `npm test` | 顺序执行 36 个离线测试脚本 |
 | `npm run build` | 构建 main、preload 和 renderer |
 | `npm run audit:terminal` | 隔离 Electron 审计真实终端输入、退出码、危险确认与恢复 |
 | `npm run docs:capture` | 使用隔离演示数据重建真实 Electron 截图 |
@@ -82,7 +82,7 @@ npm run dev
 - DeepSeek V4 快速/深度模式必须显式映射 thinking；Kimi K3 必须保持 thinking 并映射 effort；GPT-5.6 使用 `max_completion_tokens` 和 reasoning effort，不发送旧 `max_tokens`/`temperature`；Anthropic 官方端点必须使用原生 Messages 协议和 `x-api-key`，Claude 5/4.8 的思考控制必须按型号能力映射。
 - Embedding 的 Base URL、模型和 API Key 独立于聊天配置；知识库搜索、索引、重建和会话写入只读取 `embeddingConfig`，不得重新复用当前 `llm` 连接。
 - 模型测试和目录同步的异步结果必须校验发起时的 provider/Base URL/API Key/model，编辑配置后不得让旧响应覆盖新状态。
-- 问答逻辑变更至少运行 `test-quote.ts`；供应商目录、迁移或密钥隔离变更至少运行 `test-providers.ts`，请求参数兼容变更还需运行 `test-llm-request.ts`。
+- 问答逻辑变更至少运行 `test-quote.ts`；回答/分析方法变更还需运行 `test-methodologies.ts` 与 `npm run audit:ask`；供应商目录、迁移或密钥隔离变更至少运行 `test-providers.ts`，请求参数兼容变更还需运行 `test-llm-request.ts`。
 - 终端输入、尺寸、Shell 启动或目录切换变更至少运行 `test-terminal.ts`；现场存储和项目扫描分别运行 `test-terminal-workspace.ts`、`test-terminal-project.ts`；新增文件/目录对话框还必须运行 `test-external-yield.ts`。终端 UI 变更完成后运行 `npm run audit:terminal`，确认第一、第二 PowerShell 会话逐字符输入均稳定且可回传退出码。
 
 ## 6. 录屏开发约束

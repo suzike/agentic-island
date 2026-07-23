@@ -125,9 +125,22 @@ export interface ChatMessage {
   suggestions?: string[]
   /** 围绕本条回答生成的独立分析；不作为新的用户轮次，也不自动进入后续上下文。 */
   analyses?: AnswerAnalysis[]
+  /** 本轮提问显式选择的回答方法；只控制对应回答，不作为后续问题的隐藏指令。 */
+  answerMethodId?: AnswerMethodId
+  answerMethodLabel?: string
 }
 
-export type AnswerAnalysisAction = 'critique' | 'assumptions' | 'alternatives' | 'decompose' | 'socratic' | 'ground' | 'suggest' | 'council'
+export type AnswerMethodId =
+  | 'pyramid' | 'mece' | 'first-principles' | 'feynman' | 'socratic-answer'
+  | 'decision-matrix' | 'systems-thinking' | 'scientific-method' | 'scenario-planning'
+  | 'six-thinking-hats' | 'jobs-to-be-done' | 'design-thinking' | 'triz' | 'ooda' | 'rfc-adr'
+
+export type AnswerAnalysisAction =
+  | 'critique' | 'assumptions' | 'alternatives' | 'decompose' | 'socratic' | 'ground' | 'suggest'
+  | 'evidence-audit' | 'red-team' | 'steelman' | 'premortem' | 'fmea' | 'second-order'
+  | 'sensitivity' | 'causal-map' | 'five-whys' | 'constraints' | 'opportunity-cost'
+  | 'stakeholder-map' | 'counterfactual' | 'scenario-stress' | 'decision-matrix' | 'verification-plan'
+  | 'council'
 
 export interface AnswerAnalysis {
   id: string
@@ -148,6 +161,8 @@ export interface Composer {
   attachments: Attachment[]
   recording: boolean
   recTime: string
+  /** 仅作用于下一次发送；发送后随 composer 一起恢复默认。 */
+  answerMethodId?: AnswerMethodId
 }
 
 /** 问答历史会话（归档的对话） */
@@ -385,6 +400,8 @@ export interface ChatProps {
   onQuick?: (t: string) => void
   onText: (v: string) => void
   onSend: () => void
+  answerMethodId?: AnswerMethodId
+  onAnswerMethodChange?: (methodId?: AnswerMethodId) => void
   onAttach: (type: 'screenshot' | 'file', payload?: { name?: string; thumb?: string; content?: string; dataUrl?: string }) => void
   onRecord?: (v: boolean) => void
   onRemoveAtt: (i: number) => void

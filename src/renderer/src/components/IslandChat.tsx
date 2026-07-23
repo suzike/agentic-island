@@ -5,10 +5,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowUp, Brain, Camera, Check, ChevronDown, Copy, CornerDownRight, Database, EyeOff, GitFork, GitMerge, Image as ImageIcon, Library, ListTree, MoreHorizontal, Paperclip, Pin, Quote, RefreshCw, Settings, ShieldCheck, Sparkles, Square, Users, WandSparkles, Wrench, X } from 'lucide-react'
+import { ArrowUp, Brain, Camera, Check, ChevronDown, Copy, CornerDownRight, Database, EyeOff, GitFork, GitMerge, Image as ImageIcon, Library, ListTree, MoreHorizontal, Paperclip, Pin, Quote, RefreshCw, Scale, Settings, ShieldCheck, Sparkles, Square, Users, WandSparkles, Wrench, X } from 'lucide-react'
 import type { AnswerAnalysis, AnswerAnalysisAction, Block, ChatMessage, ChatProps, QuoteRef } from '../types'
 import { Markdown, Collapsible } from './Markdown'
 import { blocksToText, conversationContextStats } from '../logic/chat'
+import { ANALYSIS_METHOD_GROUPS, ANALYSIS_METHODS, ANSWER_METHOD_GROUPS, ANSWER_METHODS, analysisMethodById, answerMethodById, recommendAnalysisMethods, recommendAnswerMethods, type AnalysisMethodGroup, type AnswerMethodGroup } from '../logic/methodologies'
 import { readAttachment, downscaleDataUrl, selectLocalFiles } from '../logic/files'
 import { island } from '../bridge'
 import { Button, Chip, IconButton } from '../ui/components'
@@ -19,15 +20,15 @@ import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, 
 const AttIcon = ({ t, size = 12 }: { t: string; size?: number }): React.JSX.Element =>
   t === 'file' ? <Paperclip size={size} strokeWidth={1.75} /> : <Camera size={size} strokeWidth={1.75} />
 
-const ANSWER_ANALYSIS_ACTIONS = [
-  ['critique', ShieldCheck, '检查漏洞', '找出论证、事实或结论中的薄弱点'],
-  ['assumptions', Brain, '检查前提', '列出隐含假设、依赖条件与风险'],
-  ['alternatives', GitFork, '寻找替代方案', '给出不同实现路径并比较取舍'],
-  ['decompose', ListTree, '拆成步骤', '把复杂问题分解成可执行的小步骤'],
-  ['socratic', Quote, '反问澄清', '找出需要你进一步确认的信息'],
-  ['ground', Library, '用资料核对', '用已接入的知识库验证关键结论'],
-  ['suggest', WandSparkles, '推荐下一步', '生成值得继续追问的问题']
-] as const
+const methodGroupIcon = (group: AnswerMethodGroup | AnalysisMethodGroup): typeof ListTree => {
+  if (group === 'structure') return ListTree
+  if (group === 'reasoning') return Brain
+  if (group === 'decision') return Scale
+  if (group === 'innovation') return Sparkles
+  if (group === 'evidence') return Database
+  if (group === 'risk') return ShieldCheck
+  return Wrench
+}
 
 /** 打字中三点脉冲 */
 function TypingDots(): React.JSX.Element {
@@ -220,15 +221,23 @@ function AnswerAnalyses({ items }: { items: AnswerAnalysis[] }): React.JSX.Eleme
   useEffect(() => { setActive(items[items.length - 1]?.id || '') }, [items.length, items[items.length - 1]?.id])
   const current = items.find((item) => item.id === active) || items[items.length - 1]
   if (!current) return <></>
+  const method = current.action === 'council' ? undefined : analysisMethodById(current.action)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 8, ...surface.inset(), borderRadius: R.md }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
         <ShieldCheck size={11} strokeWidth={1.9} style={{ color: accent(), flex: 'none' }} />
-        <span style={{ color: ink(2), fontSize: FS.tiny, fontWeight: 700 }}>独立分析</span>
+        <span style={{ color: ink(2), fontSize: FS.tiny, fontWeight: 700 }}>气泡分析</span>
         {items.map((item) => <Chip key={item.id} active={item.id === current.id} onClick={() => setActive(item.id)}>{item.label}</Chip>)}
         <span style={{ flex: 1 }} />
         <span style={{ ...text.faint(), fontSize: 9 }}>不改变主回答和会话上下文</span>
       </div>
+      {method && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: ink(3), fontSize: 9.5 }}>
+          <span style={{ color: accent(0.82), fontWeight: 650 }}>{method.framework}</span>
+          <span>·</span>
+          <span>{method.outcome}</span>
+        </div>
+      )}
       <div style={{ padding: '2px 3px' }}><AnswerBody blocks={current.blocks} /></div>
     </div>
   )
@@ -341,6 +350,9 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
   const [messageMenuIdx, setMessageMenuIdx] = useState<number | null>(null)
   const [pendingForkIdx, setPendingForkIdx] = useState<number | null>(null)
   const [analysisBusy, setAnalysisBusy] = useState<{ msgIndex: number; action: Exclude<AnswerAnalysisAction, 'council'>; label: string } | null>(null)
+  const [answerMethodOpen, setAnswerMethodOpen] = useState(false)
+  const [answerMethodGroup, setAnswerMethodGroup] = useState<AnswerMethodGroup | 'recommended'>('recommended')
+  const [analysisGroup, setAnalysisGroup] = useState<AnalysisMethodGroup | 'recommended'>('recommended')
   const [councilBusy, setCouncilBusy] = useState(false)
   const [rename, setRename] = useState('')
   const [notice, setNotice] = useState('')
@@ -354,6 +366,12 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
 
   const contextStats = useMemo(() => conversationContextStats(p.messages, p.memory || ''), [p.messages, p.memory])
   const lastQuestion = useMemo(() => [...p.messages].reverse().find((message) => message.role === 'user' && message.text?.trim())?.text?.trim() || '', [p.messages])
+  const selectedAnswerMethod = useMemo(() => answerMethodById(p.answerMethodId), [p.answerMethodId])
+  const answerMethodRecommendations = useMemo(() => recommendAnswerMethods(composer.text || lastQuestion), [composer.text, lastQuestion])
+  const visibleAnswerMethods = useMemo(
+    () => answerMethodGroup === 'recommended' ? answerMethodRecommendations : ANSWER_METHODS.filter((method) => method.group === answerMethodGroup),
+    [answerMethodGroup, answerMethodRecommendations]
+  )
   const orderedBranches = useMemo(() => {
     const branches = p.branch?.branches || []
     const children = new Map<number | undefined, typeof branches>()
@@ -389,6 +407,8 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
     setMessageMenuIdx(null)
     setPendingForkIdx(null)
     setAnalysisBusy(null)
+    setAnswerMethodOpen(false)
+    setAnalysisGroup('recommended')
     setCouncilBusy(false)
     setPanel(null)
   }, [p.branch?.activeId])
@@ -654,6 +674,12 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                     {m.text}
                   </div>
                 )}
+                {m.answerMethodLabel && (
+                  <span title="本轮回答采用的方法，只影响紧随其后的回答" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: R.pill, background: semBg(accent(), 0.12), color: accent(0.84), fontSize: 9, fontWeight: 650 }}>
+                    <WandSparkles size={9} strokeWidth={2} />
+                    回答方法 · {m.answerMethodLabel}
+                  </span>
+                )}
                 <ContextStatus mode={m.contextMode} />
                 {/* 用户消息只留一个明确的二级入口。 */}
                 <div className="row-acts" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -739,29 +765,57 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                     </div>
                   )}
                   {messageMenuIdx === mi && (
-                    <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 5, padding: 6, ...surface.inset() }}>
-                      {p.onSetContextMode && <Button variant="ghost" sm onClick={() => { changeContextMode(mi, m.contextMode === 'pinned' ? 'normal' : 'pinned'); setMessageMenuIdx(null) }}><Pin size={11} />{m.contextMode === 'pinned' ? '取消重要标记' : '标为重要内容'}</Button>}
-                      {p.onSetContextMode && <Button variant="ghost" sm onClick={() => { changeContextMode(mi, m.contextMode === 'excluded' ? 'normal' : 'excluded'); setMessageMenuIdx(null) }}><EyeOff size={11} />{m.contextMode === 'excluded' ? '恢复给模型' : '不再发送给模型'}</Button>}
-                      {p.onSaveKnowledge && <Button variant="ghost" sm disabled={knowledgeBusy} onClick={() => { void saveKnowledge('message', mi); setMessageMenuIdx(null) }}><Library size={11} />保存这条回答</Button>}
+                    <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 5, padding: 7, ...surface.inset() }}>
+                      <span style={{ gridColumn: '1 / -1', ...text.overline(), padding: '1px 3px' }}>上下文</span>
+                      {p.onSetContextMode && <Button variant="ghost" sm onClick={() => { changeContextMode(mi, m.contextMode === 'pinned' ? 'normal' : 'pinned'); setMessageMenuIdx(null) }}><Pin size={11} />{m.contextMode === 'pinned' ? '取消重要标记' : '后续持续参考'}</Button>}
+                      {p.onSetContextMode && <Button variant="ghost" sm onClick={() => { changeContextMode(mi, m.contextMode === 'excluded' ? 'normal' : 'excluded'); setMessageMenuIdx(null) }}><EyeOff size={11} />{m.contextMode === 'excluded' ? '恢复给模型' : '后续不再发送'}</Button>}
+                      <span style={{ gridColumn: '1 / -1', ...text.overline(), padding: '4px 3px 1px' }}>继续使用</span>
+                      {p.onAddQuote && <Button variant="ghost" sm onClick={() => { p.onAddQuote?.({ text: blocksToText(m.blocks || []) }); flash('整条回答已作为引用放入输入区'); setMessageMenuIdx(null) }}><Quote size={11} />引用整条回答</Button>}
                       {p.onFork && <Button variant="ghost" sm disabled={p.busy} onClick={() => { setPendingForkIdx(mi); setMessageMenuIdx(null) }}><GitFork size={11} />从这里建分支</Button>}
-                      <Button variant="ghost" sm onClick={() => { copyText(blocksToText(m.blocks!)); setMessageMenuIdx(null) }}><Copy size={11} />复制回答</Button>
+                      <span style={{ gridColumn: '1 / -1', ...text.overline(), padding: '4px 3px 1px' }}>沉淀与复用</span>
+                      {p.onSaveKnowledge && <Button variant="ghost" sm disabled={knowledgeBusy} onClick={() => { void saveKnowledge('message', mi); setMessageMenuIdx(null) }}><Library size={11} />保存到知识库</Button>}
+                      <Button variant="ghost" sm onClick={() => { copyText(blocksToText(m.blocks || [])); flash('回答已复制'); setMessageMenuIdx(null) }}><Copy size={11} />复制回答</Button>
                     </motion.div>
                   )}
                   {pendingForkIdx === mi && <ForkConfirmation onCancel={() => setPendingForkIdx(null)} onConfirm={() => { setPendingForkIdx(null); p.onFork?.(mi) }} />}
-                  {advanceIdx === mi && p.onAdvance && (
-                    <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 5, padding: 7, ...surface.inset() }}>
-                      <div style={{ gridColumn: '1 / -1', ...text.faint(), fontSize: FS.tiny, lineHeight: 1.45, padding: '1px 2px 3px' }}>选择一种处理方式。结果固定显示在当前回答下方，不会新增用户消息，也不会自动改变后续上下文。</div>
-                      {ANSWER_ANALYSIS_ACTIONS.map(([action, Icon, label, detail]) => (
-                        <button key={action} type="button" disabled={!!analysisBusy || p.busy} onClick={() => runAnswerAnalysis(mi, action, label)} className="hv" style={{ display: 'grid', gridTemplateColumns: '26px minmax(0, 1fr)', gap: 7, alignItems: 'center', minHeight: 48, padding: '6px 8px', border: 'none', borderRadius: R.md, background: fill(1), color: ink(1), textAlign: 'left', fontFamily: 'var(--font)', cursor: analysisBusy || p.busy ? 'default' : 'pointer', opacity: analysisBusy || p.busy ? 0.55 : 1 }}>
-                          <span style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent() }}><Icon size={12} strokeWidth={1.9} /></span>
-                          <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            <span style={{ fontSize: FS.small, fontWeight: 650 }}>{label}</span>
-                            <span style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.35 }}>{detail}</span>
-                          </span>
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
+                  {advanceIdx === mi && p.onAdvance && (() => {
+                    const question = [...p.messages.slice(0, mi)].reverse().find((message) => message.role === 'user' && message.text?.trim())?.text || ''
+                    const recommended = recommendAnalysisMethods(question, blocksToText(m.blocks || []))
+                    const methods = analysisGroup === 'recommended' ? recommended : ANALYSIS_METHODS.filter((method) => method.group === analysisGroup)
+                    return (
+                      <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 8, ...surface.inset() }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+                          <ShieldCheck size={13} strokeWidth={2} style={{ color: accent(), flex: 'none', marginTop: 1 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ color: ink(1), fontSize: FS.small, fontWeight: 700 }}>回答分析中心</div>
+                            <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.4 }}>方法会围绕当前气泡生成独立分析，不新增主消息、不改变后续上下文。同一方法再次执行会替换旧结果。</div>
+                          </div>
+                        </div>
+                        <div className="ai-scroll" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 1 }}>
+                          <Chip active={analysisGroup === 'recommended'} onClick={() => setAnalysisGroup('recommended')} style={{ flex: 'none' }}><Sparkles size={9} />智能推荐</Chip>
+                          {ANALYSIS_METHOD_GROUPS.map((group) => <Chip key={group.id} active={analysisGroup === group.id} onClick={() => setAnalysisGroup(group.id)} style={{ flex: 'none' }}>{group.label}</Chip>)}
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(250px, 100%), 1fr))', gap: 5 }}>
+                          {methods.map((method) => {
+                            const Icon = methodGroupIcon(method.group)
+                            return (
+                              <button key={method.id} type="button" disabled={!!analysisBusy || p.busy} onClick={() => runAnswerAnalysis(mi, method.id, method.label)} className="hv" style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr)', gap: 7, alignItems: 'start', minHeight: 70, padding: '7px 8px', border: 'none', borderRadius: R.md, background: fill(1), color: ink(1), textAlign: 'left', fontFamily: 'var(--font)', cursor: analysisBusy || p.busy ? 'default' : 'pointer', opacity: analysisBusy || p.busy ? 0.55 : 1 }}>
+                                <span style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent() }}><Icon size={13} strokeWidth={1.9} /></span>
+                                <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, flexWrap: 'wrap' }}>
+                                    <strong style={{ fontSize: FS.small }}>{method.label}</strong>
+                                    <span style={{ ...text.faint(), fontSize: 8.5 }}>{method.framework}</span>
+                                  </span>
+                                  <span style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.35 }}>{method.description}</span>
+                                  <span style={{ color: accent(0.8), fontSize: 9, lineHeight: 1.3 }}>产出：{method.outcome}</span>
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </motion.div>
+                    )
+                  })()}
                   {(m.suggestions?.length || 0) > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 3 }}>
                       <span style={{ ...text.overline() }}>可继续追问</span>
@@ -848,6 +902,61 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                 {q}
               </Chip>
             ))}
+          </div>
+        )}
+
+        {p.onAnswerMethodChange && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 7 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <span style={{ ...text.overline(), flex: 'none' }}>本轮回答方法</span>
+              <Chip
+                icon={WandSparkles}
+                active={answerMethodOpen || !!selectedAnswerMethod}
+                onClick={() => setAnswerMethodOpen((open) => !open)}
+                title="选择一种方法控制下一条回答的组织和推理方式"
+                style={{ minWidth: 0, maxWidth: 190 }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedAnswerMethod?.label || '默认回答'}</span>
+              </Chip>
+              {selectedAnswerMethod && <span style={{ minWidth: 0, flex: 1, ...text.faint(), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedAnswerMethod.outcome}</span>}
+              {!selectedAnswerMethod && <span style={{ flex: 1, ...text.faint(), fontSize: 9.5 }}>不套用方法模板</span>}
+              {selectedAnswerMethod && <IconButton icon={X} title="恢复默认回答" size={22} onClick={() => p.onAnswerMethodChange?.(undefined)} style={{ flex: 'none' }} />}
+            </div>
+            {answerMethodOpen && (
+              <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 8, ...surface.inset() }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+                  <WandSparkles size={13} strokeWidth={2} style={{ color: accent(), flex: 'none', marginTop: 1 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: ink(1), fontSize: FS.small, fontWeight: 700 }}>选择这一问的回答方法</div>
+                    <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.4 }}>仅影响下一次发送，回答气泡会记录所用方法；发送完成后自动恢复默认。</div>
+                  </div>
+                  <Button variant="ghost" sm onClick={() => { p.onAnswerMethodChange?.(undefined); setAnswerMethodOpen(false) }}>使用默认</Button>
+                </div>
+                <div className="ai-scroll" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 1 }}>
+                  <Chip active={answerMethodGroup === 'recommended'} onClick={() => setAnswerMethodGroup('recommended')} style={{ flex: 'none' }}><Sparkles size={9} />智能推荐</Chip>
+                  {ANSWER_METHOD_GROUPS.map((group) => <Chip key={group.id} active={answerMethodGroup === group.id} onClick={() => setAnswerMethodGroup(group.id)} style={{ flex: 'none' }}>{group.label}</Chip>)}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(250px, 100%), 1fr))', gap: 5 }}>
+                  {visibleAnswerMethods.map((method) => {
+                    const Icon = methodGroupIcon(method.group)
+                    const active = method.id === p.answerMethodId
+                    return (
+                      <button key={method.id} type="button" onClick={() => { p.onAnswerMethodChange?.(method.id); setAnswerMethodOpen(false) }} className="hv" style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr)', gap: 7, alignItems: 'start', minHeight: 72, padding: '7px 8px', border: `0.5px solid ${active ? accent(0.7, 0.5) : hairline(0.06)}`, borderRadius: R.md, background: active ? semBg(accent(), 0.13) : fill(1), color: ink(1), textAlign: 'left', fontFamily: 'var(--font)', cursor: 'pointer' }}>
+                        <span style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent() }}><Icon size={13} strokeWidth={1.9} /></span>
+                        <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, flexWrap: 'wrap' }}>
+                            <strong style={{ fontSize: FS.small }}>{method.label}</strong>
+                            <span style={{ ...text.faint(), fontSize: 8.5 }}>{method.framework}</span>
+                          </span>
+                          <span style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.35 }}>{method.description}</span>
+                          <span style={{ color: accent(0.8), fontSize: 9, lineHeight: 1.3 }}>产出：{method.outcome}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </motion.div>
+            )}
           </div>
         )}
 

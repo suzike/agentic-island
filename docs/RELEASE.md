@@ -1,6 +1,6 @@
 # Agentic-Island 发布指南
 
-本文档对应 `0.6.5` 的 Windows NSIS 发布流程。
+本文档对应 `0.6.6` 的 Windows NSIS 发布流程。
 
 ## 1. 发布前审查
 
@@ -18,6 +18,7 @@
 npm run typecheck
 npm test
 npm run build
+npm run audit:ask
 npm run audit:terminal
 npm run docs:capture
 npm audit --omit=dev

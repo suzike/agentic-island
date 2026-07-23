@@ -88,6 +88,8 @@ try {
   assert.equal(await evaluate(`Boolean(document.querySelector('[data-terminal-host]'))`), true, '首次启动应创建空白终端')
   const terminalPoint = await evaluate(`(() => { const rect=document.querySelector('[data-terminal-host]').getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+Math.min(80,rect.height/2)} })()`)
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: terminalPoint.x, y: terminalPoint.y })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: terminalPoint.x, y: terminalPoint.y, button: 'left', clickCount: 1 })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: terminalPoint.x, y: terminalPoint.y, button: 'left', clickCount: 1 })
   await sleep(100)
 
   await evaluate(`document.querySelector('.xterm-helper-textarea')?.focus({preventScroll:true});true`)
@@ -113,6 +115,9 @@ try {
   const secondSessionId = await evaluate(`document.querySelector('[data-terminal-host]')?.dataset.terminalSessionId`)
   assert.notEqual(secondSessionId, firstSessionId, '新建终端标签后必须切换到独立会话')
   assert.equal(await evaluate(`document.body.innerText.includes('__AIIslandPrompt')`), false, 'PowerShell 初始化脚本不得回显到新终端')
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: terminalPoint.x, y: terminalPoint.y })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: terminalPoint.x, y: terminalPoint.y, button: 'left', clickCount: 1 })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: terminalPoint.x, y: terminalPoint.y, button: 'left', clickCount: 1 })
   await evaluate(`document.querySelector('.xterm-helper-textarea')?.focus({preventScroll:true});true`)
   const secondSamples = []
   for (const character of "Write-Output 'second-terminal-audit'") {

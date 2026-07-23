@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import type { AgentCliEvent, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo } from '../../shared/protocol'
-import type { ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AskBranchMeta, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
+import type { ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
 import { DEFAULT_QUICK_PROMPTS } from './logic/prompts'
@@ -23,7 +23,8 @@ import { MarkdownStudio } from './components/MarkdownStudio'
 import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
 import { PROVIDERS, loadProviderSettings, migrateEmbeddingSettings, migrateProviderSettings, patchProviderDraft, providerConfigEquals, providerModelChoices, saveProviderSettings, switchProviderSettings } from './logic/providers'
-import { ADVANCE_PROMPTS, branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
+import { branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
+import { ADVANCE_PROMPTS, analysisMethodById, answerMethodById, answerMethodInstruction } from './logic/methodologies'
 import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
 import { ThemeDesigner, type Tokens } from './components/ThemeDesigner'
 import { CalcSheet } from './components/CalcSheet'
@@ -80,16 +81,6 @@ const ambientSuggestionPrompt = (item: AmbientTextItem): string => {
   if (item.mode === 'brief') return `请根据这条实时工作状态，帮我判断优先级并给出下一步行动：\n${item.text}`
   if (item.mode === 'github') return `请介绍并评估这条 GitHub 热门内容，说明它是否值得我进一步关注：\n${item.text}`
   return `请结合软件开发和我的实际工作场景，展开这条灵感，并给出 3 条可执行建议：\n${item.text}`
-}
-
-const ANSWER_ANALYSIS_LABELS: Record<Exclude<AnswerAnalysisAction, 'council'>, string> = {
-  critique: '检查漏洞',
-  assumptions: '检查前提',
-  alternatives: '替代方案',
-  decompose: '执行步骤',
-  socratic: '澄清问题',
-  ground: '资料核对',
-  suggest: '下一步问题'
 }
 
 const newAskBranch = (title = '新会话', parentId?: number, forkAt?: number): AskBranchMeta => {
@@ -1290,10 +1281,12 @@ export function App(): React.JSX.Element {
   }, [])
 
   // 拉取 AI 回复（带多轮上下文）：history 为"本轮提问之前"的对话历史
-  const fetchReply = useCallback((key: string, text: string, atts: Composer['attachments'], deep: boolean, history: { role: 'user' | 'assistant'; content: string }[], branchId?: number): void => {
+  const fetchReply = useCallback((key: string, text: string, atts: Composer['attachments'], deep: boolean, history: { role: 'user' | 'assistant'; content: string }[], branchId?: number, answerMethodId?: AnswerMethodId): void => {
     const L = llmRef.current
     const cfg = { baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }
     const requestModelLabel = llmModelLabel(L)
+    const answerMethod = key === 'ask' ? answerMethodById(answerMethodId) : undefined
+    const methodInstruction = answerMethodInstruction(answerMethod?.id)
     const finish = (reply: ChatMessage): void => {
       const patch = (messages: ChatMessage[]): ChatMessage[] => [...messages.filter((message) => !message.typing && !message.live), { ...reply, ts: Date.now() }]
       if (key === 'ask' && branchId !== undefined) patchAskBranchMessages(branchId, patch)
@@ -1314,7 +1307,7 @@ export function App(): React.JSX.Element {
     if (useLocalAgent) {
       const eng = askEngineRef.current as 'claude' | 'codex'
       const instruction = activeAskBranchRef.current.instruction?.trim() || ''
-      const prompt = buildAgentContextPrompt(history, fullText, instruction)
+      const prompt = buildAgentContextPrompt(history, fullText, [instruction, methodInstruction].filter(Boolean).join('\n\n'))
       const patch = (message: ChatMessage): void => finish(message)
       void runAgentStream(eng, prompt, false, images.length > 0, patch, (blocks) => patch({ role: 'agent', blocks }))
       return
@@ -1323,7 +1316,9 @@ export function App(): React.JSX.Element {
       ? [{ type: 'text', text: fullText }, ...images.map((a) => ({ type: 'image_url', image_url: { url: a.dataUrl! } }))]
       : fullText
     const instruction = key === 'ask' ? activeAskBranchRef.current.instruction?.trim() : ''
-    const system = systemFor(key, deep) + (instruction ? `\n\n本会话额外指令（持续生效）：\n${instruction}` : '')
+    const system = systemFor(key, deep)
+      + (instruction ? `\n\n本会话额外指令（持续生效）：\n${instruction}` : '')
+      + (methodInstruction ? `\n\n${methodInstruction}` : '')
     island.llmComplete(cfg, system, userPayload, deep, history).then((res) => {
       if (res.ok) {
         let blocks = parseBlocks(res.text) || looseBlocks(res.text)
@@ -1356,7 +1351,7 @@ export function App(): React.JSX.Element {
 
   // 核心发送：显式 text/atts/quotes；自动携带该线程的多轮上下文（AI 记得上文，可追问）
   // 引用片段：气泡里作为卡片单独展示；发给模型的文本把引用+疑问组装进上下文
-  const pushAndReply = useCallback((key: string, text: string, atts: Composer['attachments'], deep = false, qs: QuoteRef[] = []): void => {
+  const pushAndReply = useCallback((key: string, text: string, atts: Composer['attachments'], deep = false, qs: QuoteRef[] = [], answerMethodId?: AnswerMethodId): void => {
     if (!text && atts.length === 0 && qs.length === 0) return
     const currentMessages = threadsRef.current[key] || []
     if (key === 'ask' && conversationBusy(currentMessages)) { showToast('当前回答尚未完成，请等待完成或停止本机 Agent 后再发送'); return }
@@ -1365,17 +1360,19 @@ export function App(): React.JSX.Element {
     const memory = key === 'ask' ? activeAskBranchRef.current.memory || '' : ''
     const history = historyFromThread(currentMessages, 12, memory)
     const llmText = qs.length ? buildQuotedPrompt(qs, text) : text
-    setThreads((th) => ({ ...th, [key]: [...(th[key] || []), { role: 'user', text, attachments: atts, quotes: qs.length ? qs : undefined, ts: Date.now() }, { role: 'agent', typing: true }] }))
+    const answerMethod = key === 'ask' ? answerMethodById(answerMethodId) : undefined
+    setThreads((th) => ({ ...th, [key]: [...(th[key] || []), { role: 'user', text, attachments: atts, quotes: qs.length ? qs : undefined, answerMethodId: answerMethod?.id, answerMethodLabel: answerMethod?.label, ts: Date.now() }, { role: 'agent', typing: true }] }))
     setComposers((c) => ({ ...c, [key]: emptyComposer() }))
     if (qs.length) setQuotes((q) => ({ ...q, [key]: [] }))
     // 问答区开启"知识库模式"→ 走 RAG 接地作答（本地 Agent 引擎自带工具与上下文，跳过 KB）；其余照常
     if (key === 'ask' && kbModeRef.current && askEngineRef.current === 'llm') {
       const requestModelLabel = llmModelLabel(llmRef.current)
       const settle = (blocks: ChatMessage['blocks']): void => patchAskBranchMessages(branchId!, (messages) => [...messages.filter((message) => !message.typing && !message.live), { role: 'agent', blocks, modelLabel: requestModelLabel, ts: Date.now() }])
-      const instruction = activeAskBranchRef.current.instruction || ''
+      const methodInstruction = answerMethodInstruction(answerMethod?.id)
+      const instruction = [activeAskBranchRef.current.instruction || '', methodInstruction].filter(Boolean).join('\n\n')
       void runKbReply(llmText, deep, history, instruction, settle).catch((error) => settle([{ t: 'note', text: '知识库问答失败：' + String(error) }]))
     } else {
-      fetchReply(key, llmText, atts, deep, history, branchId)
+      fetchReply(key, llmText, atts, deep, history, branchId, answerMethod?.id)
     }
   }, [fetchReply, patchAskBranchMessages, runKbReply, showToast])
 
@@ -1455,7 +1452,7 @@ export function App(): React.JSX.Element {
 
   const sendMessage = useCallback((key: string, deep = false): void => {
     const cur = getComposer(key)
-    pushAndReply(key, (cur.text || '').trim(), cur.attachments, deep, quotesRef.current[key] || [])
+    pushAndReply(key, (cur.text || '').trim(), cur.attachments, deep, quotesRef.current[key] || [], key === 'ask' ? cur.answerMethodId : undefined)
   }, [getComposer, pushAndReply])
   const sendPreset = useCallback((key: string, text: string, deep = false): void => {
     pushAndReply(key, text, [], deep)
@@ -1625,12 +1622,13 @@ export function App(): React.JSX.Element {
     const msgs = threadsRef.current.ask || []
     if (!msgs[msgIndex] || msgs[msgIndex].role !== 'agent') return
     const branchId = activeAskBranchRef.current.id
+    const analysisMethod = analysisMethodById(action)
     const target = conversationToMarkdown([msgs[msgIndex]]).slice(0, 18000)
     const prompt = `${ADVANCE_PROMPTS[action]}\n\n【本次要处理的目标回答】\n${target}`
     const attachAnalysis = (blocks: Block[]): void => {
       const createdAt = Date.now()
       patchAskBranchMessages(branchId, (messages) => upsertAnswerAnalysis(messages, msgIndex, {
-        id: `${action}:${createdAt}`, action, label: ANSWER_ANALYSIS_LABELS[action], blocks, createdAt
+        id: `${action}:${createdAt}`, action, label: analysisMethod.label, blocks, createdAt
       }))
     }
     if (action === 'suggest') {
@@ -1662,7 +1660,7 @@ export function App(): React.JSX.Element {
     if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
     const system = '你是回答分析助手。只处理用户指定的目标回答，输出简体中文 Markdown；不要假装这是一次新的用户提问。' + (branchInstruction.trim() ? `\n\n本会话规则：\n${branchInstruction.trim()}` : '')
     const res = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, prompt, deep, history)
-    if (!res.ok || !res.text) { showToast(res.error || `${ANSWER_ANALYSIS_LABELS[action]}失败`); return }
+    if (!res.ok || !res.text) { showToast(res.error || `${analysisMethod.label}失败`); return }
     let blocks = parseBlocks(res.text) || looseBlocks(res.text)
     if (res.reasoning) blocks = [{ t: 'think' as const, text: res.reasoning }, ...blocks]
     attachAnalysis(blocks)
@@ -1753,9 +1751,13 @@ export function App(): React.JSX.Element {
     // 问答区消息历史更高：标准 420px，大尺寸 620px 固定，仅真全屏才绑 100vh（覆盖层铺满窗口时 100vh 会突变，不能用）。
     // 全屏扣除量收紧到 305px（头部工具条 ~44 + 输入区峰值 ~130 + 头/尾余量）——让气泡区吃满高度、输入框下移贴底，消除底部空白。
     maxH: key === 'ask' ? (fullscreen ? 'calc(100vh - 305px)' : settings.largeSize ? 620 : 420) : undefined,
-    onQuick: (t) => sendPreset(key, t, deep),
+    onQuick: (t) => key === 'ask'
+      ? pushAndReply(key, t, [], deep, [], getComposer(key).answerMethodId)
+      : sendPreset(key, t, deep),
     onText: (v) => patchComposer(key, { text: v }),
     onSend: () => sendMessage(key, deep),
+    answerMethodId: key === 'ask' ? getComposer(key).answerMethodId : undefined,
+    onAnswerMethodChange: key === 'ask' ? (answerMethodId) => patchComposer(key, { answerMethodId }) : undefined,
     onAttach: (type, payload) => onAttach(key, type, payload),
     onRemoveAtt: (i) => onRemoveAtt(key, i),
     // 引用追问仅问答区开启（框选 AI 回复 → 备注 → 贴入输入区）
@@ -1791,7 +1793,7 @@ export function App(): React.JSX.Element {
     onAdvance: key === 'ask' ? (index, action) => advanceAsk(index, action, deep) : undefined,
     onUseSuggestion: key === 'ask' ? (value) => patchComposer(key, { text: value }) : undefined,
     busy: key === 'ask' ? conversationBusy(threads[key] || []) : undefined
-  }), [threads, quotes, getComposer, sendPreset, followUpReply, patchComposer, sendMessage, onAttach, onRemoveAtt, addQuote, removeQuote, settings.largeSize, fullscreen, activeAskBranch, askSessions, askFork, askSwitch, renameAskBranch, mergeAskBranch, compressAskContext, setAskContextMode, saveAskKnowledge, councilModels, runAskCouncil, adoptAskVariant, advanceAsk])
+  }), [threads, quotes, getComposer, pushAndReply, sendPreset, followUpReply, patchComposer, sendMessage, onAttach, onRemoveAtt, addQuote, removeQuote, settings.largeSize, fullscreen, activeAskBranch, askSessions, askFork, askSwitch, renameAskBranch, mergeAskBranch, compressAskContext, setAskContextMode, saveAskKnowledge, councilModels, runAskCouncil, adoptAskVariant, advanceAsk])
 
   // ===== LLM 设置 =====
   const setLlmField = (f: 'model' | 'baseUrl' | 'apiKey', v: string): void => setLlm((s) => ({
