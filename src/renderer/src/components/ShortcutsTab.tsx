@@ -4,15 +4,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import type { RunLog, ShortcutDef, ShortcutStep, StepKind } from '../logic/shortcuts'
 import { PRESET_SHORTCUTS, LEGACY_PRESET_IDS, runShortcut, needsRepo, GEN_SYSTEM, parseGenerated } from '../logic/shortcuts'
 import { island } from '../bridge'
 import { Markdown } from './Markdown'
-import type { WorkbenchProject, WorkflowRun } from '../types'
+import type { AutomationRule, WorkbenchProject, WorkflowRun } from '../types'
 import { ProjectContextBar } from './ProjectContextBar'
 import { Ico, type LucideIcon } from '../ui/icons'
-import { Button, Chip, EmptyState, IconButton, Input } from '../ui/components'
+import { Button, Chip, EmptyState, IconButton, Input, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop, staggerContainer, staggerItem } from '../ui/motion'
 import { accent, accent2, fill, FS, hairline, hueAccent, ink, R, sem, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
 
@@ -32,6 +32,9 @@ interface Props {
   repos: { path: string }[]
   autoRunId: string | null
   onAutoRunDone: () => void
+  /** 定时自动化：每日 HH:mm 触发的规则列表（编辑器在本页） */
+  automations: AutomationRule[]
+  onSetAutomations: (list: AutomationRule[]) => void
 }
 
 interface AgentLive { text: string; tools: { label: string; detail?: string }[] }
@@ -229,6 +232,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
         label="执行上下文"
         detail="当前项目仓库会自动传给需要仓库的工作流"
       />
+      <AutomationsEditor automations={p.automations} onChange={p.onSetAutomations} shortcuts={p.shortcuts} />
       {/* 工程工作流概览 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.35fr repeat(3, 1fr)', gap: 0.5, overflow: 'hidden', borderRadius: R.lg, background: hairline(0.07) }}>
         <div style={{ padding: '10px 12px', background: fill(2), display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
@@ -552,6 +556,62 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
               <Button variant="primary" onClick={saveEdit} disabled={!edit.name.trim() || !edit.steps.length}>保存指令</Button>
             </div>
           </motion.div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 定时自动化编辑器：每日 HH:mm 触发一条动作；触发窗口与补跑判定在 logic/automation.ts */
+function AutomationsEditor({ automations, onChange, shortcuts }: { automations: AutomationRule[]; onChange: (list: AutomationRule[]) => void; shortcuts: ShortcutDef[] }): React.JSX.Element {
+  const [open, setOpen] = useState(automations.some((r) => r.enabled))
+  const patch = (id: string, next: Partial<AutomationRule>): void => onChange(automations.map((r) => (r.id === id ? { ...r, ...next } : r)))
+  const add = (): void => {
+    const id = 'auto-' + Date.now()
+    onChange([...automations, { id, name: '定时任务 ' + (automations.length + 1), enabled: true, time: '09:30', action: { kind: 'shortcut', shortcutId: shortcuts[0]?.id || '' } }])
+    setOpen(true)
+  }
+  const selectStyle = { background: fill(1), border: `0.5px solid ${hairline(0.15)}`, borderRadius: R.sm, color: ink(1), fontSize: FS.small, padding: '5px 7px', outline: 'none', minWidth: 0 } as React.CSSProperties
+  return (
+    <div style={{ ...surface.section(), padding: '9px 11px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <Ico.shortcuts size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+        <span style={{ ...text.subtitle(), fontSize: FS.small }}>定时自动化</span>
+        <span style={text.faint()}>每日到点自动执行；启动时自动补跑 30 分钟内错过的任务</span>
+        <span style={{ flex: 1 }} />
+        <Button sm variant="ghost" onClick={add}>新建</Button>
+        <IconButton icon={open ? ChevronUp : ChevronDown} title={open ? '收起' : '展开'} onClick={() => setOpen((v) => !v)} />
+      </div>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', marginTop: 8 }}>
+          {automations.length === 0 && <span style={{ ...text.faint(), fontSize: FS.tiny }}>还没有定时任务——例如每天 9:30 自动跑「项目全量体检」，或把固定反思写进待办。</span>}
+          {automations.map((rule) => {
+            const target = rule.action.kind === 'shortcut' ? rule.action.shortcutId : ''
+            return (
+              <div key={rule.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderTop: `0.5px solid ${hairline(0.07)}`, flexWrap: 'wrap' }}>
+                <Switch on={rule.enabled} onChange={(on) => patch(rule.id, { enabled: on })} />
+                <input type="time" value={rule.time} onChange={(e) => patch(rule.id, { time: e.target.value })} style={selectStyle} title="每日触发时间" />
+                <input value={rule.name} onChange={(e) => patch(rule.id, { name: e.target.value })} placeholder="任务名" style={{ ...selectStyle, width: 110 }} />
+                <select value={rule.action.kind} onChange={(e) => {
+                  const kind = e.target.value as AutomationRule['action']['kind']
+                  const next = kind === 'shortcut' ? { kind, shortcutId: shortcuts[0]?.id || '' } : { kind, text: '' }
+                  patch(rule.id, { action: next } as Partial<AutomationRule>)
+                }} style={selectStyle}>
+                  <option value="shortcut">运行工作流</option>
+                  <option value="todo">写待办</option>
+                  <option value="note">存便签</option>
+                </select>
+                {rule.action.kind === 'shortcut' ? (
+                  <select value={target} onChange={(e) => patch(rule.id, { action: { kind: 'shortcut', shortcutId: e.target.value } })} style={{ ...selectStyle, flex: 1, minWidth: 140 }}>
+                    {shortcuts.map((s2) => <option key={s2.id} value={s2.id}>{s2.icon} {s2.name}</option>)}
+                  </select>
+                ) : (
+                  <input value={rule.action.text} onChange={(e) => patch(rule.id, { action: rule.action.kind === 'todo' ? { kind: 'todo', text: e.target.value } : { kind: 'note', text: e.target.value } })} placeholder={rule.action.kind === 'todo' ? '待办内容（首行可写项目 @名）' : '便签内容（首行=标题）'} style={{ ...selectStyle, flex: 1, minWidth: 160 }} />
+                )}
+                <IconButton icon={X} size={27} title="删除此定时任务" onClick={() => onChange(automations.filter((r) => r.id !== rule.id))} />
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

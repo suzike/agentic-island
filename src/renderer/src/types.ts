@@ -194,6 +194,23 @@ export interface WorkbenchProject {
 }
 
 /** 快捷工作流的一次可追溯执行。 */
+/** 定时自动化：每日 HH:mm 触发一个动作（执行快捷工作流 / 写待办 / 存便签） */
+export type AutomationAction =
+  | { kind: 'shortcut'; shortcutId: string }
+  | { kind: 'todo'; text: string }
+  | { kind: 'note'; text: string }
+
+export interface AutomationRule {
+  id: string
+  name: string
+  enabled: boolean
+  /** 每日触发时间（HH:mm，本地时区） */
+  time: string
+  action: AutomationAction
+  /** 最近触发日期（YYYY-MM-DD），防同日重复触发 */
+  lastRunDay?: string
+}
+
 export interface WorkflowRun {
   id: string
   shortcutId: string

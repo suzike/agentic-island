@@ -10,19 +10,25 @@ const tests = readdirSync(scriptsDir)
   .filter((name) => /^test-.+\.ts$/.test(name) && !excluded.has(name))
   .sort()
 
-const run = (test) => spawnSync(process.execPath, ['--experimental-strip-types', join('scripts', test)], {
-  cwd: root,
-  stdio: 'inherit',
-  env: process.env
-})
+// 子进程 stdout/stderr 走管道再转发（而非 inherit）：本机 Node 25.2.1 (Windows) 在 strip-types 下、
+// 子进程 stdout 直接继承文件句柄时，退出阶段会触发 libuv 断言（STATUS_STACK_BUFFER_OVERRUN，与断言结果无关）。
+// 管道转发在终端/管道/CI(Node 22) 下均正常，且能统一输出顺序。
+const run = (test) => {
+  const result = spawnSync(process.execPath, ['--experimental-strip-types', join('scripts', test)], {
+    cwd: root,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: process.env
+  })
+  if (result.stdout) process.stdout.write(result.stdout)
+  if (result.stderr) process.stderr.write(result.stderr)
+  return result
+}
 
 for (const test of tests) {
   process.stdout.write(`\n=== ${test} ===\n`)
   let result = run(test)
   if (result.status !== 0) {
-    // Node 25.2.1 (Windows) 的 strip-types teardown 偶发 libuv 断言崩溃：断言已全部通过、
-    // 且崩溃对象随时间轮换（与 preload 注入相互扰动）。失败重跑一次：teardown 崩溃重跑即过；
-    // 真实断言失败重跑仍失败，不会被掩盖。
+    // 兜底重试：断言已全部通过、仅进程退出阶段异常时重跑一次即可通过；真实断言失败重跑仍失败，不会被掩盖。
     process.stdout.write(`  ↻ ${test} 退出码 ${result.status}，重试一次（Node teardown 偶发崩溃防护）\n`)
     result = run(test)
   }

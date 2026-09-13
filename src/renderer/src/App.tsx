@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import type { AgentCliEvent, ApprovalAuditEntry, ApprovalPolicy, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo, UpdateState } from '../../shared/protocol'
-import type { ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
+import type { ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, AutomationRule, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
 import { DEFAULT_QUICK_PROMPTS } from './logic/prompts'
@@ -23,6 +23,7 @@ import { MarkdownStudio } from './components/MarkdownStudio'
 import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
 import { PROVIDERS, loadProviderSettings, migrateEmbeddingSettings, migrateProviderSettings, patchProviderDraft, providerConfigEquals, providerModelChoices, saveProviderSettings, switchProviderSettings } from './logic/providers'
+import { automationDue, automationDayKey } from './logic/automation'
 import { branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
 import { ADVANCE_PROMPTS, analysisMethodById, answerMethodById, answerMethodInstruction } from './logic/methodologies'
 import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
@@ -208,6 +209,7 @@ export function App(): React.JSX.Element {
   // ⚡ 快捷指令：首装播种预置；有存档则整体覆盖（删除即真删，「恢复预置」可找回）
   const [shortcuts, setShortcuts] = useState<ShortcutDef[]>(PRESET_SHORTCUTS)
   const [shortcutRunId, setShortcutRunId] = useState<string | null>(null)
+  const [automations, setAutomations] = useState<AutomationRule[]>([])
   // 学习中心：SRS 复习状态 + 技术雷达
   const [learnOpen, setLearnOpen] = useState(false)
   const [srsState, setSrsState] = useState<Record<number, SrsCard>>({})
@@ -321,6 +323,7 @@ export function App(): React.JSX.Element {
         if (Array.isArray(s.repoBookmarks)) setRepoBookmarks(s.repoBookmarks as GitHubRepo[])
         if (Array.isArray(s.shortcuts)) setShortcuts(s.shortcuts as ShortcutDef[])
         if (s.approvalPolicy && typeof s.approvalPolicy === 'object') setApprovalPolicy(s.approvalPolicy as ApprovalPolicy)
+        if (Array.isArray(s.automations)) setAutomations(s.automations as AutomationRule[])
         if (s.askEngine === 'llm' || s.askEngine === 'claude' || s.askEngine === 'codex') setAskEngine(s.askEngine)
         if (typeof s.agentCwd === 'string') setAgentCwd(s.agentCwd)
         if (s.srsState && typeof s.srsState === 'object') setSrsState(s.srsState as Record<number, SrsCard>)
@@ -607,6 +610,7 @@ export function App(): React.JSX.Element {
     island.saveState({
       settings,
       approvalPolicy,
+      automations,
       soundMap,
       activeMonitor,
       todos,
@@ -661,7 +665,7 @@ export function App(): React.JSX.Element {
         providerCatalogVersion: llm.providerCatalogVersion
       }
     })
-  }, [settings, approvalPolicy, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
+  }, [settings, approvalPolicy, automations, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
 
   // 字体与缩放应用（--font 变量 + 主进程 zoomFactor）
   useEffect(() => {
@@ -2334,6 +2338,46 @@ export function App(): React.JSX.Element {
 
   // 命令面板的命令集：跳分区 + 快捷动作 + 切主题（run 里直接调 App 的动作）
   const goTab = (k: Tab): void => { setRevealed(true); setTab(k) }
+
+  // ===== 定时自动化：每日 HH:mm 触发（快捷工作流切到快捷页执行以支持确认闸；待办/便签静默直写） =====
+  const fireAutomation = (rule: AutomationRule, missed: boolean): void => {
+    const tag = missed ? '（补跑）' : ''
+    const act = rule.action
+    if (act.kind === 'shortcut') {
+      const def = shortcuts.find((s2) => s2.id === act.shortcutId)
+      if (!def) { showToast(`定时任务「${rule.name}」找不到工作流，已跳过`); return }
+      goTab('shortcuts')
+      setShortcutRunId(def.id)
+      showToast(`⏰ 定时任务${tag}：运行「${def.name}」`)
+    } else if (act.kind === 'todo') {
+      todoQuickAdd(act.text.slice(0, 200), 'todo')
+      showToast(`⏰ 定时任务${tag}：已写入待办`)
+    } else {
+      const lines = act.text.split('\n')
+      const title = (lines[0] || '定时便签').slice(0, 30)
+      const now3 = Date.now()
+      noteAddFull({ id: now3, emoji: '⏰', title, md: lines.slice(1).join('\n').trim() || act.text, color: 'sky', tags: ['定时'], createdAt: now3, updatedAt: now3 })
+      showToast(`⏰ 定时任务${tag}：已存为便签「${title}」`)
+    }
+  }
+  const fireAutomationRef = useRef(fireAutomation)
+  fireAutomationRef.current = fireAutomation
+  useEffect(() => {
+    const tick = (): void => {
+      const now = new Date()
+      for (const rule of automationsRef.current) {
+        const due = automationDue(rule, now)
+        if (!due.fire) continue
+        setAutomations((list) => list.map((r) => (r.id === rule.id ? { ...r, lastRunDay: automationDayKey(now) } : r)))
+        fireAutomationRef.current(rule, due.missed)
+      }
+    }
+    tick() // 启动即检查：宽限期内的错过任务补跑
+    const t = setInterval(tick, 30_000)
+    return () => clearInterval(t)
+  }, [])
+  const automationsRef = useRef(automations)
+  automationsRef.current = automations
   const paletteCommands: Command[] = [
     ...TABS.map((t): Command => ({ id: 'tab:' + t.key, title: '前往 · ' + t.label, hint: '切换到' + t.label + '分区', icon: '📂', group: '分区', keywords: t.key, run: () => goTab(t.key) })),
     { id: 'act:ask', title: '新提问', hint: '打开问答分区', icon: '💬', group: '动作', keywords: 'ask wenda tiwen', run: () => goTab('ask') },
@@ -2739,6 +2783,7 @@ export function App(): React.JSX.Element {
                 repos={repos}
                 autoRunId={shortcutRunId}
                 onAutoRunDone={() => setShortcutRunId(null)}
+                automations={automations} onSetAutomations={setAutomations}
               />
             )}
             {tab === 'term' && <TerminalTab tall={settings.largeSize || fullscreen} full={fullscreen} agents={agents} llm={{ model: llm.model, baseUrl: llm.baseUrl, apiKey: llm.apiKey }} onKeyboardActivity={holdPanelForTerminal} />}
