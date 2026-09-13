@@ -126,7 +126,10 @@ export async function runShortcut(def: ShortcutDef, ctx: RunCtx): Promise<boolea
       log(true, '已确认')
     } else if (s.kind === 'shell') {
       const cmd = interpolate(s.cmd, v)
-      if (!def.trusted || DANGEROUS_RE.test(cmd)) {
+      // 命令模板引用了外部可影响的变量（AI 输出 %prev% / 剪贴板 %clip% / 运行时输入 %input%）时，
+      // "信任"标记不生效：恶意外部内容可操纵这些值注入命令，必须展示插值后的实际命令让用户确认
+      const externalized = /%(?:prev|clip|input)%/.test(s.cmd)
+      if (!def.trusted || externalized || DANGEROUS_RE.test(cmd)) {
         const okGo = await ctx.askConfirm(cmd)
         if (!okGo) { log(false, undefined, '已取消'); return false }
       }

@@ -112,6 +112,8 @@ export class RecordingProjectStore {
   }
 
   async delete(id: string): Promise<void> {
+    // id 用于拼文件路径，只允许删除已登记在册的工程，防路径穿越
+    if (!this.projects.has(id)) return
     await Promise.all([rm(this.projectPath(id), { force: true }), rm(`${this.projectPath(id)}.tmp`, { force: true })])
     this.projects.delete(id)
   }

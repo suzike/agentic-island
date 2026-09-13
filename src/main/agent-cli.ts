@@ -29,6 +29,8 @@ function killTree(p?: ChildProcess): void {
 /** 探测 CLI 是否可用（15s 超时），返回版本首行 */
 export function agentCliCheck(engine: AgentEngine): Promise<{ ok: boolean; version?: string }> {
   return new Promise((resolve) => {
+    // engine 会被拼进 cmd 命令串，必须先过白名单（IPC 透传值不受 TS 类型保护）
+    if (engine !== 'claude' && engine !== 'codex') { resolve({ ok: false }); return }
     let done = false
     const finish = (r: { ok: boolean; version?: string }): void => { if (!done) { done = true; resolve(r) } }
     try {

@@ -99,6 +99,18 @@ const danger: ShortcutDef = { ...pipeline, id: 't5', trusted: true, steps: [{ ki
 await runShortcut(danger, t5.ctx)
 ok(confirmed5 === 1, '确认闸：信任指令的危险命令仍强制确认')
 
+// 信任 + 外部可影响变量（%prev%/%clip%/%input%）→ 仍要确认；纯本地变量（%repo%）不触发
+let confirmedExt = 0
+const t5b = makeCtx({ askConfirm: async () => { confirmedExt++; return true } })
+const extSc: ShortcutDef = { id: 't5b', icon: '⚡', name: '外变量', group: '测试', runCount: 0, trusted: true,
+  steps: [{ kind: 'ai', system: '出命令', prompt: '给一条命令' }, { kind: 'shell', cmd: '%prev%' }] }
+await runShortcut(extSc, t5b.ctx)
+ok(confirmedExt === 1, '确认闸：信任指令引用 %prev% 的 shell 仍强制确认（防 AI 输出注入命令）')
+const repoOnly: ShortcutDef = { ...pipeline, id: 't5c', trusted: true, steps: [{ kind: 'shell', cmd: 'git -C "%repo%" status' }] }
+const t5c = makeCtx({ askConfirm: async () => { confirmedExt++; return true } })
+await runShortcut(repoOnly, t5c.ctx)
+ok(confirmedExt === 1, '确认闸：%repo% 属用户自选本地路径，信任指令不额外确认')
+
 // shell 失败 → 中止后续
 const t6 = makeCtx({ shell: async () => ({ ok: false, error: 'boom' }) })
 const failPipe: ShortcutDef = { ...pipeline, id: 't6', trusted: true, steps: [{ kind: 'shell', cmd: 'x' }, { kind: 'clipboard', op: 'write', text: 'nope' }] }
