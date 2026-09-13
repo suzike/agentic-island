@@ -7,6 +7,8 @@ export interface Provider {
   models: string[]
   hint?: string
   modelDiscovery?: boolean
+  /** 本地端点无需 API Key（Ollama / LM Studio）：空 Key 也可视为已就绪，请求不带 Authorization */
+  keyless?: boolean
 }
 
 export interface ProviderDraft {
@@ -39,7 +41,7 @@ export interface ProviderModelChoice {
 export type EmbeddingSettings = ProviderDraft
 
 // 目录升级时递增：旧持久化数据只在版本变化时补入新官方型号，之后仍允许用户删除。
-export const PROVIDER_CATALOG_VERSION = 6
+export const PROVIDER_CATALOG_VERSION = 7
 
 export const PROVIDERS: Provider[] = [
   { key: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-v4-pro', 'deepseek-v4-flash'] },
@@ -61,8 +63,27 @@ export const PROVIDERS: Provider[] = [
   { key: 'qwen', label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max', 'qwen-turbo'] },
   { key: 'openai', label: 'GPT (OpenAI)', baseUrl: 'https://api.openai.com/v1', models: ['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-luna'], hint: 'GPT-5.6 Sol / Terra / Luna；深度模式会提升 reasoning effort' },
   { key: 'claude', label: 'Claude', baseUrl: 'https://api.anthropic.com/v1', models: ['claude-sonnet-5', 'claude-opus-4-8', 'claude-fable-5', 'claude-haiku-4-5'], hint: '直连 Anthropic Messages API；Sonnet 5 默认平衡速度与能力' },
+  {
+    key: 'ollama',
+    label: 'Ollama（本地）',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    models: [],
+    hint: '本机推理，数据不出网；无需 API Key。先运行 ollama serve，可用模型会自动同步',
+    keyless: true
+  },
+  {
+    key: 'lmstudio',
+    label: 'LM Studio（本地）',
+    baseUrl: 'http://127.0.0.1:1234/v1',
+    models: [],
+    hint: '本机推理，数据不出网；无需 API Key。在 LM Studio 里启动本地服务器后即可同步模型',
+    keyless: true
+  },
   { key: 'custom', label: '自定义', baseUrl: '', models: [] }
 ]
+
+/** 本地端点（Ollama / LM Studio）无需 API Key */
+export const providerIsKeyless = (key: string): boolean => !!PROVIDERS.find((item) => item.key === key)?.keyless
 
 const providerOf = (key: string): Provider => PROVIDERS.find((item) => item.key === key) || PROVIDERS[0]
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : ''

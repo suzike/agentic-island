@@ -11,7 +11,7 @@ import {
 import type { ApprovalAuditEntry, ApprovalPolicy, DisplayInfo, RuntimeInfo, UpdateState } from '../../../shared/protocol'
 import type { BarConfig } from '../types'
 import { SOUNDS, SOUND_TYPES, type SoundMap } from '../logic/sounds'
-import { PROVIDERS, providerConfigEquals, type ProviderSettingsSnapshot } from '../logic/providers'
+import { PROVIDERS, providerConfigEquals, providerIsKeyless, type ProviderSettingsSnapshot } from '../logic/providers'
 import { normalizeThemeTokens, THEMES, type ThemeDef } from '../logic/themes'
 import { Badge, Button, Chip, Group, IconButton, Input, SectionHeader, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
@@ -311,8 +311,8 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
     },
     {
       label: '问答模型',
-      ok: !!p.llm.apiKey && !!p.llm.model,
-      detail: p.llm.apiKey && p.llm.model ? p.llm.model : '尚未完成配置'
+      ok: !!p.llm.model && (providerIsKeyless(p.llm.provider) || !!p.llm.apiKey),
+      detail: p.llm.model && (providerIsKeyless(p.llm.provider) || p.llm.apiKey) ? p.llm.model : '尚未完成配置'
     },
     {
       label: '日历同步',
@@ -656,7 +656,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
           <div style={separatorRow()} />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={labelSm}>已保存的配置</div>
-            <Button sm variant="ghost" icon={Plus} disabled={!p.llm.model.trim() || !p.llm.baseUrl.trim() || !p.llm.apiKey.trim()} onClick={p.onSaveLlm}>保存当前</Button>
+            <Button sm variant="ghost" icon={Plus} disabled={!p.llm.model.trim() || !p.llm.baseUrl.trim() || (!p.llm.apiKey.trim() && !providerIsKeyless(p.llm.provider))} onClick={p.onSaveLlm}>保存当前</Button>
           </div>
           {p.llm.saved.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

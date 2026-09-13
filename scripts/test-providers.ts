@@ -6,6 +6,7 @@ import {
   migrateProviderSettings,
   patchProviderDraft,
   providerConfigEquals,
+  providerIsKeyless,
   providerModelChoices,
   saveProviderSettings,
   switchProviderSettings
@@ -145,5 +146,21 @@ const intentionallyClearedEmbedding = migrateEmbeddingSettings({ model: '', base
   model: 'gpt-5.6', baseUrl: 'https://api.openai.com/v1', apiKey: 'chat-key'
 })
 ok(!intentionallyClearedEmbedding.model && !intentionallyClearedEmbedding.apiKey, '用户清空独立向量配置后不得再次从聊天连接回填')
+
+// 本地模型预设（Ollama / LM Studio）：无需 API Key，端点指向本机，模型靠 /models 同步
+const ollama = PROVIDERS.find((item) => item.key === 'ollama')
+const lmstudio = PROVIDERS.find((item) => item.key === 'lmstudio')
+ok(!!ollama && !!lmstudio, '目录应包含 Ollama 与 LM Studio 本地预设')
+ok(/^http:\/\/127\.0\.0\.1:\d+\/v1$/.test(ollama!.baseUrl) && /^http:\/\/127\.0\.0\.1:\d+\/v1$/.test(lmstudio!.baseUrl), '本地预设端点应为回环地址 + OpenAI 兼容 /v1')
+ok(providerIsKeyless('ollama') && providerIsKeyless('lmstudio'), '本地预设标记为免密钥')
+ok(!providerIsKeyless('deepseek') && !providerIsKeyless('custom') && !providerIsKeyless('nonexistent'), '云端与未知供应商仍需密钥')
+ok(PROVIDER_CATALOG_VERSION === 7, '目录版本递增，旧配置会在升级时补入新官方型号')
+
+// 免密钥供应商的空 Key 配置：切换后保持可用（不被空 Key 判定为未配置）
+const localDraft = switchProviderSettings(migrateProviderSettings({
+  provider: 'deepseek', model: 'deepseek-v4-pro', apiKey: 'sk-x', baseUrl: 'https://api.deepseek.com/v1'
+}), 'ollama')
+ok(localDraft.provider === 'ollama' && localDraft.baseUrl === ollama!.baseUrl, '切换到本地预设：端点跟随目录')
+ok(!localDraft.apiKey, '本地预设不继承云端密钥')
 
 console.log('provider settings migration tests passed')

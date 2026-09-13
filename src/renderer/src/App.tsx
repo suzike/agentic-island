@@ -22,7 +22,7 @@ import { KB_SYSTEM, kbGroundPrompt, citeSources } from './logic/kbAsk'
 import { MarkdownStudio } from './components/MarkdownStudio'
 import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
-import { PROVIDERS, loadProviderSettings, migrateEmbeddingSettings, migrateProviderSettings, patchProviderDraft, providerConfigEquals, providerModelChoices, saveProviderSettings, switchProviderSettings } from './logic/providers'
+import { PROVIDERS, loadProviderSettings, migrateEmbeddingSettings, migrateProviderSettings, patchProviderDraft, providerConfigEquals, providerIsKeyless, providerModelChoices, saveProviderSettings, switchProviderSettings } from './logic/providers'
 import { automationDue, automationDayKey } from './logic/automation'
 import { branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
 import { ADVANCE_PROMPTS, analysisMethodById, answerMethodById, answerMethodInstruction } from './logic/methodologies'
@@ -880,7 +880,7 @@ export function App(): React.JSX.Element {
   // 提交：AI 判断意图 → 路由到 待办/便签/问答
   const capsuleSubmit = useCallback(async (text: string): Promise<{ result: CapsuleResult; feedback: string } | { error: string }> => {
     const L = llmRef.current
-    if (!L.apiKey || !L.model) return { error: '请先在 设置 › 问答助手模型 配置 Key' }
+    if (!L.model || (!L.apiKey && !providerIsKeyless(L.provider))) return { error: '请先在 设置 › 问答助手模型 配置模型（本地端点无需 Key）' }
     const now2 = new Date()
     const nowText = `${now2.getFullYear()}-${now2.getMonth() + 1}-${now2.getDate()} ${String(now2.getHours()).padStart(2, '0')}:${String(now2.getMinutes()).padStart(2, '0')} 周${'日一二三四五六'[now2.getDay()]}`
     const res = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, capsuleSystemPrompt(nowText), text, false)
@@ -956,7 +956,7 @@ export function App(): React.JSX.Element {
   const barGenBusyRef = useRef(false)
   const refreshBarPools = useCallback(async (): Promise<string> => {
     const L = llmRef.current
-    if (!L.apiKey || !L.model) return '✗ 请先配置问答模型的端点与 Key'
+    if (!L.model || (!L.apiKey && !providerIsKeyless(L.provider))) return '✗ 请先配置问答模型的端点与模型'
     if (barGenBusyRef.current) return '正在生成中…'
     barGenBusyRef.current = true
     try {
@@ -987,7 +987,8 @@ export function App(): React.JSX.Element {
     }
   }, [])
   const barCfgRef = useRef(barCfg); barCfgRef.current = barCfg
-  const llmReady = !!(llm.apiKey && llm.model)
+  // 本地端点（Ollama / LM Studio）无需 Key：选了模型即视为就绪
+  const llmReady = !!llm.model && (providerIsKeyless(llm.provider) || !!llm.apiKey)
   const aiTopicsKey = ['quotes', 'exp', 'agent', 'thermal'].filter((k) => barCfg.modes.includes(k)).join(',') + '|' + (barCfg.customTopics || []).map((t) => t.id).join(',')
   useEffect(() => {
     if (!settings.ambientBar || barCfg.aiRefresh === false || !llmReady) return
@@ -1318,8 +1319,8 @@ export function App(): React.JSX.Element {
 
     // 本地 Agent 引擎不依赖云端 Key；仅云端模式做配置校验
     const useLocalAgent = key === 'ask' && askEngineRef.current !== 'llm'
-    if (!useLocalAgent && (!cfg.apiKey || !cfg.model)) {
-      finish({ role: 'agent', blocks: [{ t: 'note', text: '请先在 Settings › 问答助手模型 里配置端点、型号与 API Key。' }] })
+    if (!useLocalAgent && (!cfg.model || (!cfg.apiKey && !providerIsKeyless(llmRef.current.provider)))) {
+      finish({ role: 'agent', blocks: [{ t: 'note', text: '请先在 Settings › 问答助手模型 里配置端点与模型（本地端点无需 API Key）。' }] })
       return
     }
     // 附件真实注入：文本文件内容拼进提问；图片作为多模态 parts（需模型支持视觉，否则 API 会报错并如实显示）
@@ -1358,7 +1359,7 @@ export function App(): React.JSX.Element {
   const runKbReply = useCallback(async (query: string, deep: boolean, history: { role: 'user' | 'assistant'; content: string }[], instruction: string, settle: (blocks: ChatMessage['blocks']) => void): Promise<void> => {
     const L = llmRef.current
     const cfg = { baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }
-    if (!cfg.apiKey || !cfg.model) { settle([{ t: 'note', text: '请先在 设置 › 问答助手模型 里配置端点、型号与 API Key。' }]); return }
+    if (!cfg.model || (!cfg.apiKey && !providerIsKeyless(L.provider))) { settle([{ t: 'note', text: '请先在 设置 › 问答助手模型 里配置端点与模型（本地端点无需 API Key）。' }]); return }
     const em = embedConfigRef.current
     if (!em.baseUrl.trim() || !em.apiKey.trim() || !em.model.trim()) { settle([{ t: 'note', text: '知识库检索需要独立的向量连接：请打开知识库面板，填写 Base URL、Embedding 模型和 API Key。' }]); return }
     const sr = await island.kbSearch(em, query, 8)

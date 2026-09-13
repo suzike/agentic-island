@@ -6,6 +6,8 @@ import { netFetch } from './http-client'
 import { buildAnthropicRequestBody, buildChatRequestBody, isAnthropicRequest, normalizeLlmBaseUrl, normalizeLlmConfig, sanitizeLlmErrorDetail } from './llm-request'
 
 const chatUrl = (baseUrl: string): string => normalizeLlmBaseUrl(baseUrl) + '/chat/completions'
+/** 本地端点（Ollama / LM Studio）无密钥：不带 Authorization，避免发送空的 Bearer 头 */
+const bearer = (apiKey: string): Record<string, string> => (apiKey ? { authorization: `Bearer ${apiKey}` } : {})
 const anthropicHeaders = (apiKey: string): Record<string, string> => ({
   'content-type': 'application/json',
   'x-api-key': apiKey,
@@ -51,7 +53,7 @@ export async function complete(
     const res = await netFetch(anthropic ? cfg.baseUrl + '/messages' : chatUrl(cfg.baseUrl), {
       method: 'POST',
       timeoutMs: deep ? 120000 : 60000,
-      headers: anthropic ? anthropicHeaders(cfg.apiKey) : { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+      headers: anthropic ? anthropicHeaders(cfg.apiKey) : { 'content-type': 'application/json', ...bearer(cfg.apiKey) },
       body: JSON.stringify(body)
     })
     if (!res.ok) {
@@ -90,7 +92,7 @@ export async function listModels(cfg: LlmRequestConfig): Promise<{ ok: boolean; 
     const res = await netFetch(cfg.baseUrl + '/models', {
       method: 'GET',
       timeoutMs: 30000,
-      headers: anthropic ? anthropicHeaders(cfg.apiKey) : { authorization: `Bearer ${cfg.apiKey}` }
+      headers: anthropic ? anthropicHeaders(cfg.apiKey) : bearer(cfg.apiKey)
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
@@ -116,7 +118,7 @@ export async function embed(cfg: LlmRequestConfig, texts: string[]): Promise<{ o
     const res = await netFetch(url, {
       method: 'POST',
       timeoutMs: 60000,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+      headers: { 'content-type': 'application/json', ...bearer(cfg.apiKey) },
       body: JSON.stringify({ model: cfg.model, input: texts })
     })
     if (!res.ok) {
