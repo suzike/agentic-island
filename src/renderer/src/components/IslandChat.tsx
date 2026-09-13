@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowUp, Brain, Camera, Check, ChevronDown, Copy, CornerDownRight, Database, EyeOff, GitFork, GitMerge, Image as ImageIcon, Library, ListTree, MoreHorizontal, Paperclip, Pin, Quote, RefreshCw, Scale, Settings, ShieldCheck, Sparkles, Square, Users, WandSparkles, Wrench, X } from 'lucide-react'
+import { ArrowUp, Brain, Camera, Check, ChevronDown, Copy, CornerDownRight, Database, Download, EyeOff, GitFork, GitMerge, Image as ImageIcon, Library, ListTree, MoreHorizontal, Paperclip, Pin, Quote, RefreshCw, Scale, Settings, ShieldCheck, Sparkles, Square, Users, WandSparkles, Wrench, X } from 'lucide-react'
 import type { AnswerAnalysis, AnswerAnalysisAction, Block, ChatMessage, ChatProps, QuoteRef } from '../types'
 import { Markdown, Collapsible } from './Markdown'
 import { blocksToText, conversationContextStats } from '../logic/chat'
@@ -556,6 +556,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                   style={{ flex: 1, minWidth: 0, background: fill(1), border: 'none', outline: 'none', borderRadius: R.sm, color: ink(1), padding: '5px 8px', fontSize: FS.small, fontWeight: 600, fontFamily: 'var(--font)' }}
                   title="重命名当前分支"
                 />
+                {p.onExportThread && <Button variant="ghost" sm icon={Download} onClick={p.onExportThread} title="把当前分支全文导出为 Markdown 文件（归档会话以附录列出）">导出</Button>}
                 {p.branch.parentId && <span style={{ ...text.faint(), fontSize: 9 }}>Fork 分支</span>}
               </div>
               <div className="ai-scroll" style={{ maxHeight: 190, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>

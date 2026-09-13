@@ -75,6 +75,17 @@ export function conversationTitle(msgs: ChatMessage[], fallback = '新会话'): 
   return (first?.text?.trim() || fallback).replace(/\s+/g, ' ').slice(0, 28)
 }
 
+/** 会话导出文档：当前分支全文 + 归档会话附录（只列标题与消息数，避免文件爆炸）。 */
+export function exportThreadMarkdown(title: string, msgs: ChatMessage[], archived?: { title: string; count: number }[]): string {
+  const visible = msgs.filter((message) => !message.typing && !message.live)
+  const head = `# ${title}\n\n> Agentic-Island 问答导出 · ${new Date().toLocaleString('zh-CN')} · ${visible.length} 条消息\n\n---\n\n`
+  const body = conversationToMarkdown(msgs)
+  const appendix = archived && archived.length
+    ? `\n\n---\n\n## 归档会话\n\n${archived.map((s) => `- ${s.title}（${s.count} 条消息）`).join('\n')}\n`
+    : ''
+  return head + (body || '（空会话）') + appendix
+}
+
 /** 将分析结果固定附着到目标回答；同类分析只保留最新一次，不生成主会话消息。 */
 export function upsertAnswerAnalysis(msgs: ChatMessage[], msgIndex: number, analysis: AnswerAnalysis): ChatMessage[] {
   if (msgs[msgIndex]?.role !== 'agent') return msgs

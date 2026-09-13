@@ -1,7 +1,7 @@
 // buildQuotedPrompt 单测：引用片段 + 疑问 + 输入 → 发给模型的完整提问。
 // 运行：node --experimental-strip-types scripts/test-quote.ts
 
-import { buildAgentContextPrompt, buildQuotedPrompt, chatMessageText, compactChatMessages, conversationBusy, conversationContextStats, conversationToMarkdown, forkConversation, historyFromThread, sanitizeChatMessages, upsertAnswerAnalysis } from '../src/renderer/src/logic/chat.ts'
+import { buildAgentContextPrompt, buildQuotedPrompt, chatMessageText, compactChatMessages, conversationBusy, conversationContextStats, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, sanitizeChatMessages, upsertAnswerAnalysis } from '../src/renderer/src/logic/chat.ts'
 import type { ChatMessage, QuoteRef } from '../src/renderer/src/types.ts'
 
 let failed = 0
@@ -57,6 +57,12 @@ ok(forked.length === 4 && !forked.some((item) => item.typing), 'Fork 按节点�
 ok(chatMessageText(thread[3]).includes('规格'), '消息正文序列化包含文本附件')
 const markdown = conversationToMarkdown(thread)
 ok(markdown.includes('## 用户 · 长期上下文') && markdown.includes('## AI') && !markdown.includes('think'), '对话可稳定序列化为知识库 Markdown')
+
+// 会话导出：标题头 + 当前分支全文 + 归档附录；进行中占位不进导出
+const exported = exportThreadMarkdown('测试会话', [...thread, { role: 'agent' as const, typing: true, ts: 9 }], [{ title: '旧分支', count: 3 }])
+ok(exported.startsWith('# 测试会话') && exported.includes('## 用户 · 长期上下文'), '导出文档含标题头与分支全文')
+ok(exported.includes('归档会话') && exported.includes('旧分支（3 条消息）'), '导出文档列出归档会话附录')
+ok(!exported.includes('undefined'), '导出文档不携带占位/未定义内容')
 
 // 回答分析只附着原回答：不增加主会话消息，同类结果覆盖，且不进入后续模型历史。
 const analysisBlocks = [{ t: 'p' as const, text: '只用于检查原回答的独立分析' }]

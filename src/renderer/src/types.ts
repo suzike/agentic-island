@@ -424,6 +424,8 @@ export interface ChatProps {
   onSwitchBranch?: (id: number) => void
   onRenameBranch?: (title: string) => void
   onMergeBranch?: (id: number) => void
+  /** 把当前分支导出为 Markdown 文件（另存为对话框；问答区开启） */
+  onExportThread?: () => void
   /** 长期记忆与会话级指令均按分支持久化，并真实注入模型上下文。 */
   memory?: string
   instruction?: string
