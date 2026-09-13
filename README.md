@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.6.7](https://img.shields.io/badge/release-v0.6.7-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.7)
+[![Release v0.6.7](https://img.shields.io/badge/release-v0.6.8-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.8)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/terminal-v067.png" alt="Agentic-Island v0.6.4 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
+<img src="screenshots/terminal-v068.png" alt="Agentic-Island v0.6.4 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
 
 </div>
 
@@ -34,6 +34,14 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **成果没有沉淀** | 执行记录、情报简报、每日复盘与知识资料成为下一轮工作的上下文 |
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
+
+## v0.6.8 更新概览
+
+- **审批策略规则化**：设置页配置放行规则（匹配命令原文），命中即自动放行并记入审计流水；审批卡片新增「本会话放行此命令」。把人的判断力集中到真正危险的命令上。
+- **定时自动化**：每日 HH:mm 自动运行指定工作流、写入待办或存为便签；应用启动时自动补跑 30 分钟内错过的任务，同日不重复触发——从「功能集合」向「个人自动化中枢」迈一步。
+- **本地模型预设**：内置 Ollama 与 LM Studio 端点，无需 API Key，选中即可同步本机模型；本地推理数据不出网，契合无账号、隐私优先的定位。
+- **运行时升级到 Electron 44**：原 Electron 39 已滑出官方安全维护窗口；适配其重构后的剪贴板 API，截图轮询改为异步串行并加重入保护。
+- **图片附件外置**：会话里的截图不再以 base64 随状态全量加密落盘，改为按内容哈希存入 `userData/attachments/` 并在读取时回填——含 3 张截图的 `config.json` 从 2.3 MB 降到 0.6 KB，重复图片自动去重。
 
 ## v0.6.7 更新概览
 
@@ -89,24 +97,24 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v067.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v067.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v068.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v068.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v067.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v067.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v068.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v068.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v067.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v067.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v068.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v068.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/recording-v067.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>多源采集 · 实时运镜 · 三轨剪辑 · AI 后期</sub></td>
-<td width="50%" align="center"><img src="screenshots/settings-v067.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v068.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>多源采集 · 实时运镜 · 三轨剪辑 · AI 后期</sub></td>
+<td width="50%" align="center"><img src="screenshots/settings-v068.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v067.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v068.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -117,7 +125,7 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **Agents** | Claude Code/Codex 会话聚合；运行、等待、审批、完成状态；风险分级；允许/拒绝；拒绝理由回传；git 变更小结；跳回原终端；会话时间线；审批策略自动放行与本会话放行；模型与上下文占用显示 |
 | **Plan** | 独立计划审阅队列；Markdown 方案展示；批准或带理由打回；等待时长与终端定位 |
 | **问答** | OpenAI 兼容云模型（含 Ollama / LM Studio 本地端点预设）、Anthropic Messages API 与本机 Claude Code/Codex；供应商/账号原子切换与回答模型标记；15 种单轮回答方法与本地智能推荐；23 种附着气泡的深度分析；会话分支树与任意节点 Fork；长期记忆、持续指令和上下文钉选/排除；多模型并行、共识与辩论；每条回答气泡内的连续追问支线；引用追问；对话写入知识库；会话导出 Markdown；动态灵感推荐 |
-| **快捷** | 12 条内置工程工作流；自定义工作流；AI 生成流程；输入、剪贴板、AI、Shell、打开、Agent、岛动作、确认步骤；变量插值；仓库上下文；危险命令强制确认；外部变量（AI 输出/剪贴板）插值强制确认；执行日志与项目归档 |
+| **快捷** | 12 条内置工程工作流；自定义工作流；AI 生成流程；定时自动化（每日定时跑工作流/写待办/存便签，错过自动补跑）；输入、剪贴板、AI、Shell、打开、Agent、岛动作、确认步骤；变量插值；仓库上下文；危险命令强制确认；外部变量（AI 输出/剪贴板）插值强制确认；执行日志与项目归档 |
 | **待办** | 时间线、看板、今日计划、完成视图；优先级、状态、标签、项目、依赖、验收标准、精力、预估/投入工时、重复、子任务、备注、置顶、归档；批量处理；Markdown 导入导出；日历会议 |
 | **灵感便签** | Markdown 卡片；富文本快捷工具；模板、闪念、日记、放映；标签、颜色、星标、稍后读、锁定、回收站、批量管理；Wiki 双链、反向链接、关系图；快照；桌面便签；AI 生成与语义检索 |
 | **资讯** | RSS/Atom 聚合；正文抓取；AI 评分、分类、摘要；精选、信号、雷达、全部、日报、主题、收藏；关键词观察清单；影响/时间判断；多源 AI 综合；关联文章；转待办；项目情报资产 |
@@ -206,7 +214,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.6.7.exe
+Agentic-Island-Setup-0.6.8.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。
@@ -287,7 +295,7 @@ npm run demo:plan       # 向运行中的应用注入计划审阅演示
 npm run probe           # hooks 接入诊断与事件跟踪
 ```
 
-`npm test` 当前顺序执行 38 个离线脚本，自动排除 `test-real-claude.ts`。覆盖 Agent 生命周期、审批闭环与审批策略、Codex 跟随、外部让位、日历、待办、快捷、终端工作区/项目扫描、Markdown、便签、资讯、复盘、供应商模型配置迁移、回答与分析方法目录、DeepSeek/Kimi/Anthropic 请求协议、录屏合成/会话/工程/FFmpeg 导出、截图轮询、主题、向量、知识链接、RSS 解析、知识库纯逻辑、番茄钟、SRS、工程计算和工作台迁移。`npm run audit:ask` 与 `npm run audit:terminal` 分别启动隔离 Electron 验证问答交互和真实 ConPTY 交互。真实 Claude CLI 与云供应商账号连通测试需在已登录或持有有效密钥的环境中单独运行。
+`npm test` 当前顺序执行 41 个离线脚本，自动排除 `test-real-claude.ts`。覆盖 Agent 生命周期、审批闭环与审批策略、Codex 跟随、外部让位、日历、待办、快捷、终端工作区/项目扫描、Markdown、便签、资讯、复盘、供应商模型配置迁移、回答与分析方法目录、DeepSeek/Kimi/Anthropic 请求协议、录屏合成/会话/工程/FFmpeg 导出、截图轮询、主题、向量、知识链接、RSS 解析、知识库纯逻辑、附件外置、定时自动化调度、番茄钟、SRS、工程计算和工作台迁移。`npm run audit:ask` 与 `npm run audit:terminal` 分别启动隔离 Electron 验证问答交互和真实 ConPTY 交互。真实 Claude CLI 与云供应商账号连通测试需在已登录或持有有效密钥的环境中单独运行。
 
 `.github/workflows/release.yml` 提供可重复的 Windows Release 门禁：在 GitHub Windows runner 上重新安装依赖、执行类型检查和全部离线测试、生成 NSIS 安装包与 SHA-256，并上传到指定草稿 Release 后发布。
 
