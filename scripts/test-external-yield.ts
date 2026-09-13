@@ -53,7 +53,7 @@ assert.equal((mainSource.match(/showOwnedOpenDialog\(/g) || []).length, 7, 'Mark
 assert.equal((mainSource.match(/showOwnedSaveDialog\(/g) || []).length, 7, 'Markdown、PDF、文本、录屏、图片和终端工作区保存入口必须接入统一包装器')
 assert.match(mainSource, /ipcMain\.handle\('pick-directory',[\s\S]*?showOwnedOpenDialog\([\s\S]*?properties:\s*\['openDirectory'/, 'PowerShell 工作目录必须使用可确认选择的系统目录对话框')
 assert.equal((mainSource.match(/shell\.(?:openExternal|openPath)\(/g) || []).length, 2, '外部网页和路径只能在统一让位包装器中调用')
-assert.match(mainSource, /function openScreenshot\([^)]*\): void \{[\s\S]*?yieldToExternalApp\(\)/, '系统截图界面打开前必须让位')
+assert.match(mainSource, /(?:async )?function openScreenshot\([^)]*\): (?:void|Promise<void>) \{[\s\S]*?yieldToExternalApp\(\)/, '系统截图界面打开前必须让位')
 assert.match(mainSource, /const nextRelease = externalYield\?\.suspendTopmost\(\)/, '系统框选期间必须持续降低灵动岛层级')
 assert.match(mainSource, /screenshotPoller\.stop\(\)[\s\S]*?screenshotPoller\.start\(baseline\)/, '重复截图必须替换旧轮询，不能静默返回')
 

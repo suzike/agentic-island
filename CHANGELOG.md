@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 运行时升级到 Electron 44.3.0（原 39.8.10 已滑出官方安全维护窗口）。为适配 Electron 44 重构的剪贴板 API（`read`/`write` 走 ClipboardItem、`readText`/`writeText` 改为 Promise、移除 `readImage`/`writeImage`），新增 `src/main/clipboard-compat.ts` 兼容层，调用方语义保持不变；截图轮询改为异步串行并加入重入保护。
+- 打包验证补充说明：本机下载 Electron 运行时不稳定时，可从镜像取 zip 解压到 `node_modules/electron/dist` 后用 `--config.electronDist` 打包（见 docs/RELEASE.md）。
+
 ### Added
 
 - 审批策略规则化：设置页可配置放行规则（子串匹配命令原文），命中即自动放行并记入审计流水；审批卡片新增「本会话放行此命令」；会话结束自动清理临时放行；策略由主进程在阻塞审批前强制执行，启动时即从持久化载入。

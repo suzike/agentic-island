@@ -5,7 +5,7 @@ let clipboard = 'old'
 const captures: string[] = []
 let timeouts = 0
 const poller = createScreenshotPoller({
-  readImage: () => clipboard,
+  readImage: async () => clipboard,
   onCapture: (url) => captures.push(url),
   onTimeout: () => { timeouts++ }
 }, 5, 4)

@@ -32,6 +32,7 @@ import { setPtySink, ptyEnsure, ptyInput, ptyResize, ptyKill, ptyKillAll } from 
 import { createTerminalWorkspaceStore, terminalWorkspaceExportState } from './terminal-workspace-store'
 import { inspectTerminalProject } from './terminal-project'
 import { startClipboardWatch } from './clipboard-watch'
+import { readClipboardImageDataUrl, writeClipboardImageDataUrl } from './clipboard-compat'
 import { startDndWatch } from './dnd-watch'
 import { initUpdater } from './updater'
 import { setApprovalPolicy, approvalSessionAllow, setApprovalAuditSink, policyAutoDecision, clearSessionAllows } from './approval-policy'
@@ -345,6 +346,7 @@ function createWindow(): void {
   loadRenderer(win)
 
   // 无边框窗口开不了 DevTools —— 把渲染进程的报错转发到启动终端，便于排查
+  // 无边框窗口开不了 DevTools —— 把渲染进程的报错转发到启动终端，便于排查
   win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
     if (level >= 2) console.error(`[renderer] ${message} (${sourceId.split('/').pop()}:${line})`)
   })
@@ -365,10 +367,7 @@ const finishScreenshotFlow = (): void => {
   release?.()
 }
 const screenshotPoller = createScreenshotPoller({
-  readImage: () => {
-    const image = clipboard.readImage()
-    return image.isEmpty() ? '' : image.toDataURL()
-  },
+  readImage: () => readClipboardImageDataUrl(),
   onCapture: (dataUrl) => {
     const target = screenshotTarget
     screenshotTarget = 'ask'
@@ -385,7 +384,7 @@ const screenshotPoller = createScreenshotPoller({
   }
 })
 
-function openScreenshot(target: ScreenshotTarget = 'ask'): void {
+async function openScreenshot(target: ScreenshotTarget = 'ask'): Promise<void> {
   if (!win) return
   yieldToExternalApp()
   // 先取得新 hold，再释放旧 hold；重试瞬间不会闪回最高层。
@@ -395,8 +394,7 @@ function openScreenshot(target: ScreenshotTarget = 'ask'): void {
   screenshotTopmostRelease = nextRelease
   screenshotTarget = target
 
-  const image = clipboard.readImage()
-  const baseline = image.isEmpty() ? '' : image.toDataURL()
+  const baseline = await readClipboardImageDataUrl()
   try {
     const child = spawn('explorer.exe', ['ms-screenclip:'], { detached: true, windowsHide: true })
     child.once('error', () => {
@@ -1377,13 +1375,12 @@ function wireIpc(): void {
   const imageDataLimit = 160_000_000
   const validImageData = (value: string): boolean => /^data:image\/(?:png|jpe?g|webp);base64,/i.test(value) && value.length <= imageDataLimit
   // 图片写剪贴板。返回结果，避免渲染层在失败时仍提示成功。
-  ipcMain.handle('copy-image', (_e, dataUrl: string) => {
+  ipcMain.handle('copy-image', async (_e, dataUrl: string) => {
     const url = String(dataUrl || '')
     if (!validImageData(url)) return { ok: false, error: '图片数据无效或超过 160MB' }
     try {
-      const image = nativeImage.createFromDataURL(url)
-      if (image.isEmpty()) return { ok: false, error: '图片解码失败' }
-      clipboard.writeImage(image)
+      const written = await writeClipboardImageDataUrl(url)
+      if (!written) return { ok: false, error: '图片解码失败' }
       return { ok: true }
     } catch (e) { return { ok: false, error: String(e instanceof Error ? e.message : e) } }
   })
@@ -1414,11 +1411,11 @@ function wireIpc(): void {
       return { ok: true, dataUrl: `data:${mime};base64,${raw.toString('base64')}`, name: basename(path).replace(/\.[^.]+$/, '') }
     } catch (e) { return { ok: false, error: String(e instanceof Error ? e.message : e) } }
   })
-  ipcMain.handle('read-clipboard-image', () => {
+  ipcMain.handle('read-clipboard-image', async () => {
     try {
-      const image = clipboard.readImage()
-      if (image.isEmpty()) return { ok: false, error: '剪贴板中没有图片' }
-      return { ok: true, dataUrl: image.toDataURL() }
+      const dataUrl = await readClipboardImageDataUrl()
+      if (!dataUrl) return { ok: false, error: '剪贴板中没有图片' }
+      return { ok: true, dataUrl }
     } catch (e) { return { ok: false, error: String(e instanceof Error ? e.message : e) } }
   })
   // ===== 快捷指令（M1）：PowerShell 执行 / 万能打开 / 剪贴板读写 =====
@@ -1456,7 +1453,7 @@ function wireIpc(): void {
     return r ? { ok: false, error: r } : { ok: true }
   })
   ipcMain.handle('clip-read-text', () => clipboard.readText())
-  ipcMain.on('clip-write-text', (_e, t: string) => clipboard.writeText(String(t)))
+  ipcMain.on('clip-write-text', (_e, t: string) => { void clipboard.writeText(String(t)).catch(() => {}) })
 
   // 本地 Agent CLI（Claude Code / Codex 无头模式，JSONL 流式）：问答的另一种引擎，继承本机全部配置
   ipcMain.handle('agent-cli-check', (_e, engine: AgentEngine) => agentCliCheck(engine))

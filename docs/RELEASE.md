@@ -26,6 +26,17 @@ npm run package
 npm run verify:package
 ```
 
+如果 electron-builder 在本机下载 Electron 运行时超时（国内网络常见），可先手动解压运行时再打包：
+
+```powershell
+curl -L -o "$env:TEMP\electron.zip" https://npmmirror.com/mirrors/electron/<version>/electron-v<version>-win32-x64.zip
+Remove-Item -Recurse -Force node_modules/electron/dist -ErrorAction SilentlyContinue
+New-Item -ItemType Directory node_modules/electron/dist | Out-Null
+Expand-Archive "$env:TEMP\electron.zip" -DestinationPath node_modules/electron/dist -Force
+"<version>" | Set-Content node_modules/electron/dist/version -NoNewline
+npx electron-builder --win nsis --publish never --config.electronDist=node_modules/electron/dist
+```
+
 如果 electron-builder 在 GitHub 运行时下载阶段超时，而 `node_modules/electron/dist` 已存在且 `node -p "require('electron/package.json').version"` 与项目锁定版本一致，可在 `npm run build` 成功后复用本地 Windows 运行时：
 
 ```powershell

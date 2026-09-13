@@ -1,5 +1,6 @@
 export interface ScreenshotPollerPort {
-  readImage: () => string
+  /** 异步：Electron 44 的 clipboard.read() 为 Promise（旧 readImage 同步 API 已移除） */
+  readImage: () => Promise<string>
   onCapture: (dataUrl: string) => void
   onTimeout: () => void
 }
@@ -32,20 +33,26 @@ export function createScreenshotPoller(
     stop()
     const currentGeneration = generation
     let tries = 0
+    let reading = false // 异步读取未完成时跳过本轮，避免读取重叠堆积
     timer = setInterval(() => {
-      if (generation !== currentGeneration) return
-      tries++
-      let dataUrl = ''
-      try { dataUrl = port.readImage() } catch { /* 剪贴板可能被其它进程短暂占用 */ }
-      if (dataUrl && dataUrl !== baseline) {
-        stop()
-        port.onCapture(dataUrl)
-        return
-      }
-      if (tries >= maxTries) {
-        stop()
-        port.onTimeout()
-      }
+      if (generation !== currentGeneration || reading) return
+      reading = true
+      void (async () => {
+        let dataUrl = ''
+        try { dataUrl = await port.readImage() } catch { /* 剪贴板可能被其它进程短暂占用 */ }
+        finally { reading = false }
+        if (generation !== currentGeneration) return
+        tries++
+        if (dataUrl && dataUrl !== baseline) {
+          stop()
+          port.onCapture(dataUrl)
+          return
+        }
+        if (tries >= maxTries) {
+          stop()
+          port.onTimeout()
+        }
+      })()
     }, intervalMs)
   }
 
