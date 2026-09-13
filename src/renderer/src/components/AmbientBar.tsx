@@ -180,6 +180,7 @@ export function AmbientBar({ cfg, media, brief, pools, width, status, onMediaKey
 
   return (
     <div className="ambient-shell" style={{ width: barW }}>
+      {/* 角部外扩：与主体一同构成"贴顶挂下"的圆角轮廓（几何修正见 index.html .ambient-notch-*） */}
       <div className="ambient-notch ambient-notch-left" />
       <div className="ambient-notch ambient-notch-right" />
       <div
@@ -192,6 +193,7 @@ export function AmbientBar({ cfg, media, brief, pools, width, status, onMediaKey
         onClick={onOpen}
         title="点击展开灵动岛"
       >
+        <div className="ambient-rim" />
         <div className="ambient-depth-grid" />
         <div className="ambient-surface-flow" />
         <div className="ambient-top-highlight" />
