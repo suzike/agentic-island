@@ -19,6 +19,14 @@ export class RecordingSessionStore {
   private manifestPath(id: string): string { return join(this.root, `${id}.json`) }
   private mediaPath(manifest: RecordingSessionManifest): string { return join(this.root, manifest.fileName) }
 
+  /** 同会话磁盘操作串行化：finalize/discard 的 rename/rm 也必须与 append 同队列，否则队列排空后新到的分片会按旧路径重建孤儿文件 */
+  private enqueue<T>(id: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.queues.get(id) || Promise.resolve()
+    const run = previous.then(task, task)
+    this.queues.set(id, run.then(() => undefined, () => undefined))
+    return run
+  }
+
   private async persist(manifest: RecordingSessionManifest): Promise<void> {
     const target = this.manifestPath(manifest.id)
     const temporary = `${target}.tmp`
@@ -88,45 +96,45 @@ export class RecordingSessionStore {
     const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data
     if (!bytes.byteLength) return { ...manifest }
     if (bytes.byteLength > 128 * 1024 * 1024) throw new Error('单个录制分片超过 128MB')
-    const previous = this.queues.get(id) || Promise.resolve()
-    const next = previous.then(async () => {
+    await this.enqueue(id, async () => {
+      // 任务真正执行时复核：discard/finalize 排在前面时，本分片必须丢弃（否则按旧路径 appendFile 重建孤儿文件）
+      if (this.manifests.get(id) !== manifest || manifest.status !== 'recording') return
       await appendFile(this.mediaPath(manifest), bytes)
       manifest.bytes += bytes.byteLength
       manifest.chunks++
       manifest.updatedAt = Date.now()
       if (manifest.chunks % 5 === 0) await this.persist(manifest)
     })
-    this.queues.set(id, next)
-    try { await next } finally { if (this.queues.get(id) === next) this.queues.delete(id) }
     return { ...manifest }
   }
 
   async finalize(id: string, durationMs: number): Promise<{ manifest: RecordingSessionManifest; filePath: string }> {
     const manifest = this.manifests.get(id)
     if (!manifest) throw new Error('录制会话不存在')
-    await this.queues.get(id)
-    const previous = { ...manifest }
-    const currentPath = this.mediaPath(previous)
-    const finalName = previous.fileName.endsWith('.part') ? previous.fileName.slice(0, -5) : previous.fileName
-    const finalPath = join(this.root, finalName)
-    const needsRename = currentPath !== finalPath
-    if (needsRename) await rename(currentPath, finalPath)
-    try {
-      const next: RecordingSessionManifest = {
-        ...previous,
-        fileName: finalName,
-        durationMs: Math.max(0, Number(durationMs) || previous.durationMs),
-        status: 'ready',
-        updatedAt: Date.now(),
-        bytes: (await stat(finalPath)).size
+    return this.enqueue(id, async () => {
+      const previous = { ...manifest }
+      const currentPath = this.mediaPath(previous)
+      const finalName = previous.fileName.endsWith('.part') ? previous.fileName.slice(0, -5) : previous.fileName
+      const finalPath = join(this.root, finalName)
+      const needsRename = currentPath !== finalPath
+      if (needsRename) await rename(currentPath, finalPath)
+      try {
+        const next: RecordingSessionManifest = {
+          ...previous,
+          fileName: finalName,
+          durationMs: Math.max(0, Number(durationMs) || previous.durationMs),
+          status: 'ready',
+          updatedAt: Date.now(),
+          bytes: (await stat(finalPath)).size
+        }
+        await this.persist(next)
+        this.manifests.set(id, next)
+        return { manifest: { ...next }, filePath: finalPath }
+      } catch (error) {
+        if (needsRename) await rename(finalPath, currentPath).catch(() => {})
+        throw error
       }
-      await this.persist(next)
-      this.manifests.set(id, next)
-      return { manifest: { ...next }, filePath: finalPath }
-    } catch (error) {
-      if (needsRename) await rename(finalPath, currentPath).catch(() => {})
-      throw error
-    }
+    })
   }
 
   async recover(id: string): Promise<{ manifest: RecordingSessionManifest; filePath: string }> {
@@ -147,13 +155,14 @@ export class RecordingSessionStore {
   async discard(id: string): Promise<void> {
     const manifest = this.manifests.get(id)
     if (!manifest) return
-    await this.queues.get(id)?.catch(() => {})
-    this.manifests.delete(id)
+    await this.enqueue(id, async () => {
+      this.manifests.delete(id)
+      await Promise.all([
+        rm(this.mediaPath(manifest), { force: true }),
+        rm(this.manifestPath(id), { force: true }),
+        rm(`${this.manifestPath(id)}.tmp`, { force: true })
+      ])
+    }).catch(() => {})
     this.queues.delete(id)
-    await Promise.all([
-      rm(this.mediaPath(manifest), { force: true }),
-      rm(this.manifestPath(id), { force: true }),
-      rm(`${this.manifestPath(id)}.tmp`, { force: true })
-    ])
   }
 }

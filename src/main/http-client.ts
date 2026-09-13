@@ -23,3 +23,23 @@ export async function netFetch(url: string, opts: NetFetchOptions = {}): Promise
     if (signal) signal.removeEventListener('abort', abort)
   }
 }
+
+/** 流式读取响应体并在超过 maxBytes 时中止——恶意/异常的大响应不再能把主进程内存打爆。 */
+export async function readBodyText(res: Response, maxBytes: number): Promise<string> {
+  const declared = Number(res.headers?.get?.('content-length') || 0)
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error(`响应超过大小上限（${Math.round(maxBytes / 1024 / 1024)}MB）`)
+  const reader = res.body?.getReader?.()
+  if (!reader) return res.text()
+  const decoder = new TextDecoder()
+  let out = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    out += decoder.decode(value, { stream: true })
+    if (out.length > maxBytes) {
+      try { await reader.cancel() } catch { /* 已中断即可 */ }
+      throw new Error(`响应超过大小上限（${Math.round(maxBytes / 1024 / 1024)}MB）`)
+    }
+  }
+  return out + decoder.decode()
+}

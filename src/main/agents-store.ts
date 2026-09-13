@@ -17,6 +17,10 @@ interface PendingRequest {
   agentId: string
   resolve: (r: DecisionResult) => void
   timer: NodeJS.Timeout
+  /** 事件快照：排队审批被顶上卡片时用于还原展示 */
+  detail?: string
+  command?: string
+  isPlan?: boolean
 }
 
 const toolLabel = (e: BridgeEvent): string => {
@@ -38,6 +42,8 @@ const agentKey = (e: BridgeEvent): string => `${e.backend}:${e.sessionId || e.cw
 export class AgentsStore extends EventEmitter {
   private agents = new Map<string, AgentState>()
   private pending = new Map<string, PendingRequest>()
+  /** 每会话的审批队列（requestId 有序）：并行工具调用会产生多个挂起审批，卡片展示队首，裁决后依次顶上 */
+  private queues = new Map<string, string[]>()
   private seq = 0
 
   /** 审批默认超时（毫秒）：超时未裁决则 fail-open 回退到 CLI 自身提示 */
@@ -99,20 +105,30 @@ export class AgentsStore extends EventEmitter {
   /** 处理一条 permission 事件：登记挂起请求并返回一个在用户裁决时 resolve 的 Promise */
   handlePermission(e: BridgeEvent): Promise<DecisionResult> {
     const requestId = `req-${++this.seq}-${Date.now()}`
+    const agentId = agentKey(e)
     return new Promise<DecisionResult>((resolve) => {
       const timer = setTimeout(() => {
         // 超时：fail-open，交回 CLI 自身的权限提示
         this.resolvePending(requestId, 'ask')
       }, AgentsStore.APPROVAL_TIMEOUT)
       // 先登记 pending，再触发 change —— 避免同步监听者在 pending 就绪前就 decide 造成放行落空
-      this.pending.set(requestId, { id: requestId, agentId: agentKey(e), resolve, timer })
-      this.upsertAgent(e, {
-        status: 'needs_approval',
-        detail: e.detail || '请求执行命令',
-        command: e.command,
-        requestId,
-        isPlan: !!e.isPlan
+      this.pending.set(requestId, {
+        id: requestId, agentId, resolve, timer,
+        detail: e.detail, command: e.command, isPlan: !!e.isPlan
       })
+      const queue = this.queues.get(agentId) || []
+      queue.push(requestId)
+      this.queues.set(agentId, queue)
+      if (queue.length === 1) {
+        this.upsertAgent(e, {
+          status: 'needs_approval',
+          detail: e.detail || '请求执行命令',
+          command: e.command,
+          requestId,
+          isPlan: !!e.isPlan
+        })
+      }
+      // 队列非 1 说明该会话已有审批在卡片上：新请求排队等待，不覆盖队首（并行工具调用场景）
     })
   }
 
@@ -121,16 +137,46 @@ export class AgentsStore extends EventEmitter {
     this.resolvePending(requestId, decision, reason)
   }
 
+  /** 把队首下一条待审批顶上卡片；队列已空则清档并返回 false */
+  private promoteNext(agentId: string): boolean {
+    const queue = this.queues.get(agentId)
+    const next = queue?.find((id) => this.pending.has(id))
+    if (!next) {
+      this.queues.delete(agentId)
+      return false
+    }
+    const p = this.pending.get(next)
+    const agent = this.agents.get(agentId)
+    if (!p || !agent) return false
+    this.agents.set(agentId, {
+      ...agent,
+      status: 'needs_approval',
+      detail: p.detail || '请求执行命令',
+      command: p.command,
+      requestId: next,
+      isPlan: p.isPlan,
+      updatedAt: Date.now()
+    })
+    this.emit('change')
+    return true
+  }
+
   private resolvePending(requestId: string, decision: Decision, reason?: string): void {
     const p = this.pending.get(requestId)
     if (!p) return
     clearTimeout(p.timer)
     this.pending.delete(requestId)
+    const queue = this.queues.get(p.agentId)
+    if (queue) {
+      const idx = queue.indexOf(requestId)
+      if (idx !== -1) queue.splice(idx, 1)
+    }
     p.resolve({ decision, reason })
 
     const agent = this.agents.get(p.agentId)
     if (agent && agent.requestId === requestId) {
-      // 裁决后回到 running（allow/ask）或标记已拒绝（deny 仍继续运行，交回 CLI）
+      // 卡片正在展示本条：先让排队中的下一条顶上（保持待审批），没有才回到运行态
+      if (this.promoteNext(p.agentId)) return
       this.agents.set(p.agentId, {
         ...agent,
         status: 'running',
@@ -164,6 +210,10 @@ export class AgentsStore extends EventEmitter {
   // 会话真正结束 → 立即从岛上移除，不再占位（此前保留 3min，用户希望即时消失）
   handleEnd(e: BridgeEvent): void {
     const key = agentKey(e)
+    // 会话结束：排队中的审批一并 fail-open（'ask' 交回 CLI 原生提示），避免悬挂到超时才放行
+    const queue = this.queues.get(key)
+    if (queue) for (const id of [...queue]) this.resolvePending(id, 'ask')
+    this.queues.delete(key)
     if (this.agents.delete(key)) this.emit('change')
   }
 
@@ -220,6 +270,9 @@ export class AgentsStore extends EventEmitter {
   }
 
   handlePrompt(e: BridgeEvent): void {
+    // 若该会话正处于待审批，不要用新消息覆盖审批态
+    const prev = this.agents.get(agentKey(e))
+    if (prev && prev.status === 'needs_approval') return
     this.upsertAgent(e, { status: 'running', detail: e.detail || '对话中 · 正在处理你的消息…', summary: undefined })
   }
 

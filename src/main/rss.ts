@@ -1,6 +1,6 @@
 // RSS 抓取与解析（零依赖）：支持 RSS 2.0 与 Atom。用 electron net.fetch（走系统代理）。
 // 解析尽力而为：title/link/时间/摘要；单源上限 30 条，异常源如实报错不拖垮其它源。
-// electron 延迟导入：parseRss 保持纯函数，可被 raw-node 测试直接加载（项目约定）。
+// electron/readBodyText 延迟导入：parseRss 保持纯函数，可被 raw-node 测试直接加载（项目约定）。
 
 export interface RssItem {
   title: string
@@ -50,6 +50,7 @@ export function parseRss(xml: string): RssItem[] {
 
 export async function fetchRss(url: string): Promise<RssItem[]> {
   const { net } = await import('electron')
+  const { readBodyText } = await import('./http-client')
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 20000)
   try {
@@ -58,7 +59,7 @@ export async function fetchRss(url: string): Promise<RssItem[]> {
       headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) agentic-island-rss', accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*' }
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const xml = await res.text()
+    const xml = await readBodyText(res, 8 * 1024 * 1024)
     const items = parseRss(xml)
     if (!items.length && !/<(rss|feed|rdf)[\s>]/i.test(xml)) throw new Error('返回内容不是 RSS/Atom 订阅源')
     return items

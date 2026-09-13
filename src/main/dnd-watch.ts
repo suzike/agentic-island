@@ -21,17 +21,30 @@ export function startDndWatch(onChange: (active: boolean) => void): () => void {
   const poll = (): void => {
     if (dead) return
     let out = ''
+    // 一次 spawn 挂起即永久停摆 + 僵尸 powershell 进程：超时强杀并按降频续链
+    let killer: NodeJS.Timeout | undefined
+    let settled = false
+    const proceed = (delay: number): void => {
+      if (settled || dead) return
+      settled = true
+      if (killer) clearTimeout(killer)
+      timer = setTimeout(poll, delay)
+    }
     try {
       const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_SCRIPT], { windowsHide: true })
+      killer = setTimeout(() => {
+        try { ps.kill() } catch { /* */ }
+        proceed(POLL_MS * 2)
+      }, 10000)
       ps.stdout.on('data', (d) => { out += String(d) })
       ps.on('close', () => {
         const active = out.trim().startsWith('1')
         if (active !== last) { last = active; onChange(active) }
-        if (!dead) timer = setTimeout(poll, POLL_MS)
+        proceed(POLL_MS)
       })
-      ps.on('error', () => { if (!dead) timer = setTimeout(poll, POLL_MS * 2) })
+      ps.on('error', () => proceed(POLL_MS * 2))
     } catch {
-      if (!dead) timer = setTimeout(poll, POLL_MS * 2)
+      proceed(POLL_MS * 2)
     }
   }
   poll()

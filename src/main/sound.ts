@@ -2,7 +2,7 @@
 // 完全绕开 Chromium 渲染进程音频（透明置顶无焦点窗口里渲染进程音频不可靠）。
 
 import { app } from 'electron'
-import { writeFileSync, existsSync, appendFileSync } from 'fs'
+import { writeFileSync, existsSync, appendFileSync, statSync, renameSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { execFile } from 'child_process'
@@ -77,7 +77,10 @@ function ensureWav(key: string): string | null {
 
 const LOG = join(homedir(), '.agentic-island', 'sound.log')
 const log = (msg: string): void => {
-  try { appendFileSync(LOG, `${new Date().toISOString()} ${msg}\n`) } catch { /* */ }
+  try {
+    try { if (existsSync(LOG) && statSync(LOG).size > 1_000_000) renameSync(LOG, LOG + '.old') } catch { /* 首次写入前无文件 */ }
+    appendFileSync(LOG, `${new Date().toISOString()} ${msg}\n`)
+  } catch { /* */ }
 }
 
 export function playSound(key: string): void {

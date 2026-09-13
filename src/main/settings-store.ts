@@ -6,7 +6,7 @@
 // ③ 自定义主题双写明文 themes.json（非敏感数据）——即使主 config 出任何问题，主题也能兜底恢复。
 
 import { app, safeStorage } from 'electron'
-import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync, appendFileSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync, appendFileSync, statSync } from 'fs'
 import { join } from 'path'
 
 const filePath = (): string => join(app.getPath('userData'), 'config.json')
@@ -14,7 +14,10 @@ const themesPath = (): string => join(app.getPath('userData'), 'themes.json')
 const logPath = (): string => join(app.getPath('userData'), 'store.log')
 
 const log = (msg: string): void => {
-  try { appendFileSync(logPath(), `${new Date().toISOString()} ${msg}\n`) } catch { /* */ }
+  try {
+    try { if (existsSync(logPath()) && statSync(logPath()).size > 1_000_000) renameSync(logPath(), logPath() + '.old') } catch { /* 首次写入前无文件 */ }
+    appendFileSync(logPath(), `${new Date().toISOString()} ${msg}\n`)
+  } catch { /* */ }
 }
 
 export function loadState(): Record<string, unknown> | null {

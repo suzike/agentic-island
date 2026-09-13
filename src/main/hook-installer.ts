@@ -2,7 +2,7 @@
 // 原则：合并而非覆盖；幂等（重复安装不重复添加）；可一键卸载还原。
 // 识别我方条目的方式：命令行内包含转发脚本的绝对路径。
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs'
+import { readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, mkdirSync, copyFileSync } from 'fs'
 import { join, dirname, basename } from 'path'
 import { homedir } from 'os'
 
@@ -37,6 +37,26 @@ const backup = (p: string): void => {
   if (existsSync(p) && !existsSync(p + '.aiisland.bak')) {
     copyFileSync(p, p + '.aiisland.bak')
   }
+}
+
+// 原子写 + 无变化跳过：这些是用户的 CLI 全局配置，启动瞬间被截断会连累用户 CLI，
+// 且每次启动都会执行 install，无变化时必须短路，避免无谓的重写放大损坏窗口。
+const writeAtomic = (p: string, content: string): void => {
+  const tmp = p + '.aiisland.tmp'
+  writeFileSync(tmp, content)
+  try {
+    renameSync(tmp, p)
+  } catch (err) {
+    try { unlinkSync(tmp) } catch { /* 忽略清理失败 */ }
+    throw err
+  }
+}
+
+const writeIfChanged = (p: string, content: string): void => {
+  if (existsSync(p)) {
+    try { if (readFileSync(p, 'utf8') === content) return } catch { /* 读失败按有变化处理 */ }
+  }
+  writeAtomic(p, content)
 }
 
 const nodeCmd = (script: string, arg: string): string => `node "${script}" ${arg}`
@@ -102,7 +122,7 @@ export function installClaudeCode(ccForwardScript: string): void {
   ensureHook(hooks, 'SessionEnd', undefined, ccForwardScript, 'claude-code SessionEnd')
   ensureHook(hooks, 'Notification', undefined, ccForwardScript, 'claude-code Notification')
   mkdirSync(dirname(CC_SETTINGS), { recursive: true })
-  writeFileSync(CC_SETTINGS, JSON.stringify(settings, null, 2))
+  writeIfChanged(CC_SETTINGS, JSON.stringify(settings, null, 2))
 }
 
 export function uninstallClaudeCode(ccForwardScript: string): void {
@@ -111,7 +131,7 @@ export function uninstallClaudeCode(ccForwardScript: string): void {
   if (settings.hooks) {
     removeOurs(settings.hooks as Record<string, HookMatcher[]>, ccForwardScript)
   }
-  writeFileSync(CC_SETTINGS, JSON.stringify(settings, null, 2))
+  writeIfChanged(CC_SETTINGS, JSON.stringify(settings, null, 2))
 }
 
 // Codex：官方支持从 ~/.codex/hooks.json 读取生命周期 hooks（command 类型）。
@@ -120,21 +140,31 @@ export function installCodex(codexForwardScript: string): void {
   backup(CODEX_HOOKS)
   const doc = readJson(CODEX_HOOKS)
   const hooks = ((doc.hooks as Record<string, HookMatcher[]>) ||= {})
-  // Codex 支持的生命周期 matcher（字段细节以真实版本为准）
+  // Codex 支持的生命周期 matcher（字段细节以真实版本为准）；审批 hook 与 Claude 侧一致给 600s 长超时
   ensureHook(hooks, 'SessionStart', undefined, codexForwardScript, 'codex SessionStart')
   ensureHook(hooks, 'UserPromptSubmit', undefined, codexForwardScript, 'codex UserPromptSubmit')
-  ensureHook(hooks, 'PermissionRequest', undefined, codexForwardScript, 'codex PermissionRequest')
-  ensureHook(hooks, 'PreToolUse', undefined, codexForwardScript, 'codex PreToolUse')
+  ensureHook(hooks, 'PermissionRequest', undefined, codexForwardScript, 'codex PermissionRequest', 600)
+  ensureHook(hooks, 'PreToolUse', undefined, codexForwardScript, 'codex PreToolUse', 600)
   ensureHook(hooks, 'Stop', undefined, codexForwardScript, 'codex Stop')
   mkdirSync(dirname(CODEX_HOOKS), { recursive: true })
-  writeFileSync(CODEX_HOOKS, JSON.stringify(doc, null, 2))
+  writeIfChanged(CODEX_HOOKS, JSON.stringify(doc, null, 2))
 }
 
 export function uninstallCodex(codexForwardScript: string): void {
   if (!existsSync(CODEX_HOOKS)) return
   const doc = readJson(CODEX_HOOKS)
   if (doc.hooks) removeOurs(doc.hooks as Record<string, HookMatcher[]>, codexForwardScript)
-  writeFileSync(CODEX_HOOKS, JSON.stringify(doc, null, 2))
+  writeIfChanged(CODEX_HOOKS, JSON.stringify(doc, null, 2))
+}
+
+// TOML 顶层键必须位于任何 [table] 段之前；用户配置末尾常见表段，追加到 EOF 会让 notify 变成表内子键而静默失效。
+// 因此插到第一个表头之前（无表段才追加到末尾）。
+const insertTopLevel = (text: string, block: string): string => {
+  const lines = text.split('\n')
+  const idx = lines.findIndex((l) => /^\s*\[/.test(l))
+  if (idx === -1) return text.replace(/\s*$/, '') + '\n\n' + block
+  lines.splice(idx, 0, ...block.split('\n'))
+  return lines.join('\n')
 }
 
 // Codex 的 hooks 在 Windows 被禁用 → 用 notify（config.toml，Windows 可用）收完成/通知事件。
@@ -150,15 +180,15 @@ export function installCodexNotify(notifyScript: string): void {
   // 若用户在标记块之外已自定义 notify，则不动它（尊重用户配置）
   if (/^\s*notify\s*=/m.test(text)) return
   const fwd = notifyScript.replace(/\\/g, '/')
-  const block = `\n${NOTIFY_BEGIN}\nnotify = ["node", "${fwd}"]\n${NOTIFY_END}\n`
+  const block = `${NOTIFY_BEGIN}\nnotify = ["node", "${fwd}"]\n${NOTIFY_END}\n`
   mkdirSync(dirname(CODEX_CONFIG), { recursive: true })
-  writeFileSync(CODEX_CONFIG, text.replace(/\s*$/, '') + '\n' + block)
+  writeIfChanged(CODEX_CONFIG, insertTopLevel(text, block))
 }
 
 export function uninstallCodexNotify(): void {
   if (!existsSync(CODEX_CONFIG)) return
   const text = readFileSync(CODEX_CONFIG, 'utf8')
-  writeFileSync(CODEX_CONFIG, stripBlock(text, NOTIFY_BEGIN, NOTIFY_END).replace(/\n{3,}/g, '\n\n'))
+  writeIfChanged(CODEX_CONFIG, stripBlock(text, NOTIFY_BEGIN, NOTIFY_END).replace(/\n{3,}/g, '\n\n'))
 }
 
 function stripBlock(text: string, begin: string, end: string): string {

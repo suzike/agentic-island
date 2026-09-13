@@ -1,9 +1,9 @@
 // 知识库（本地 RAG）：把本地文件夹/文件/网页切块 → 向量化(OpenAI 兼容 /embeddings) → 存本机 → 语义检索。
-// 设计约束：存储目录由外部注入（不 import electron，便于 raw-node 测试）；pdf/docx 解析器惰性 import（避免顶层副作用）。
+// 设计约束：存储目录由外部注入（不 import electron，便于 raw-node 测试）；pdf/docx 解析器与 embed
+// 均为惰性 import（避免顶层副作用/无扩展名相对导入破坏 raw-node 直跑）。
 
 import { promises as fs } from 'node:fs'
 import { join, extname, basename } from 'node:path'
-import { embed } from './llm-proxy'
 import type { LlmRequestConfig } from '../shared/protocol'
 
 export type KbKind = 'folder' | 'files' | 'url' | 'conversation'
@@ -18,6 +18,8 @@ const TEXT_EXT = new Set(['.md', '.markdown', '.mdx', '.txt', '.rst', '.org', '.
 const SKIP_DIR = new Set(['node_modules', '.git', 'dist', 'build', 'out', '.next', '.cache', 'coverage', '__pycache__', '.venv', 'venv', 'target', 'vendor'])
 const MAX_FILES = 2000
 const MAX_TEXT_BYTES = 1_500_000
+// pdf/docx 解析要全量读入内存（解析器本身也吃 CPU），上限比纯文本宽得多但仍封顶
+const MAX_DOC_BYTES = 30 * 1024 * 1024
 const CHUNK = 900
 const OVERLAP = 150
 // 向量化分批：同时限"条数"与"总字符"——很多 embedding 端点对单请求 token 有硬上限（大批量 900 字块一撞就 400）
@@ -53,6 +55,7 @@ export async function readFileText(path: string): Promise<string | null> {
   const ext = extname(path).toLowerCase()
   try {
     if (ext === '.pdf') {
+      if ((await fs.stat(path)).size > MAX_DOC_BYTES) return null
       const buf = await fs.readFile(path)
       const { PDFParse } = await import('pdf-parse')
       const parser = new PDFParse({ data: new Uint8Array(buf) })
@@ -62,6 +65,7 @@ export async function readFileText(path: string): Promise<string | null> {
       return (r.text || '').replace(/\n*-- \d+ of \d+ --\n*/g, '\n\n').trim() || null
     }
     if (ext === '.docx') {
+      if ((await fs.stat(path)).size > MAX_DOC_BYTES) return null
       const mammoth = await import('mammoth')
       const r = await mammoth.extractRawText({ path })
       return r.value || null
@@ -109,6 +113,8 @@ export function chunkText(text: string): string[] {
 
 /** 分批向量化（按条数+总字符双限），任一批失败即整体失败（保证"必须向量嵌入"契约）。 */
 async function embedAll(cfg: LlmRequestConfig, texts: string[]): Promise<number[][] | { error: string }> {
+  // 惰性导入：保持本模块顶层无副作用依赖（raw-node 测试只测纯逻辑，embed 不会被调用）
+  const { embed } = await import('./llm-proxy')
   const out: number[][] = []
   let i = 0
   while (i < texts.length) {
@@ -272,6 +278,7 @@ function cosine(a: number[], b: number[]): number {
 
 /** 语义检索：向量化 query → 余弦相似 → top-k（同文件多块时适度去重，保多样性）。 */
 export async function search(cfg: LlmRequestConfig, query: string, k = 8): Promise<{ ok: boolean; hits?: KbHit[]; error?: string }> {
+  const { embed } = await import('./llm-proxy')
   const s = await load()
   if (!s.docs.length) return { ok: false, error: '知识库为空，请先在管理面板添加文件夹/文件/网页' }
   const qv = await embed(cfg, [query])

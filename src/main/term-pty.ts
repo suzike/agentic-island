@@ -32,6 +32,10 @@ function loadPty(): PtyModule | null {
 
 const sessions = new Map<string, IPty>()
 const sessionSizes = new Map<string, { cols: number; rows: number }>()
+// 会话元数据：会话退出后保留，ptyInput 的"输入任意内容自动重启"据此还原 profile/cwd/env/尺寸，
+// 而不是静默退回默认 powershell + 主目录 + 100x28
+interface PtyMeta { cwd?: string; profile: TerminalShellProfile; environment?: Record<string, string> }
+const sessionMeta = new Map<string, PtyMeta>()
 let sink: ((id: string, data: string) => void) | null = null
 
 export const POWERSHELL_BOOTSTRAP = '[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();$OutputEncoding=[Console]::OutputEncoding;$global:__AIIslandPrompt=(Get-Item Function:\\prompt).ScriptBlock;function global:prompt{$__ok=$?;$__native=$global:LASTEXITCODE;$__code=if($__ok){0}elseif($__native -is [int] -and $__native -ne 0){$__native}else{1};[Console]::Write(([char]27)+"]633;D;$__code"+([char]7));&$global:__AIIslandPrompt}'
@@ -79,19 +83,22 @@ export function ptyEnsure(id: string, cols: number, rows: number, cwd?: string, 
   }
   sessions.set(id, p)
   sessionSizes.set(id, size)
+  sessionMeta.set(id, { cwd, profile, environment })
   p.onData((data) => sink?.(id, data))
   p.onExit(({ exitCode }) => {
     sink?.(id, `\r\n\x1b[90m[会话已退出 code=${exitCode}，输入任意内容自动重启]\x1b[0m\r\n`)
-    if (sessions.get(id) === p) {
-      sessions.delete(id)
-      sessionSizes.delete(id)
-    }
+    // 只移除进程句柄：尺寸与元数据保留给自动重启用（真正关标签时 ptyKill 统一清理）
+    if (sessions.get(id) === p) sessions.delete(id)
   })
   return true
 }
 
 export function ptyInput(id: string, data: string): void {
-  if (!sessions.has(id)) ptyEnsure(id, 100, 28)
+  if (!sessions.has(id)) {
+    const meta = sessionMeta.get(id)
+    const size = sessionSizes.get(id)
+    ptyEnsure(id, size?.cols ?? 100, size?.rows ?? 28, meta?.cwd, meta?.profile ?? 'powershell', meta?.environment)
+  }
   sessions.get(id)?.write(data)
 }
 
@@ -109,6 +116,7 @@ export function ptyKill(id: string): void {
   try { sessions.get(id)?.kill() } catch { /* */ }
   sessions.delete(id)
   sessionSizes.delete(id)
+  sessionMeta.delete(id)
 }
 
 export function ptyKillAll(): void {

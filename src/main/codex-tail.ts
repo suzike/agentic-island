@@ -7,7 +7,7 @@
 // 局限（如实）：rollout 是「运行记录」而非控制通道 —— 只能观察，无法拦截审批（那需要 hooks 生效）。
 // 因此 Codex 在岛上是「实时监控 + 完成待命」，不提供 Allow/Deny 按钮。
 
-import { readFileSync, openSync, readSync, closeSync, statSync, readdirSync, existsSync } from 'fs'
+import { openSync, readSync, closeSync, statSync, readdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import type { AgentsStore } from './agents-store'
@@ -110,10 +110,15 @@ export class CodexTail {
   }
 
   // 从文件头部读取 session_meta，建立会话上下文（用于「岛启动前已在跑」的会话）
+  // 只读前 16KB：rollout 会全程追加、长会话可达上百 MB，全量读入是内存尖峰；session_meta 恒在首行附近。
   private readHeadCtx(f: string): Ctx {
     const ctx: Ctx = { sessionId: '', cwd: homedir(), entry: 'cli' }
+    let fd: number | null = null
     try {
-      const head = readFileSync(f, 'utf8').split('\n', 3)
+      fd = openSync(f, 'r')
+      const buf = Buffer.alloc(16384)
+      const n = readSync(fd, buf, 0, buf.length, 0)
+      const head = buf.toString('utf8', 0, n).split('\n', 3)
       for (const line of head) {
         if (!line.trim()) continue
         const o = JSON.parse(line)
@@ -125,7 +130,8 @@ export class CodexTail {
           break
         }
       }
-    } catch { /* */ }
+    } catch { /* 头部截断/解析失败按无上下文处理 */ }
+    finally { if (fd !== null) { try { closeSync(fd) } catch { /* */ } } }
     return ctx
   }
 
