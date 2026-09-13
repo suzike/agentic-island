@@ -6,12 +6,51 @@
 // ③ 自定义主题双写明文 themes.json（非敏感数据）——即使主 config 出任何问题，主题也能兜底恢复。
 
 import { app, safeStorage } from 'electron'
-import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync, appendFileSync, statSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync, appendFileSync, statSync, mkdirSync, readdirSync, rmSync } from 'fs'
+import { externalizeAttachments, inlineAttachments, attachmentFileName } from './attachment-store'
 import { join } from 'path'
 
 const filePath = (): string => join(app.getPath('userData'), 'config.json')
 const themesPath = (): string => join(app.getPath('userData'), 'themes.json')
 const logPath = (): string => join(app.getPath('userData'), 'store.log')
+const attachmentsDir = (): string => join(app.getPath('userData'), 'attachments')
+
+// 附件落盘/读取（base64 → 文件）；失败返回 false / null，由调用方保留内联形态
+const writeAttachmentFile = (hash: string, ext: string, base64: string): boolean => {
+  try {
+    mkdirSync(attachmentsDir(), { recursive: true })
+    const target = join(attachmentsDir(), attachmentFileName(hash, ext))
+    if (!existsSync(target)) writeFileSync(target, Buffer.from(base64, 'base64'))
+    return true
+  } catch (e) {
+    log(`writeAttachment FAILED: ${String(e instanceof Error ? e.message : e)}`)
+    return false
+  }
+}
+const readAttachmentFile = (hash: string, ext: string): string | null => {
+  try {
+    const file = join(attachmentsDir(), attachmentFileName(hash, ext))
+    if (!existsSync(file)) return null
+    return readFileSync(file).toString('base64')
+  } catch { return null }
+}
+
+/** 清理未被当前状态引用的附件文件（保留 7 天宽限，避免误删尚未落盘的会话） */
+const pruneAttachments = (referenced: Set<string>): void => {
+  try {
+    const dir = attachmentsDir()
+    if (!existsSync(dir)) return
+    const cutoff = Date.now() - 7 * 86_400_000
+    for (const name of readdirSync(dir)) {
+      if (referenced.has(name)) continue
+      const file = join(dir, name)
+      try {
+        if (statSync(file).mtimeMs >= cutoff) continue // 宽限期内不动
+        rmSync(file, { force: true })
+      } catch { /* 单个文件失败不影响其余 */ }
+    }
+  } catch { /* 目录不可读时跳过 GC */ }
+}
 
 const log = (msg: string): void => {
   try {
@@ -40,6 +79,16 @@ export function loadState(): Record<string, unknown> | null {
       state = null
     }
   }
+  // 图片附件回填：把引用还原为 dataUrl（缺失文件则移除该字段）
+  if (state) {
+    try {
+      const stats = inlineAttachments(state, readAttachmentFile)
+      if (stats.restored) log(`附件回填 ${stats.restored} 项`)
+      if (stats.missing) log(`附件缺失 ${stats.missing} 项（文件已被清理）`)
+    } catch (e) {
+      log(`inlineAttachments FAILED: ${String(e instanceof Error ? e.message : e)}`)
+    }
+  }
   // 主题兜底：仅当主 config 里**字段缺失**（整体丢失/损坏/新装）时回补；
   // `[]` 是用户明确删空的合法状态，不回补——否则删除过的主题会"复活"
   try {
@@ -66,6 +115,10 @@ function atomicWrite(path: string, data: string, mode?: number): void {
 
 export function saveState(state: Record<string, unknown>): void {
   try {
+    // 图片附件外置（base64 → 文件 + 引用），避免 config.json 被数 MB 图片撑大；
+    // 注意：只影响落盘副本，渲染层内存中的状态仍持有完整 dataUrl
+    const external = externalizeAttachments(state, writeAttachmentFile)
+    if (external.written || external.referenced.size) pruneAttachments(external.referenced)
     const json = JSON.stringify(state)
     if (safeStorage.isEncryptionAvailable()) {
       const enc = safeStorage.encryptString(json).toString('base64')

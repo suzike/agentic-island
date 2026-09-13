@@ -6,6 +6,7 @@
 
 ### Changed
 
+- 图片附件外置：问答消息里的截图 base64（thumb + dataUrl，单张数百 KB）不再随状态全量加密落盘，改为按内容哈希存入 `userData/attachments/` 并在读取时回填。实测含 3 张截图的 config.json 从 2.3 MB 降到 0.6 KB；渲染层内存模型不变（仍持有 dataUrl，渲染与视觉模型调用零改动），重复图片自动去重，写入失败时保留内联形态不丢图，未被引用的附件文件在 7 天宽限后自动清理。
 - 运行时升级到 Electron 44.3.0（原 39.8.10 已滑出官方安全维护窗口）。为适配 Electron 44 重构的剪贴板 API（`read`/`write` 走 ClipboardItem、`readText`/`writeText` 改为 Promise、移除 `readImage`/`writeImage`），新增 `src/main/clipboard-compat.ts` 兼容层，调用方语义保持不变；截图轮询改为异步串行并加入重入保护。
 - 打包验证补充说明：本机下载 Electron 运行时不稳定时，可从镜像取 zip 解压到 `node_modules/electron/dist` 后用 `--config.electronDist` 打包（见 docs/RELEASE.md）。
 
