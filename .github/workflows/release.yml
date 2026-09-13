@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing draft release tag
         required: true
-        default: v0.6.6
+        default: v0.6.7
 
 permissions:
   contents: write
@@ -51,5 +51,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           $installer = Get-ChildItem dist/Agentic-Island-Setup-*.exe | Select-Object -First 1
-          gh release upload $env:RELEASE_TAG $installer.FullName dist/SHA256SUMS.txt --clobber
+          # latest.yml + blockmap 是 electron-updater 发现与差量下载更新的必备资产，缺一不可
+          $updateMeta = @($installer.FullName) + @(Get-ChildItem dist -File | Where-Object { $_.Name -in @('latest.yml', 'SHA256SUMS.txt') -or $_.Name.EndsWith('.blockmap') } | ForEach-Object { $_.FullName })
+          gh release upload $env:RELEASE_TAG @updateMeta --clobber
           gh release edit $env:RELEASE_TAG --draft=false --latest
