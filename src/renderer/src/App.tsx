@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import type { AgentCliEvent, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo } from '../../shared/protocol'
+import type { AgentCliEvent, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo, UpdateState } from '../../shared/protocol'
 import type { ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
@@ -23,7 +23,7 @@ import { MarkdownStudio } from './components/MarkdownStudio'
 import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
 import { PROVIDERS, loadProviderSettings, migrateEmbeddingSettings, migrateProviderSettings, patchProviderDraft, providerConfigEquals, providerModelChoices, saveProviderSettings, switchProviderSettings } from './logic/providers'
-import { branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
+import { branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
 import { ADVANCE_PROMPTS, analysisMethodById, answerMethodById, answerMethodInstruction } from './logic/methodologies'
 import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
 import { ThemeDesigner, type Tokens } from './components/ThemeDesigner'
@@ -99,6 +99,7 @@ export function App(): React.JSX.Element {
   // 真实快照（唯一 Agent 数据源）
   const [snap, setSnap] = useState<IslandSnapshot>({ agents: [] })
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null)
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const [bridgeConnected, setBridgeConnected] = useState(false)
 
   const [tab, setTab] = useState<Tab>('agents')
@@ -294,6 +295,7 @@ export function App(): React.JSX.Element {
   const hydrated = useRef(false)
   useEffect(() => {
     island.getRuntimeInfo().then(setRuntimeInfo).catch(() => setRuntimeInfo(null))
+    const offUpdate = island.onUpdateState(setUpdateState)
     island.getSnapshot().then((next) => { setSnap(next); setBridgeConnected(true) }).catch(() => setBridgeConnected(false))
     const off = island.onSnapshot((next) => { setSnap(next); setBridgeConnected(true) })
     // 载入持久化配置
@@ -369,7 +371,7 @@ export function App(): React.JSX.Element {
         monitorIndex: (typeof s?.activeMonitor === 'number' ? s.activeMonitor : 1) - 1
       })
     })
-    return off
+    return () => { off(); offUpdate() }
   }, [])
 
   const agents: AgentVM[] = useMemo(() => snap.agents.map((a) => ({ ...a })), [snap])
@@ -916,7 +918,13 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (!musicOn) { setMedia(null); return }
     let dead = false
-    const load = (): void => { island.mediaInfo().then((m) => { if (!dead) setMedia(m) }) }
+    let lastJson = ''
+    const load = (): void => { island.mediaInfo().then((m) => {
+      if (dead) return
+      // SMTC 轮询返回新对象：内容没变就不 setState，避免每 4s 打破 memo 造成全树重渲染
+      const j = JSON.stringify(m)
+      if (j !== lastJson) { lastJson = j; setMedia(m) }
+    }) }
     load()
     const t = setInterval(load, 4000)
     return () => { dead = true; clearInterval(t) }
@@ -1450,6 +1458,14 @@ export function App(): React.JSX.Element {
     if (next) setActiveAskBranch((branch) => ({ ...branch, title: next, updatedAt: Date.now() }))
   }, [])
 
+  // 导出当前分支为 Markdown 文件（另存为对话框）；归档会话以附录列出
+  const exportAskThread = useCallback((): void => {
+    const msgs = threads['ask'] || []
+    const title = (activeAskBranch.title || conversationTitle(msgs) || '问答会话').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)
+    const md = exportThreadMarkdown(title, msgs, askSessions.map((s) => ({ title: s.title, count: s.msgs?.length || 0 })))
+    island.saveMdFile(md, title)
+  }, [threads, activeAskBranch, askSessions])
+
   const sendMessage = useCallback((key: string, deep = false): void => {
     const cur = getComposer(key)
     pushAndReply(key, (cur.text || '').trim(), cur.attachments, deep, quotesRef.current[key] || [], key === 'ask' ? cur.answerMethodId : undefined)
@@ -1780,6 +1796,7 @@ export function App(): React.JSX.Element {
     onSwitchBranch: key === 'ask' ? askSwitch : undefined,
     onRenameBranch: key === 'ask' ? renameAskBranch : undefined,
     onMergeBranch: key === 'ask' ? mergeAskBranch : undefined,
+    onExportThread: key === 'ask' ? exportAskThread : undefined,
     memory: key === 'ask' ? activeAskBranch.memory || '' : undefined,
     instruction: key === 'ask' ? activeAskBranch.instruction || '' : undefined,
     onSetMemory: key === 'ask' ? (memory) => setActiveAskBranch((branch) => ({ ...branch, memory, updatedAt: Date.now() })) : undefined,
@@ -1793,7 +1810,7 @@ export function App(): React.JSX.Element {
     onAdvance: key === 'ask' ? (index, action) => advanceAsk(index, action, deep) : undefined,
     onUseSuggestion: key === 'ask' ? (value) => patchComposer(key, { text: value }) : undefined,
     busy: key === 'ask' ? conversationBusy(threads[key] || []) : undefined
-  }), [threads, quotes, getComposer, pushAndReply, sendPreset, followUpReply, patchComposer, sendMessage, onAttach, onRemoveAtt, addQuote, removeQuote, settings.largeSize, fullscreen, activeAskBranch, askSessions, askFork, askSwitch, renameAskBranch, mergeAskBranch, compressAskContext, setAskContextMode, saveAskKnowledge, councilModels, runAskCouncil, adoptAskVariant, advanceAsk])
+  }), [threads, quotes, getComposer, pushAndReply, sendPreset, followUpReply, patchComposer, sendMessage, onAttach, onRemoveAtt, addQuote, removeQuote, settings.largeSize, fullscreen, activeAskBranch, askSessions, askFork, askSwitch, renameAskBranch, mergeAskBranch, exportAskThread, compressAskContext, setAskContextMode, saveAskKnowledge, councilModels, runAskCouncil, adoptAskVariant, advanceAsk])
 
   // ===== LLM 设置 =====
   const setLlmField = (f: 'model' | 'baseUrl' | 'apiKey', v: string): void => setLlm((s) => ({
@@ -1873,6 +1890,20 @@ export function App(): React.JSX.Element {
     setNotes((l) => l.map((x) => (x.id === n.id ? n : x)))
     // 若该便签已钉屏，同步更新浮贴
     island.stickyPush({ id: n.id, emoji: n.emoji, title: n.title, md: n.md, color: n.color })
+  }, [])
+  // patch 基于 setState updater 内的最新便签计算（含函数式 patch），异步回写不会覆盖期间的并发修改
+  const notePatch = useCallback((id: number, patch: Partial<StickyNote> | ((cur: StickyNote) => Partial<StickyNote>)): void => {
+    setNotes((l) => l.map((x) => {
+      if (x.id !== id) return x
+      const q = typeof patch === 'function' ? patch(x) : patch
+      return { ...x, ...q, updatedAt: Date.now() }
+    }))
+    const prev = notesRef.current.find((x) => x.id === id)
+    if (prev?.pinned) {
+      const q = typeof patch === 'function' ? patch(prev) : patch
+      const m = { ...prev, ...q }
+      island.stickyPush({ id: m.id, emoji: m.emoji, title: m.title, md: m.md, color: m.color })
+    }
   }, [])
   const noteAddFull = useCallback((n: StickyNote): void => setNotes((l) => [n, ...l].slice(0, 400)), [])
   const pinNoteDesktop = useCallback((n: StickyNote): void => {
@@ -2583,7 +2614,7 @@ export function App(): React.JSX.Element {
             {tab === 'notes' && (
               <NotesTab
                 notes={notes}
-                onAdd={noteAdd} onUpdate={noteUpdate} onDelete={noteDelete} onTogglePin={noteTogglePin}
+                onAdd={noteAdd} onUpdate={noteUpdate} onPatch={notePatch} onDelete={noteDelete} onTogglePin={noteTogglePin}
                 onAiCreate={aiCreateNote} onAiSearch={aiSearchNotes}
                 onAddNote={noteAddFull} onPinDesktop={pinNoteDesktop} onOpenStudio={openStudioNote}
                 onStar={noteStar} onRestore={noteRestore} onPurge={notePurge} onBatchColor={noteBatchColor} onBatchTrash={noteBatchTrash}
@@ -2703,6 +2734,7 @@ export function App(): React.JSX.Element {
             {tab === 'settings' && (
               <SettingsTab
                 runtimeInfo={runtimeInfo} bridgeConnected={bridgeConnected}
+                updateState={updateState} onCheckUpdates={() => island.checkForUpdates()} onInstallUpdate={() => island.installUpdate()}
                 activeAgents={agents.filter((a) => a.status !== 'done').length} totalAgents={agents.length}
                 settings={settings} onToggle={toggleSetting}
                 soundMap={soundMap} soundPickerOpen={soundPickerOpen} onToggleSoundPicker={() => settings.sound && setSoundPickerOpen((v) => !v)} onSetSound={setSoundFor} onPreviewSound={previewSound}

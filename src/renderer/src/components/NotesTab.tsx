@@ -37,6 +37,8 @@ interface NotesTabProps {
   notes: StickyNote[]
   onAdd: () => void
   onUpdate: (n: StickyNote) => void
+  /** 按 id 打补丁式更新（patch 可为函数，基于当前最新便签计算，避免异步回写覆盖并发修改） */
+  onPatch: (id: number, patch: Partial<StickyNote> | ((cur: StickyNote) => Partial<StickyNote>)) => void
   onDelete: (id: number) => void
   onTogglePin: (id: number) => void
   /** AI 生成：输入文本或 URL，返回反馈文案 */
@@ -252,7 +254,8 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
     )
     setAppendBusy(false)
     if (r.ok && r.text) {
-      p.onUpdate({ ...n, md: `${n.md.trimEnd()}\n\n---\n💡 **${stamp()} 追加**（✨增强）：\n\n${r.text.trim()}`, updatedAt: Date.now() })
+      const text = r.text.trim()
+      p.onPatch(n.id, (cur) => ({ md: `${cur.md.trimEnd()}\n\n---\n💡 **${stamp()} 追加**（✨增强）：\n\n${text}` }))
       setAppendText(''); setAppendId(null); flash('✓ AI 已增强并追加')
     } else flash(r.error || '增强失败')
   }
@@ -339,7 +342,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
           try {
             const arr = JSON.parse(r.text.replace(/^```(json)?\s*|\s*```$/g, '')) as { id: number; tags: string[] }[]
             let cnt = 0
-            arr.forEach((x) => { const n = untagged.find((u) => u.id === x.id); if (n && Array.isArray(x.tags)) { p.onUpdate({ ...n, tags: x.tags.slice(0, 3) }); cnt++ } })
+            arr.forEach((x) => { if (untagged.some((u) => u.id === x.id) && Array.isArray(x.tags)) { p.onPatch(x.id, { tags: x.tags.slice(0, 3) }); cnt++ } })
             flash(`✓ 已为 ${cnt} 条便签打标签`)
           } catch { setToolOut(r.text.trim()) }
         }
@@ -380,7 +383,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
             let cnt = 0
             pairs.slice(0, 4).forEach(({ a, b }) => {
               const na = pool.find((n) => n.title.trim() === a?.trim()); const nb = pool.find((n) => n.title.trim() === b?.trim())
-              if (na && nb && !na.md.includes(`[[${nb.title}]]`)) { p.onUpdate({ ...na, md: `${na.md.trimEnd()}\n\n> 🔗 相关：[[${nb.title}]]`, updatedAt: Date.now() }); cnt++ }
+              if (na && nb && !na.md.includes(`[[${nb.title}]]`)) { p.onPatch(na.id, (cur) => ({ md: `${cur.md.trimEnd()}\n\n> 🔗 相关：[[${nb.title}]]` })); cnt++ }
             })
             flash(cnt ? `✓ 已补 ${cnt} 条双链（看关系图）` : '没找到值得建链的关联')
           } catch { setToolOut(r.text.trim()) }
@@ -437,19 +440,19 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
     try {
       if (key === 'summary') {
         const r = await p.onAI('为下面的便签写 2-3 句中文摘要，只输出摘要文字。', n.md.slice(0, 4000))
-        if (r.ok && r.text) { p.onUpdate({ ...n, md: `> 📄 **摘要**：${strip(r.text).replace(/\n+/g, ' ')}\n\n${n.md}`, updatedAt: Date.now() }); flash('✓ 已插入摘要') } else flash(r.error || '生成失败')
+        if (r.ok && r.text) { const text = strip(r.text); p.onPatch(n.id, (cur) => ({ md: `> 📄 **摘要**：${text.replace(/\n+/g, ' ')}\n\n${cur.md}` })); flash('✓ 已插入摘要') } else flash(r.error || '生成失败')
       } else if (key === 'tags') {
         const r = await p.onAI('为下面的便签生成 2-4 个中文标签（每个 ≤4 字），逗号分隔，只输出标签。', `${n.title}\n${n.md.slice(0, 2000)}`)
-        if (r.ok && r.text) { const tags = [...new Set([...n.tags, ...strip(r.text).split(/[,，、\s]+/).filter(Boolean)])].slice(0, 4); p.onUpdate({ ...n, tags, updatedAt: Date.now() }); flash('✓ 标签：' + tags.join(' / ')) } else flash(r.error || '生成失败')
+        if (r.ok && r.text) { const fresh = strip(r.text); const mergeTags = (cur: StickyNote): string[] => [...new Set([...cur.tags, ...fresh.split(/[,，、\s]+/).filter(Boolean)])].slice(0, 4); const tags = mergeTags(n); p.onPatch(n.id, (cur) => ({ tags: mergeTags(cur) })); flash('✓ 标签：' + tags.join(' / ')) } else flash(r.error || '生成失败')
       } else if (key === 'polish') {
         const r = await p.onAI('把下面的便签正文改写得更通顺、清晰、有条理，保持原意与 Markdown 结构，只输出结果。', n.md.slice(0, 6000))
-        if (r.ok && r.text) { p.onUpdate({ ...n, md: strip(r.text), updatedAt: Date.now() }); flash('✓ 已润色') } else flash(r.error || '润色失败')
+        if (r.ok && r.text) { p.onPatch(n.id, { md: strip(r.text) }); flash('✓ 已润色') } else flash(r.error || '润色失败')
       } else if (key === 'continue') {
         const r = await p.onAI('顺着下面的便签内容自然地继续写一小段（3-6 句），风格一致，只输出续写部分。', n.md.slice(-3000))
-        if (r.ok && r.text) { p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n' + strip(r.text), updatedAt: Date.now() }); flash('✓ 已续写') } else flash(r.error || '续写失败')
+        if (r.ok && r.text) { const text = strip(r.text); p.onPatch(n.id, (cur) => ({ md: cur.md.trimEnd() + '\n\n' + text })); flash('✓ 已续写') } else flash(r.error || '续写失败')
       } else if (key === 'translate') {
         const r = await p.onAI('翻译下面的内容：中文→英文，英文→中文，保留 Markdown 结构，只输出译文。', n.md.slice(0, 4000))
-        if (r.ok && r.text) { p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n## 🌐 译文\n\n' + strip(r.text), updatedAt: Date.now() }); flash('✓ 已追加译文') } else flash(r.error || '翻译失败')
+        if (r.ok && r.text) { const text = strip(r.text); p.onPatch(n.id, (cur) => ({ md: cur.md.trimEnd() + '\n\n## 🌐 译文\n\n' + text })); flash('✓ 已追加译文') } else flash(r.error || '翻译失败')
       } else if (key === 'todos') {
         const r = await p.onAI('从下面的便签里提取可执行的行动项（没有就输出"无"）。每行一条，不要序号/符号，只输出行动项。', n.md.slice(0, 4000))
         if (r.ok && r.text) {
@@ -458,13 +461,13 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         } else flash(r.error || '提取失败')
       } else if (key === 'title') {
         const r = await p.onAI('为下面的便签起一个简洁有力的标题（≤16 字）和一个贴切的 emoji。输出格式：emoji|标题，只输出这一行。', n.md.slice(0, 2000))
-        if (r.ok && r.text) { const [em, ...rest] = strip(r.text).split('|'); const t = rest.join('|').trim(); p.onUpdate({ ...n, emoji: (em || '').trim().slice(0, 4) || n.emoji, title: t || n.title, updatedAt: Date.now() }); flash('✓ 已更新标题') } else flash(r.error || '生成失败')
+        if (r.ok && r.text) { const [em, ...rest] = strip(r.text).split('|'); const t = rest.join('|').trim(); p.onPatch(n.id, { emoji: (em || '').trim().slice(0, 4) || n.emoji, title: t || n.title }); flash('✓ 已更新标题') } else flash(r.error || '生成失败')
       } else if (key === 'quotes') {
         const r = await p.onAI('从下面的内容里提炼 1-3 句最有价值的金句（原句或轻度改写），每句一行，只输出金句。', n.md.slice(0, 4000))
-        if (r.ok && r.text) { const qs = strip(r.text).split('\n').filter(Boolean).map((l) => `> ❝ ${l.replace(/^[->\s❝"]+/, '')}`).join('\n'); p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n' + qs, updatedAt: Date.now() }); flash('✓ 已提炼金句') } else flash(r.error || '提炼失败')
+        if (r.ok && r.text) { const qs = strip(r.text).split('\n').filter(Boolean).map((l) => `> ❝ ${l.replace(/^[->\s❝"]+/, '')}`).join('\n'); p.onPatch(n.id, (cur) => ({ md: cur.md.trimEnd() + '\n\n' + qs })); flash('✓ 已提炼金句') } else flash(r.error || '提炼失败')
       } else if (key === 'dig') {
         const r = await p.onAI('针对下面的想法，提出 3 个能推动它往下走的追问（具体、尖锐、可回答），输出 Markdown 有序列表，只输出列表。', n.md.slice(0, 3000))
-        if (r.ok && r.text) { p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n## 🌱 深挖\n' + strip(r.text), updatedAt: Date.now() }); flash('✓ 已生成深挖三问') } else flash(r.error || '生成失败')
+        if (r.ok && r.text) { const text = strip(r.text); p.onPatch(n.id, (cur) => ({ md: cur.md.trimEnd() + '\n\n## 🌱 深挖\n' + text })); flash('✓ 已生成深挖三问') } else flash(r.error || '生成失败')
       } else if (key === 'poster') {
         await makePoster(n)
       } else if (key === 'similar') {
@@ -474,7 +477,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         const r = await p.onAI('从候选便签标题里挑出与目标便签最相关的 1-3 个，只输出标题本身，每行一个，一字不差地照抄候选里的标题。没有相关的就输出"无"。', `目标便签：${n.title}\n${n.md.slice(0, 1500)}\n\n候选：\n${list}`)
         if (r.ok && r.text) {
           const titles = strip(r.text).split('\n').map((l) => l.replace(/^[-*\s]+/, '').trim()).filter((t) => t && t !== '无' && others.some((x) => x.title.trim() === t)).slice(0, 3)
-          if (!titles.length) { flash('没找到相关便签') } else { p.onUpdate({ ...n, md: n.md.trimEnd() + '\n\n## 🔗 相关\n' + titles.map((t) => `- [[${t}]]`).join('\n'), updatedAt: Date.now() }); flash(`✓ 已关联 ${titles.length} 条（看关系图）`) }
+          if (!titles.length) { flash('没找到相关便签') } else { p.onPatch(n.id, (cur) => ({ md: cur.md.trimEnd() + '\n\n## 🔗 相关\n' + titles.map((t) => `- [[${t}]]`).join('\n') })); flash(`✓ 已关联 ${titles.length} 条（看关系图）`) }
         } else flash(r.error || '查找失败')
       }
     } finally { done() }

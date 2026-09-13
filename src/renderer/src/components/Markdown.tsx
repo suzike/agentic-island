@@ -2,8 +2,9 @@
 // 用于计划审阅、Agent 提问等上下文内容，替代生肉 Markdown 文本。
 // 另含 Collapsible：长内容默认折叠，可展开/收起。
 
-import { createContext, useContext, useRef, useState, useLayoutEffect } from 'react'
+import { createContext, memo, useContext, useRef, useState, useLayoutEffect } from 'react'
 import { island } from '../bridge'
+import { safeUrl } from '../logic/mdHtml'
 import { accent, fill, gradient, hairline, ink, surface } from '../ui/tokens'
 
 // 双向链接跳转回调（便签用）：Markdown 提供，Inline 消费；不提供时 [[..]] 按普通文字渲染
@@ -84,7 +85,7 @@ const splitRow = (line: string): string[] =>
   line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
 
 /* ---------- 块级解析（支持标题1-6 / 列表·任务清单·缩进 / 表格 / 引用 / 代码 / 分割线 / 图片）---------- */
-export function Markdown({ text, onWikiLink, reader, light }: { text: string; onWikiLink?: (title: string) => void; reader?: boolean; light?: boolean }): React.JSX.Element {
+function MarkdownImpl({ text, onWikiLink, reader, light }: { text: string; onWikiLink?: (title: string) => void; reader?: boolean; light?: boolean }): React.JSX.Element {
   const lines = (text || '').replace(/\r\n/g, '\n').split('\n')
   const out: React.JSX.Element[] = []
   let i = 0
@@ -148,10 +149,11 @@ export function Markdown({ text, onWikiLink, reader, light }: { text: string; on
       continue
     }
 
-    // 图片
+    // 图片（src 走协议白名单：LLM/RSS 内容里的远程信标与 javascript: 等一律不渲染）
     const img = line.match(/^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/)
     if (img) {
-      out.push(<img key={key++} src={img[2]} alt={img[1]} style={{ maxWidth: '100%', borderRadius: 10, margin: reader ? '12px auto' : '4px 0', display: 'block' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />)
+      const src = safeUrl(img[2], true)
+      if (src) out.push(<img key={key++} src={src} alt={img[1]} loading="lazy" style={{ maxWidth: '100%', borderRadius: 10, margin: reader ? '12px auto' : '4px 0', display: 'block' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />)
       i++
       continue
     }
@@ -274,3 +276,6 @@ export function Collapsible({ children, collapsedHeight = 120 }: { children: Rea
     </div>
   )
 }
+
+// memo：正文未变时不重解析 Markdown——流式回答期间旧消息列表不再每 80ms 全量重渲染
+export const Markdown = memo(MarkdownImpl)

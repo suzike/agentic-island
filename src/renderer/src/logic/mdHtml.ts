@@ -8,7 +8,8 @@ export function escAttr(s: string): string {
   return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
 
-function safeUrl(url: string, image = false): string | null {
+/** URL 协议白名单：仅 http/https；图片额外放行 data:image。image=true 时不合格返回 null。 */
+export function safeUrl(url: string, image = false): string | null {
   const u = url.trim()
   if (/^https?:\/\//i.test(u)) return u
   if (image && /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(u)) return u.replace(/\s/g, '')
