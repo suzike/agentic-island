@@ -7,6 +7,7 @@ import { motion } from 'framer-motion'
 import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import type { RunLog, ShortcutDef, ShortcutStep, StepKind } from '../logic/shortcuts'
 import { PRESET_SHORTCUTS, LEGACY_PRESET_IDS, runShortcut, needsRepo, GEN_SYSTEM, parseGenerated } from '../logic/shortcuts'
+import { automationTriggerLabel } from '../logic/automation'
 import { island } from '../bridge'
 import { Markdown } from './Markdown'
 import type { AutomationRule, WorkbenchProject, WorkflowRun } from '../types'
@@ -568,7 +569,7 @@ function AutomationsEditor({ automations, onChange, shortcuts }: { automations: 
   const patch = (id: string, next: Partial<AutomationRule>): void => onChange(automations.map((r) => (r.id === id ? { ...r, ...next } : r)))
   const add = (): void => {
     const id = 'auto-' + Date.now()
-    onChange([...automations, { id, name: '定时任务 ' + (automations.length + 1), enabled: true, time: '09:30', action: { kind: 'shortcut', shortcutId: shortcuts[0]?.id || '' } }])
+    onChange([...automations, { id, name: '自动化任务 ' + (automations.length + 1), enabled: true, trigger: { kind: 'daily', time: '09:30' }, action: { kind: 'shortcut', shortcutId: shortcuts[0]?.id || '' } }])
     setOpen(true)
   }
   const selectStyle = { background: fill(1), border: `0.5px solid ${hairline(0.15)}`, borderRadius: R.sm, color: ink(1), fontSize: FS.small, padding: '5px 7px', outline: 'none', minWidth: 0 } as React.CSSProperties
@@ -577,20 +578,31 @@ function AutomationsEditor({ automations, onChange, shortcuts }: { automations: 
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
         <Ico.shortcuts size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
         <span style={{ ...text.subtitle(), fontSize: FS.small }}>定时自动化</span>
-        <span style={text.faint()}>每日到点自动执行；启动时自动补跑 30 分钟内错过的任务</span>
+        <span style={text.faint()}>每日定时到点执行（启动时补跑 30 分钟内错过的任务），或由「Agent 会话结束 / 番茄钟专注结束」事件触发</span>
         <span style={{ flex: 1 }} />
         <Button sm variant="ghost" onClick={add}>新建</Button>
         <IconButton icon={open ? ChevronUp : ChevronDown} title={open ? '收起' : '展开'} onClick={() => setOpen((v) => !v)} />
       </div>
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', marginTop: 8 }}>
-          {automations.length === 0 && <span style={{ ...text.faint(), fontSize: FS.tiny }}>还没有定时任务——例如每天 9:30 自动跑「项目全量体检」，或把固定反思写进待办。</span>}
+          {automations.length === 0 && <span style={{ ...text.faint(), fontSize: FS.tiny }}>还没有自动化任务——例如每天 9:30 自动跑「项目全量体检」，或 Agent 会话结束自动建一条复盘待办。</span>}
           {automations.map((rule) => {
             const target = rule.action.kind === 'shortcut' ? rule.action.shortcutId : ''
             return (
               <div key={rule.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderTop: `0.5px solid ${hairline(0.07)}`, flexWrap: 'wrap' }}>
                 <Switch on={rule.enabled} onChange={(on) => patch(rule.id, { enabled: on })} />
-                <input type="time" value={rule.time} onChange={(e) => patch(rule.id, { time: e.target.value })} style={selectStyle} title="每日触发时间" />
+                <select value={rule.trigger.kind} onChange={(e) => {
+                  const kind = e.target.value as AutomationRule['trigger']['kind']
+                  patch(rule.id, { trigger: kind === 'daily' ? { kind: 'daily', time: '09:30' } : { kind } } as Partial<AutomationRule>)
+                }} style={selectStyle} title="触发时机">
+                  <option value="daily">每日定时</option>
+                  <option value="agent-end">Agent 会话结束</option>
+                  <option value="pomo-end">番茄钟专注结束</option>
+                </select>
+                {rule.trigger.kind === 'daily' && (
+                  <input type="time" value={rule.trigger.time} onChange={(e) => patch(rule.id, { trigger: { kind: 'daily', time: e.target.value } })} style={selectStyle} title="每日触发时间" />
+                )}
+                <span style={{ ...text.faint(), fontSize: 9, flex: 'none' }} title="当前触发时机">{automationTriggerLabel(rule.trigger)}</span>
                 <input value={rule.name} onChange={(e) => patch(rule.id, { name: e.target.value })} placeholder="任务名" style={{ ...selectStyle, width: 110 }} />
                 <select value={rule.action.kind} onChange={(e) => {
                   const kind = e.target.value as AutomationRule['action']['kind']

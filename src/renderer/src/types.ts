@@ -200,14 +200,19 @@ export type AutomationAction =
   | { kind: 'todo'; text: string }
   | { kind: 'note'; text: string }
 
+/** 自动化触发器：每日定时，或由岛内事件驱动 */
+export type AutomationTrigger =
+  | { kind: 'daily'; /** HH:mm 本地时间 */ time: string }
+  | { kind: 'agent-end' }
+  | { kind: 'pomo-end' }
+
 export interface AutomationRule {
   id: string
   name: string
   enabled: boolean
-  /** 每日触发时间（HH:mm，本地时区） */
-  time: string
+  trigger: AutomationTrigger
   action: AutomationAction
-  /** 最近触发日期（YYYY-MM-DD），防同日重复触发 */
+  /** 最近触发日期（YYYY-MM-DD），仅每日定时用于防同日重复触发 */
   lastRunDay?: string
 }
 

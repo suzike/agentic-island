@@ -23,7 +23,7 @@ import { MarkdownStudio } from './components/MarkdownStudio'
 import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
 import { PROVIDERS, loadProviderSettings, migrateEmbeddingSettings, migrateProviderSettings, patchProviderDraft, providerConfigEquals, providerIsKeyless, providerModelChoices, saveProviderSettings, switchProviderSettings } from './logic/providers'
-import { automationDue, automationDayKey } from './logic/automation'
+import { automationDue, automationDayKey, disappearedAgents, normalizeAutomationRules } from './logic/automation'
 import { branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, looseBlocks, newAskBranchMeta, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
 import { ADVANCE_PROMPTS, analysisMethodById, answerMethodById, answerMethodInstruction } from './logic/methodologies'
 import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
@@ -320,7 +320,7 @@ export function App(): React.JSX.Element {
         if (Array.isArray(s.repoBookmarks)) setRepoBookmarks(s.repoBookmarks as GitHubRepo[])
         if (Array.isArray(s.shortcuts)) setShortcuts(s.shortcuts as ShortcutDef[])
         if (s.approvalPolicy && typeof s.approvalPolicy === 'object') setApprovalPolicy(s.approvalPolicy as ApprovalPolicy)
-        if (Array.isArray(s.automations)) setAutomations(s.automations as AutomationRule[])
+        if (Array.isArray(s.automations)) setAutomations(normalizeAutomationRules(s.automations))
         if (s.askEngine === 'llm' || s.askEngine === 'claude' || s.askEngine === 'codex') setAskEngine(s.askEngine)
         if (typeof s.agentCwd === 'string') setAgentCwd(s.agentCwd)
         if (s.srsState && typeof s.srsState === 'object') setSrsState(s.srsState as Record<number, SrsCard>)
@@ -595,6 +595,8 @@ export function App(): React.JSX.Element {
           showToast('🍅 专注完成一轮 · 休息一下')
           // 规则③：番茄结束 → 弹闪念胶囊趁热记进展
           if (settings.rulePomoCapsule) { setRevealed(true); setCapsuleOpen(true) }
+          // 事件触发：番茄钟专注结束 → 跑该触发器的自动化规则
+          fireByTriggerRef.current('pomo-end', '专注结束')
         } else {
           if (settings.sound) playSound('blip')
           showToast('☕ 休息结束 · 开始下一轮专注')
@@ -2342,8 +2344,8 @@ export function App(): React.JSX.Element {
   const goTab = (k: Tab): void => { setRevealed(true); setTab(k) }
 
   // ===== 定时自动化：每日 HH:mm 触发（快捷工作流切到快捷页执行以支持确认闸；待办/便签静默直写） =====
-  const fireAutomation = (rule: AutomationRule, missed: boolean): void => {
-    const tag = missed ? '（补跑）' : ''
+  const fireAutomation = (rule: AutomationRule, missed: boolean, eventLabel?: string): void => {
+    const tag = eventLabel ? `（${eventLabel}）` : missed ? '（补跑）' : ''
     const act = rule.action
     if (act.kind === 'shortcut') {
       const def = shortcuts.find((s2) => s2.id === act.shortcutId)
@@ -2364,6 +2366,21 @@ export function App(): React.JSX.Element {
   }
   const fireAutomationRef = useRef(fireAutomation)
   fireAutomationRef.current = fireAutomation
+  const automationsRef = useRef(automations)
+  automationsRef.current = automations
+
+  // 按触发器类型触发（事件驱动路径）：只跑启用且触发器匹配的规则
+  const fireByTrigger = useCallback((kind: 'agent-end' | 'pomo-end', eventLabel: string): void => {
+    for (const rule of automationsRef.current) {
+      if (!rule.enabled || rule.trigger.kind !== kind) continue
+      fireAutomationRef.current(rule, false, eventLabel)
+    }
+  }, [])
+
+  const fireByTriggerRef = useRef(fireByTrigger)
+  fireByTriggerRef.current = fireByTrigger
+
+  // 每日定时：30s 轮询 + 启动宽限补跑
   useEffect(() => {
     const tick = (): void => {
       const now = new Date()
@@ -2378,8 +2395,17 @@ export function App(): React.JSX.Element {
     const t = setInterval(tick, 30_000)
     return () => clearInterval(t)
   }, [])
-  const automationsRef = useRef(automations)
-  automationsRef.current = automations
+
+  // 事件触发之一：Agent 会话结束（快照中消失）。用 ref 记录上一轮会话 id，天然一次事件只触发一次
+  const knownAgentIdsRef = useRef<string[]>([])
+  useEffect(() => {
+    const ids = agents.map((a) => a.id)
+    const gone = disappearedAgents(knownAgentIdsRef.current, ids)
+    knownAgentIdsRef.current = ids
+    if (gone.length) fireByTrigger('agent-end', gone.length > 1 ? `${gone.length} 个会话结束` : '会话结束')
+  }, [agents, fireByTrigger])
+
+  // 事件触发之二：番茄钟专注结束（在下方番茄钟节拍里调用，见 firePomoEndRef）
   const paletteCommands: Command[] = [
     ...TABS.map((t): Command => ({ id: 'tab:' + t.key, title: '前往 · ' + t.label, hint: '切换到' + t.label + '分区', icon: '📂', group: '分区', keywords: t.key, run: () => goTab(t.key) })),
     { id: 'act:ask', title: '新提问', hint: '打开问答分区', icon: '💬', group: '动作', keywords: 'ask wenda tiwen', run: () => goTab('ask') },
