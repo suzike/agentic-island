@@ -66,17 +66,22 @@ function CodeBlock({ code }: { code: string }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
   const lt = useContext(LightCtx)
   return (
-    <div style={{ position: 'relative', margin: '4px 0' }}>
-      <div className="ai-scroll" style={{ fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 11, lineHeight: 1.55, color: lt ? '#2f3b47' : ink(2), background: lt ? 'rgba(0,0,0,.05)' : surface.inset().background, border: lt ? 'none' : `0.5px solid ${hairline(.06)}`, padding: '7px 9px', paddingRight: 46, borderRadius: 7, overflowX: 'auto', whiteSpace: 'pre' }}>
+    <div className="code-block" style={{ position: 'relative', margin: '4px 0' }}>
+      <div className="ai-scroll" style={{ fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 11, lineHeight: 1.55, color: lt ? '#2f3b47' : ink(2), background: lt ? 'rgba(0,0,0,.05)' : surface.inset().background, border: lt ? 'none' : `0.5px solid ${hairline(.06)}`, padding: '7px 9px', paddingRight: 30, borderRadius: 7, overflowX: 'auto', whiteSpace: 'pre' }}>
         {code}
       </div>
-      <div
-        className="hv"
+      {/* 复制按钮：默认隐藏，悬停/键盘聚焦浮现（见 index.html .code-copy）。
+          用真实 <button> —— div 不可聚焦，:focus-within 无从生效，键盘用户会被挡在外面。 */}
+      <button
+        type="button"
+        className="code-copy"
+        title={copied ? '已复制' : '复制这段代码'}
+        aria-label="复制代码"
         onClick={() => { navigator.clipboard?.writeText(code).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
-        style={{ position: 'absolute', top: 5, right: 6, padding: '2px 7px', borderRadius: 6, background: lt ? 'rgba(0,0,0,.06)' : fill(3), color: copied ? accent(.76) : ink(3), fontSize: 9, fontWeight: 600, cursor: 'pointer' }}
+        style={{ position: 'absolute', top: 5, right: 6, display: 'grid', placeItems: 'center', width: 20, height: 20, padding: 0, border: 'none', borderRadius: 6, background: lt ? 'rgba(0,0,0,.06)' : fill(3), color: copied ? accent(.76) : ink(3), fontSize: 11, lineHeight: 1, cursor: 'pointer' }}
       >
-        {copied ? '✓' : '⧉ 复制'}
-      </div>
+        {copied ? '✓' : '⧉'}
+      </button>
     </div>
   )
 }

@@ -584,6 +584,32 @@
       .hv:active {
         transform: scale(0.97);
       }
+      /* 代码块复制按钮：默认隐藏，悬停代码块或键盘聚焦时浮现。
+         必须同时带 :focus-within —— 只做悬停会把键盘用户挡在外面；
+         pointer-events 一并切换，避免隐形按钮仍可点。 */
+      .code-copy {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease, filter 0.15s ease, transform 0.1s ease;
+      }
+      .code-block:hover .code-copy,
+      .code-block:focus-within .code-copy {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .code-copy:hover {
+        filter: brightness(1.22);
+      }
+      .code-copy:active {
+        transform: scale(0.97);
+      }
+      /* 无悬停能力的设备（触屏）：直接常显，否则无从触发 */
+      @media (hover: none) {
+        .code-copy {
+          opacity: 1;
+          pointer-events: auto;
+        }
+      }
       /* 卡片悬停填充微亮（Apple 式：只变填充，不动描边） */
       .ai-card {
         transition: background 0.18s ease;
