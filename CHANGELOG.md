@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-09-13
+
+### Added
+
+- 自动更新：接入 electron-updater + GitHub Releases。启动 30 秒后静默检查、之后每 6 小时轮询，新版本后台下载，用户确认后重启安装（退出时兜底安装）；设置页「运行状态」新增检查更新与重启安装入口。更新链路从本版本起闭环。
+- 问答会话导出：分支面板新增「导出」，把当前分支全文（含长期上下文标记与文本附件）写入 Markdown 文件，归档会话以附录列出。
+- Agent 卡片补齐 Claude 元信息：Stop 事件从会话 transcript 尾部提取模型名与上下文占用（输入+缓存），岛卡片显示模型徽章，终端面板的 Token/上下文指标与占用条对 Claude 会话点亮（此前仅 Codex 可用）。
+- 主题设计器新增五组「复古风·高级感」风格起点：奶霜、月苍、牙色、御茶、肌色——奶油底 + 双强调色映射为 OKLCH 令牌，主色明度已校准至 WCAG AA。
+- 新增 push/PR 日常 CI（typecheck + 离线测试 + 生产构建，windows-latest）；新增 RSS 解析与知识库纯逻辑离线测试，离线测试 36 → 38 个。
+
+### Fixed
+
+- 便签 AI 回写改为按 id 补丁式更新：AI 请求期间的并发修改（星标/置顶/锁定/编辑保存）不再被过期整对象覆盖导致静默丢数据。
+- 安全加固：`agent-cli-check` 引擎白名单（堵命令注入）；录屏工程删除先查注册表（堵路径穿越）；`save-md-file` 只允许回写本会话经对话框打开/保存过的路径；Markdown 图片走协议白名单并惰性加载（远程信标不再随渲染发出）；快捷指令 shell 步骤引用 `%prev%`/`%clip%`/`%input%` 时即使「信任」也强制确认（防 AI 输出被注入命令静默执行）；`github-readme` 校验 owner/repo；外部抓取（RSS/网页）8MB、知识库 PDF/DOCX 30MB 响应体上限；导出 PDF 离屏窗口补齐导航锁。
+- hook-installer：对 `~/.claude/settings.json` 等用户全局配置改为 tmp+rename 原子写，内容无变化跳过写入（不再每次启动重写）；Codex `notify` 键插入首个 TOML 表段之前（原追加到文件末尾会静默失效）；Codex 审批 hook 补 600s 长超时。
+- 审批并发队列：同一会话并行工具调用产生多个挂起审批时排队展示、依次裁决，不再互相覆盖导致 CLI 悬挂至 5 分钟超时；会话结束时排队审批全部 fail-open 交回 CLI。
+- 性能：save-state 主进程 700ms 防抖并在退出时强制落盘（流式回答期间不再高频全量写盘）；Markdown 组件 memo 化；媒体轮询内容未变不再触发全树重渲染；codex-tail 会话头部只读前 16KB（长 rollout 不再全量载入内存）。
+- 稳定性：统一 `safeSend` 销毁守卫（托盘/快捷键/推送通道）；本地桥启动失败降级继续初始化（不再产生无窗无托盘僵尸进程）；positionWindow 过期的 60ms 重试按代数作废；终端会话退出后自动重启保留 profile/工作目录/环境变量与尺寸；录屏 finalize/discard 与分片写入串行化（不再产生孤儿 .part 文件）；会议检测轮询 10 秒超时强杀续链；三处诊断日志超 1MB 轮转。
+- 打包：仅被 vite 打包消费的依赖移到 devDependencies、移除未使用的 electron-store，app.asar 从 261MB 降至 33MB，安装体积大幅缩小。
+- 测试：修复 terminal-workspace 测试的时间腐化（快照日期钉死导致发版一周后必然失败）。
+
+### Verification
+
+- 两套 TypeScript 检查、38 个离线测试、Electron 三端生产构建通过。
+- NSIS 打包验证 `latest.yml`/`.blockmap` 生成；unpacked 以隔离 profile/bridge/hooks 冒烟启动通过，electron-updater 随包就位。
+
 ## [0.6.6] - 2026-07-23
 
 ### Added
