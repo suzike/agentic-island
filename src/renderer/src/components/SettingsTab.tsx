@@ -8,7 +8,7 @@ import {
   Moon, Pencil, Play, Plug, Plus, Power, Settings2, Sparkles, Sun, Terminal, TimerReset, TriangleAlert,
   Waves, Wind, Wrench, X, Zap
 } from 'lucide-react'
-import type { DisplayInfo, RuntimeInfo } from '../../../shared/protocol'
+import type { DisplayInfo, RuntimeInfo, UpdateState } from '../../../shared/protocol'
 import type { BarConfig } from '../types'
 import { SOUNDS, SOUND_TYPES, type SoundMap } from '../logic/sounds'
 import { PROVIDERS, providerConfigEquals, type ProviderSettingsSnapshot } from '../logic/providers'
@@ -115,6 +115,10 @@ interface SettingsTabProps {
   onSetUiZoom: (z: number) => void
   /** 退出应用（托盘菜单也可退出） */
   onQuitApp: () => void
+  /** 自动更新（GitHub Releases）；开发版为 null */
+  updateState: UpdateState | null
+  onCheckUpdates: () => void
+  onInstallUpdate: () => void
 }
 
 const FONT_OPTIONS: { key: string; label: string }[] = [
@@ -247,6 +251,31 @@ const secretInput: React.CSSProperties = {
   outline: 'none'
 }
 
+/** 自动更新状态行：静默检查 → 后台下载 → 用户确认重启安装；开发版不启用 */
+function UpdateRow({ p }: { p: SettingsTabProps }): React.JSX.Element {
+  const u = p.updateState
+  const text0 = !p.runtimeInfo?.packaged ? '开发版不启用自动更新'
+    : u?.status === 'checking' ? '正在检查更新…'
+    : u?.status === 'available' ? `发现新版本 v${u.version || ''}，后台下载中…`
+    : u?.status === 'downloading' ? `正在下载新版本… ${u.percent ?? 0}%`
+    : u?.status === 'downloaded' ? `v${u.version || ''} 已下载完成，重启后安装`
+    : u?.status === 'error' ? `更新检查失败（${u.error || '网络不可用'}），可重试`
+    : u?.status === 'not-available' ? '当前已是最新版本'
+    : '启动时自动检查更新 · 每 6 小时轮询'
+  const busy = u?.status === 'checking' || u?.status === 'downloading' || u?.status === 'available'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${hairline(0.08)}` }}>
+      <RefreshCw size={13} color={ink(3)} style={{ flex: 'none' }} />
+      <span title={text0} style={{ flex: 1, minWidth: 0, ...text.faint(), fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text0}</span>
+      {u?.status === 'downloaded' ? (
+        <Button sm variant="primary" icon={Zap} onClick={p.onInstallUpdate}>重启并安装{u.version ? ` v${u.version}` : ''}</Button>
+      ) : (
+        <Button sm variant="ghost" icon={RefreshCw} disabled={busy} onClick={p.onCheckUpdates}>{busy ? '处理中…' : '检查更新'}</Button>
+      )}
+    </div>
+  )
+}
+
 export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
   const [hookMsg, setHookMsg] = useState('')
   const [modelDraft, setModelDraft] = useState('')
@@ -314,6 +343,8 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
             )
           })}
         </div>
+        {/* 自动更新（GitHub Releases）：静默后台检查，下载完成后用户确认重启安装 */}
+        <UpdateRow p={p} />
       </Section>
 
       {/* 主题 */}

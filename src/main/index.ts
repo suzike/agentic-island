@@ -27,12 +27,13 @@ import { fetchIcs, parseIcs } from './calendar-ics'
 import { fetchCaldav } from './calendar-caldav'
 import { getMediaInfo, mediaKey } from './media'
 import { fetchRss } from './rss'
-import { netFetch } from './http-client'
+import { netFetch, readBodyText } from './http-client'
 import { setPtySink, ptyEnsure, ptyInput, ptyResize, ptyKill, ptyKillAll } from './term-pty'
 import { createTerminalWorkspaceStore, terminalWorkspaceExportState } from './terminal-workspace-store'
 import { inspectTerminalProject } from './terminal-project'
 import { startClipboardWatch } from './clipboard-watch'
 import { startDndWatch } from './dnd-watch'
+import { initUpdater } from './updater'
 import { createExternalYieldController, type ExternalYieldController } from './external-yield'
 import { createScreenshotPoller } from './screenshot-poller'
 import { recordingExportSubtitleSegments, recordingHasEdits, startRecordingFfmpeg } from './recording-export'
@@ -54,6 +55,11 @@ let win: BrowserWindow | null = null
 let externalYield: ExternalYieldController | null = null
 let rendererDialogRelease: (() => void) | null = null
 const store = new AgentsStore()
+
+// 统一发送通道：退出收尾期窗口可能已销毁，裸 `win?.` 判空挡不住 "Object has been destroyed"
+const safeSend = (channel: string, ...args: unknown[]): void => {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
+}
 const terminalWorkspace = createTerminalWorkspaceStore({
   filePath: () => join(app.getPath('userData'), 'terminal-workspace.json'),
   encrypt: (plain) => safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(plain).toString('base64') : plain,
@@ -131,7 +137,7 @@ function createTray(): void {
   tray = new Tray(img)
   tray.setToolTip('Agentic-Island · 灵动岛')
   const reveal = (): void => {
-    if (!win) return
+    if (!win || win.isDestroyed()) return
     win.showInactive()
     win.moveTop()
     win.webContents.send('reveal')
@@ -166,6 +172,8 @@ function targetDisplay(): Electron.Display {
     : displays[monitorIndex] || displays[0]
 }
 
+// 定位代数：每次 positionWindow 递增，用于作废在途的 60ms 校验重试
+let positionEpoch = 0
 function positionWindow(w: BrowserWindow, force = false): void {
   const display = targetDisplay()
   const { x, y, width, height } = fullMode ? display.bounds : display.workArea
@@ -177,9 +185,11 @@ function positionWindow(w: BrowserWindow, force = false): void {
   w.setBounds({ x, y, width, height })
   w.setResizable(false)
   // 注意：这里不要 webContents.invalidate()——透明窗口上强制全量重绘会产生肉眼可见的闪屏
-  // 混合 DPI 屏间移动时 setBounds 可能落到中间值（DIP 换算竞态）→ 60ms 后校验，不符强制重设一次
+  // 混合 DPI 屏间移动时 setBounds 可能落到中间值（DIP 换算竞态）→ 60ms 后校验，不符强制重设一次。
+  // epoch：期间若又发生了新的定位（切屏/全屏切换），本次过期重试直接作废，避免把窗口拉回旧位置
+  const epoch = ++positionEpoch
   setTimeout(() => {
-    if (w.isDestroyed()) return
+    if (w.isDestroyed() || epoch !== positionEpoch) return
     const now = w.getBounds()
     if (now.x !== x || now.y !== y || now.width !== width || now.height !== height) {
       w.setResizable(true)
@@ -320,7 +330,7 @@ function createWindow(): void {
   win.setIgnoreMouseEvents(true, { forward: true })
   externalYield?.dispose()
   externalYield = createExternalYieldController({
-    collapse: () => win?.webContents.send('external-yield'),
+    collapse: () => safeSend('external-yield'),
     blur: () => win?.blur(),
     setClickThrough: (ignore) => {
       if (ignore) win?.setIgnoreMouseEvents(true, { forward: true })
@@ -362,7 +372,7 @@ const screenshotPoller = createScreenshotPoller({
     win?.setIgnoreMouseEvents(false)
     win?.show()
     win?.focus()
-    win?.webContents.send('screenshot-captured', { dataUrl, target })
+    safeSend('screenshot-captured', { dataUrl, target })
   },
   onTimeout: () => {
     screenshotTarget = 'ask'
@@ -428,7 +438,7 @@ async function openScreenAnalyze(): Promise<void> {
   win.setIgnoreMouseEvents(false)
   win.show()
   win.focus()
-  win.webContents.send('screenshot-captured', { dataUrl: url, target: 'ask' })
+  safeSend('screenshot-captured', { dataUrl: url, target: 'ask' })
 }
 
 // 闪念胶囊：全局热键唤出居中输入框（临时让常驻窗口可聚焦，输完/取消后还原点击穿透）
@@ -438,7 +448,7 @@ function openCapsule(): void {
   win.setIgnoreMouseEvents(false) // 让胶囊可输入
   win.show()
   win.focus()
-  win.webContents.send('capsule-toggle')
+  safeSend('capsule-toggle')
 }
 
 // 全局命令面板：热键唤出居中搜索框（展开岛并可聚焦，动作执行后停在对应分区）
@@ -448,7 +458,7 @@ function openPalette(): void {
   win.setIgnoreMouseEvents(false)
   win.show()
   win.focus()
-  win.webContents.send('palette-toggle')
+  safeSend('palette-toggle')
 }
 
 // 第二大脑检索：热键唤出跨分区检索浮层
@@ -458,7 +468,7 @@ function openBrain(): void {
   win.setIgnoreMouseEvents(false)
   win.show()
   win.focus()
-  win.webContents.send('brain-toggle')
+  safeSend('brain-toggle')
 }
 
 // 可拆分桌面挂件：独立小窗常驻桌面角，展示主渲染层每秒推送的速览数据（番茄/待办/Agent/媒体）
@@ -536,6 +546,20 @@ const soundPref = {
   on: true,
   map: { waiting: 'chime', approval: 'ping', danger: 'rising', todo: 'marimba' } as Record<string, string>
 }
+// save-state 防抖：渲染层流式回答期间会高频触发全量状态上报，直接同步写盘（JSON 序列化 + DPAPI 加密 + 双文件写）
+// 会反复卡住主进程、拖慢审批链路。最新状态缓存在内存，700ms trailing 落盘，退出时强制冲刷兜底。
+let pendingState: Record<string, unknown> | null = null
+let saveTimer: NodeJS.Timeout | null = null
+const flushState = (): void => {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+  if (pendingState) { const s = pendingState; pendingState = null; saveState(s) }
+}
+const scheduleSave = (state: Record<string, unknown>): void => {
+  pendingState = state
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(flushState, 700)
+  saveTimer.unref?.()
+}
 // 智能勿扰：渲染层据"会议检测 + 用户开关"算出的最终勿扰态；置真时主进程不自动弹窗、不响铃
 let dndActive = false
 let clipWatchEnabled = true
@@ -548,7 +572,7 @@ function setClipboardWatch(on: boolean): void {
     return
   }
   if (!stopClipboardWatch) {
-    stopClipboardWatch = startClipboardWatch((item) => win?.webContents.send('clipboard-new', item))
+    stopClipboardWatch = startClipboardWatch((item) => safeSend('clipboard-new', item))
   }
 }
 // 危险命令判定（与渲染层 logic/risk.ts 的 danger 正则同步）
@@ -568,7 +592,7 @@ let prevPending = new Set<string>()
 let prevWaiting = new Set<string>()
 store.on('change', () => {
   const snap = store.snapshot()
-  win?.webContents.send('snapshot', snap)
+  safeSend('snapshot', snap)
   const pend = snap.agents.filter((a) => a.status === 'needs_approval')
   const wait = snap.agents.filter((a) => a.status === 'waiting')
   const newPend = pend.filter((a) => a.requestId && !prevPending.has(a.requestId))
@@ -594,12 +618,15 @@ store.on('change', () => {
 })
 
 // 抓取网页正文 + <title>（问答附件与知识库共用）；粗提正文，压缩空白，截断上限
+// 外部抓取（网页正文等）响应体上限：慢速流式响应也能在超限后立刻中止，防主进程 OOM
+const MAX_FETCH_BYTES = 8 * 1024 * 1024
+
 async function fetchPageText(url: string, cap = 30000): Promise<{ ok: boolean; text?: string; title?: string; error?: string }> {
   try {
     if (!/^https?:\/\//i.test(url)) return { ok: false, error: '仅支持 http/https 链接' }
     const res = await netFetch(url, { timeoutMs: 20000, redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } })
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
-    const html = await res.text()
+    const html = await readBodyText(res, MAX_FETCH_BYTES)
     const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/\s+/g, ' ').trim().slice(0, 120)
     const text = html
       .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -718,6 +745,8 @@ function wireIpc(): void {
   })
   ipcMain.handle('github-readme', async (_e, owner: string, repo: string, token?: string) => {
     try {
+      // owner/repo 直接拼进 API URL，必须白名单校验（只允许 GitHub 用户名/仓库名字符）
+      if (!/^[\w.-]{1,100}$/.test(String(owner)) || !/^[\w.-]{1,100}$/.test(String(repo))) return { ok: false, error: 'owner/repo 格式无效' }
       const res = await net.fetch(`https://api.github.com/repos/${owner}/${repo}/readme`, { headers: { ...ghHeaders(token), accept: 'application/vnd.github.raw+json' } })
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
       return { ok: true, text: (await res.text()).slice(0, 8000) }
@@ -777,12 +806,15 @@ function wireIpc(): void {
   })
 
   // Markdown 本地文件：打开 / 另存为
+  // 直写白名单：existingPath 只允许回写本次会话内经对话框打开/保存过的路径，渲染层不可任意指定写入位置
+  const mdWritablePaths = new Set<string>()
   ipcMain.handle('open-md-file', async () => {
     try {
       const r = await showOwnedOpenDialog({ title: '打开 Markdown 文件', properties: ['openFile'], filters: [{ name: 'Markdown / 文本', extensions: ['md', 'markdown', 'txt', 'mdx'] }] })
       if (r.canceled || !r.filePaths[0]) return { ok: false }
       const path = r.filePaths[0]
       const content = await readFile(path, 'utf8')
+      mdWritablePaths.add(path)
       return { ok: true, path, name: basename(path), content }
     } catch (e) {
       return { ok: false, error: String(e) }
@@ -790,13 +822,15 @@ function wireIpc(): void {
   })
   ipcMain.handle('save-md-file', async (_e, content: string, suggestName: string, existingPath?: string) => {
     try {
-      let path = existingPath
+      if (typeof content !== 'string' || content.length > 20_000_000 || hasNul(content)) return { ok: false, error: '内容无效或过大' }
+      let path = typeof existingPath === 'string' && existingPath.length <= 4096 && !hasNul(existingPath) && mdWritablePaths.has(existingPath) ? existingPath : ''
       if (!path) {
         const r = await showOwnedSaveDialog({ title: '保存 Markdown', defaultPath: (suggestName || '未命名') + '.md', filters: [{ name: 'Markdown', extensions: ['md'] }] })
         if (r.canceled || !r.filePath) return { ok: false }
         path = r.filePath
       }
       await writeFile(path, content, 'utf8')
+      mdWritablePaths.add(path)
       return { ok: true, path, name: basename(path) }
     } catch (e) {
       return { ok: false, error: String(e) }
@@ -820,6 +854,7 @@ function wireIpc(): void {
           allowRunningInsecureContent: false
         }
       })
+      hardenWindow(w)
       await w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
       const pdf = await w.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true })
       const r = await showOwnedSaveDialog({ title: '导出 PDF', defaultPath: safeName(name, '文档') + '.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] })
@@ -863,7 +898,7 @@ function wireIpc(): void {
   })
 
   // 内嵌真 PTY 终端（ConPTY PowerShell，多标签）
-  setPtySink((id, data) => win?.webContents.send('pty-data', { id, data }))
+  setPtySink((id, data) => safeSend('pty-data', { id, data }))
   ipcMain.handle('pty-ensure', (_e, id: string, cols: number, rows: number, cwd?: string, profile?: TerminalShellProfile, environment?: Record<string, string>) => {
     const env = environment && typeof environment === 'object' ? Object.fromEntries(Object.entries(environment).filter(([key, value]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && typeof value === 'string').slice(0, 40)) : undefined
     return ptyEnsure(String(id), Number(cols), Number(rows), typeof cwd === 'string' ? cwd : undefined, profile, env)
@@ -892,7 +927,7 @@ function wireIpc(): void {
       return { ok: true, state: terminalWorkspace.save(raw) }
     } catch (error) { return { ok: false, error: String(error) } }
   })
-  app.on('will-quit', () => { stopClipboardWatch?.(); ptyKillAll(); globalShortcut.unregisterAll() })
+  app.on('will-quit', () => { flushState(); stopClipboardWatch?.(); ptyKillAll(); globalShortcut.unregisterAll() })
 
   // 智能勿扰：渲染层把最终勿扰态告知主进程（真则不自动弹窗/响铃）
   ipcMain.on('set-dnd', (_e, active: boolean) => { dndActive = !!active })
@@ -903,7 +938,7 @@ function wireIpc(): void {
     lastWidgetData = data
     if (widgetWin && !widgetWin.isDestroyed()) widgetWin.webContents.send('widget-data', data)
   })
-  ipcMain.on('widget-reveal', () => { win?.webContents.send('reveal') })
+  ipcMain.on('widget-reveal', () => { safeSend('reveal') })
 
   // 钉屏便利贴：开关 / 内容更新 / 浮贴自身关闭
   ipcMain.on('toggle-sticky', (_e, note: StickyNoteData) => {
@@ -1423,7 +1458,7 @@ function wireIpc(): void {
   let agentRunSeq = 0
   ipcMain.handle('agent-cli-stream', async (_e, engine: AgentEngine, prompt: string, cwd?: string, cont?: boolean) => {
     const runId = 'ar' + ++agentRunSeq
-    const r = await agentCliStream(engine, String(prompt), cwd, !!cont, (ev) => win?.webContents.send('agent-cli-event', { runId, ev }))
+    const r = await agentCliStream(engine, String(prompt), cwd, !!cont, (ev) => safeSend('agent-cli-event', { runId, ev }))
     return r.ok ? { ok: true, runId } : { ok: false, error: r.error }
   })
   ipcMain.on('agent-cli-cancel', (_e, engine: AgentEngine) => agentCliCancel(engine))
@@ -1463,8 +1498,8 @@ function wireIpc(): void {
   ipcMain.handle('kb-save-wiki', (_e, key: string, md: string) => kbGuard(() => kb.saveWiki(String(key), String(md), Date.now())))
   ipcMain.handle('load-state', () => loadState())
   ipcMain.on('save-state', (_e, state: Record<string, unknown>) => {
-    saveState(state)
-    // 同步主进程的提示音偏好（按类型的声效映射）
+    scheduleSave(state)
+    // 同步主进程的提示音偏好（按类型的声效映射）—— 即时生效，不随防抖延迟
     const s = state as { settings?: { sound?: boolean; clipWatch?: boolean }; soundMap?: Record<string, string> }
     if (typeof s.settings?.sound === 'boolean') soundPref.on = s.settings.sound
     if (typeof s.settings?.clipWatch === 'boolean') setClipboardWatch(s.settings.clipWatch)
@@ -1485,8 +1520,14 @@ if (!allowAuditInstance && !app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(async () => {
-  await bridge.start()
+  try {
+    await bridge.start()
+  } catch (err) {
+    // 桥起失败（端口被占等）不能中断后续初始化，否则无窗无托盘成为僵尸进程；岛仍可用，仅 hook 转发不可达
+    console.error('[bridge] start failed:', err)
+  }
   codexTail.start() // Codex 实时接入：跟随 rollout 日志
+  initUpdater((s) => safeSend('update-state', s)) // 自动更新：设置页可检查/安装
   kb.initKb(app.getPath('userData')) // 知识库索引存放于 userData/kb-index.json
   recordingSessions = new RecordingSessionStore(join(app.getPath('userData'), 'recordings'))
   await recordingSessions.initialize()
@@ -1534,7 +1575,7 @@ app.whenReady().then(async () => {
   // 剪贴板助手：clipWatch 关闭时主进程也停止读取系统剪贴板
   setClipboardWatch(clipWatchEnabled)
   // 会议检测：麦克风/摄像头占用变化推给渲染层（渲染层结合"自动勿扰"开关决定是否静默）
-  startDndWatch((active) => win?.webContents.send('dnd-state', active))
+  startDndWatch((active) => safeSend('dnd-state', active))
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

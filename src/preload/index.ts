@@ -1,8 +1,15 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
+import type { DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState, UpdateState } from '../shared/protocol'
 
 const api: IslandBridgeApi = {
   getRuntimeInfo: () => ipcRenderer.invoke('runtime-info'),
+  checkForUpdates: (): void => ipcRenderer.send('update-check'),
+  installUpdate: (): void => ipcRenderer.send('update-install'),
+  onUpdateState: (cb: (s: UpdateState) => void): (() => void) => {
+    const handler = (_e: unknown, s: UpdateState): void => cb(s)
+    ipcRenderer.on('update-state', handler)
+    return () => ipcRenderer.removeListener('update-state', handler)
+  },
   onSnapshot: (cb: (snap: IslandSnapshot) => void): (() => void) => {
     const handler = (_e: unknown, snap: IslandSnapshot): void => cb(snap)
     ipcRenderer.on('snapshot', handler)

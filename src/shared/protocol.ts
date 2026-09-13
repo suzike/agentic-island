@@ -214,6 +214,10 @@ export interface BridgeEvent {
   isPlan?: boolean
   /** 一轮对话结束（触发 git 变更小结采集） */
   turnEnd?: boolean
+  /** 模型名（Stop 时从 transcript 尾部提取；Codex rollout 原生携带） */
+  model?: string
+  /** 当前上下文占用 token（输入+缓存；Stop 时从 transcript 尾部提取，Codex 来自 token_count） */
+  contextTokens?: number
 }
 
 /** 任务完成时的变更小结 */
@@ -249,11 +253,11 @@ export interface AgentState {
   startedAt?: number
   /** 最近活动轨迹（状态描述变化的时间线，最多 10 条） */
   history?: { ts: number; text: string }[]
-  /** 模型名（Codex rollout 可得；Claude Code hooks 无） */
+  /** 模型名（Codex rollout / Claude Stop 事件的 transcript 均可得） */
   model?: string
   /** 累计 token 用量（Codex token_count 事件） */
   tokens?: number
-  /** 当前上下文占用 token（Codex token_count 事件的 last/context） */
+  /** 当前上下文占用 token（Codex token_count 的 last/context；Claude 为最近一次 API 调用的输入+缓存） */
   contextTokens?: number
   updatedAt: number
 }
@@ -272,6 +276,18 @@ export interface RuntimeInfo {
     contextIsolation: boolean
     nodeIntegration: boolean
   }
+}
+
+/** 自动更新状态机（electron-updater 事件归一化后推送给渲染层） */
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+export interface UpdateState {
+  status: UpdateStatus
+  /** 新版本号（available / downloaded 时有值） */
+  version?: string
+  /** 下载进度百分比（downloading 时有值） */
+  percent?: number
+  /** 失败原因（error 时有值，已截断） */
+  error?: string
 }
 
 /** 渲染进程 → 主进程：用户对某请求的裁决 */
@@ -458,6 +474,12 @@ export interface TerminalProjectInspection {
 /** preload 通过 contextBridge 暴露给渲染进程的 API */
 export interface IslandBridgeApi {
   getRuntimeInfo: () => Promise<RuntimeInfo>
+  /** 手动检查更新（设置页"检查更新"按钮） */
+  checkForUpdates: () => void
+  /** 下载完成后退出并安装更新 */
+  installUpdate: () => void
+  /** 更新状态推送（检查中/发现新版本/下载进度/已就绪/失败） */
+  onUpdateState: (cb: (s: UpdateState) => void) => () => void
   onSnapshot: (cb: (snap: IslandSnapshot) => void) => () => void
   getSnapshot: () => Promise<IslandSnapshot>
   decide: (msg: DecisionMessage) => void
