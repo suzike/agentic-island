@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing draft release tag
         required: true
-        default: v0.6.8
+        default: v0.6.9
 
 permissions:
   contents: write
