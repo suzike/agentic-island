@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { buildRecordingFfmpegArgs, recordingExportDurationMs, recordingExportSubtitleSegments, recordingHasEdits } from '../src/main/recording-export.ts'
-import { formatRecordingTime, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame } from '../src/renderer/src/logic/recording.ts'
+import { formatRecordingTime, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
+} from '../src/renderer/src/logic/recording.ts'
 import { recordingSourceLabel, recordingWindowHandle, sameRecordingWindowSource } from '../src/shared/recording-source.ts'
 import type { RecordingExportRequest } from '../src/shared/protocol.ts'
 
@@ -155,5 +158,30 @@ const subtitleSegments = recordingExportSubtitleSegments({
   ] }
 })
 assert.deepEqual(subtitleSegments.map((item) => [item.startMs, item.endMs, item.text]), [[400, 1_200, '第一段'], [2_000, 3_200, '第二段']], '字幕时间码按保留片段拼接并随速度重排')
+
+
+// ── 播放头直写：高频 timeupdate 不经过 React 状态（录屏工作台 2000+ 行整树重渲染的根因）──
+{
+  const el = () => ({ style: { left: '' } })
+  const main = el(); const segment = el(); const label = { textContent: '' }
+  const pct = writePreviewPosition({ main, segment, label }, 2500, 10000)
+  assert.ok(pct === 25, '播放头：百分比按总时长换算')
+  assert.ok(main.style.left === '25%' && segment.style.left === '25%', '播放头：两条时间轴同步跟随')
+  assert.ok(label.textContent === formatRecordingTime(2500), '播放头：时间标签同步更新')
+
+  // 时长为 0（未载入）时不产生除零/NaN —— 否则 style.left 会写成 "NaN%"
+  writePreviewPosition({ main, segment, label }, 100, 0)
+  assert.ok(main.style.left === '0%' && !main.style.left.includes('NaN'), '播放头：总时长为 0 时安全回退为 0%（不写 NaN）')
+
+  // 元素缺失（面板切走/未挂载）不得抛错
+  assert.ok(writePreviewPosition({ main: null, segment: null, label: null }, 500, 1000) === 50, '播放头：元素缺失时静默跳过并返回百分比')
+
+  // 源码不变量：timeupdate 处理器与 seek 路径不得调用 setState（高频重渲染回归防线）
+  const src = readFileSync(join(process.cwd(), 'src/renderer/src/components/ScreenRecorderStudio.tsx'), 'utf8')
+  assert.ok(!/setPreviewCurrentMs/.test(src), '播放头：不再存在 preview 时间的 React setState 写入')
+  const timeUpdate = src.slice(src.indexOf('onTimeUpdate={'), src.indexOf('onTimeUpdate={') + 500)
+  assert.ok(/applyPreviewMs\(current\)/.test(timeUpdate) && !/set[A-Z]/.test(timeUpdate), '播放头：timeupdate 走 DOM 直写而非 setState')
+  assert.ok((src.match(/previewEls\.current/g) || []).length >= 4, '播放头：三条消费点（主/片段/标签）均挂 ref')
+}
 
 console.log('recording tests passed')

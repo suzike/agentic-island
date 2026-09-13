@@ -499,3 +499,24 @@ export function recordingStartError(error: unknown): string {
   if (/timed?\s*out|超时/i.test(detail)) return '连接屏幕画面超时，请刷新录制来源后重试。'
   return detail || '录屏启动失败，请刷新录制来源后重试。'
 }
+
+/** 播放头 DOM 元素（结构化类型：浏览器传真实元素，测试传替身） */
+export interface PreviewPositionTargets {
+  main: { style: { left: string } } | null
+  segment: { style: { left: string } } | null
+  label: { textContent: string } | null
+}
+
+/**
+ * 把播放头位置直写到 DOM（不经过 React 状态）。
+ * video 的 timeupdate 是高频事件，走 state 会让录屏工作台（2000+ 行）整树重渲染；
+ * 这里只改元素的 style/textContent，React 因其它原因重渲染时从 ref 读最新值即可保持一致。
+ * 返回写入的百分比，便于测试与调试。
+ */
+export function writePreviewPosition(targets: PreviewPositionTargets, ms: number, totalMs: number): number {
+  const pct = totalMs > 0 ? (ms / totalMs) * 100 : 0
+  if (targets.main) targets.main.style.left = `${pct}%`
+  if (targets.segment) targets.segment.style.left = `${pct}%`
+  if (targets.label) targets.label.textContent = formatRecordingTime(ms)
+  return pct
+}

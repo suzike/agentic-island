@@ -10,7 +10,7 @@ import { RecordingNeuralStyle } from '../logic/recording-neural-style'
 import type { NeuralStyleStatus } from '../logic/recording-neural-style'
 import { deleteRecordingAvatar, loadRecordingAvatar, saveRecordingAvatar } from '../logic/recording-avatar'
 import { formatBytes } from '../logic/screenshot'
-import { formatRecordingTime, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame } from '../logic/recording'
+import { formatRecordingTime, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
 import type { RecordingAnimePalette, RecordingAspect, RecordingMotion, RecordingResolution } from '../logic/recording'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
@@ -252,7 +252,18 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [trimStart, setTrimStart] = useState(0)
   const [trimEnd, setTrimEnd] = useState(0)
   const [playbackRate, setPlaybackRate] = useState(1)
-  const [previewCurrentMs, setPreviewCurrentMs] = useState(0)
+  // 播放头位置：video 的 timeupdate 是高频事件，若进入 React state 会让本组件（2000+ 行）整树重渲染。
+  // 这里沿用终端字符回显的"零 React 状态更新"惯例：写 ref + 直接改 DOM（style/textContent），
+  // React 因其它原因重渲染时从 ref 读最新值，显示始终一致。
+  const previewMsRef = useRef(0)
+  const previewEls = useRef<{ main: HTMLSpanElement | null; segment: HTMLSpanElement | null; label: HTMLSpanElement | null }>({ main: null, segment: null, label: null })
+  const elapsedForPreview = useRef(0)
+  const applyPreviewMs = (ms: number): void => {
+    previewMsRef.current = ms
+    writePreviewPosition(previewEls.current, ms, elapsedForPreview.current)
+  }
+  // elapsed 变化很少（载入/收尾）：渲染期同步镜像，供百分比换算与 DOM 直写使用（同 notesRef 惯例）
+  elapsedForPreview.current = elapsed
   const [recordingHasAudio, setRecordingHasAudio] = useState(false)
   const [editSegments, setEditSegments] = useState<RecordingEditSegment[]>([])
   const [activeSegmentId, setActiveSegmentId] = useState('')
@@ -1138,7 +1149,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
         }
         updateStatus('starting'); setStartupMessage('正在生成可播放预览…')
         const fullSegment: RecordingEditSegment = { id: `segment-${Date.now()}`, startMs: 0, endMs: finalElapsed, enabled: true, label: '片段 1' }
-        setTrimStart(0); setTrimEnd(finalElapsed); setPlaybackRate(1); setPreviewCurrentMs(0)
+        setTrimStart(0); setTrimEnd(finalElapsed); setPlaybackRate(1); applyPreviewMs(0)
         setEditSegments([fullSegment]); setActiveSegmentId(fullSegment.id)
         setEditSettings({ speed: 1, crop: { left: 0, top: 0, right: 0, bottom: 0 }, rotation: 0, contrast: 1, saturation: 1, gamma: 1, audioVolume: 1 })
         setEditHistory([]); setEditFuture([])
@@ -1234,7 +1245,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     setRecordingSessionId(restored.id); setRecordingBlob(null); setRecordingUrl(result.url); setPreviewError('')
     setRecordingName(restored.name); setRecordingSize({ width: restored.width, height: restored.height }); setFps(restored.fps); setRecordingHasAudio(restored.hasAudio)
     setRecordedBytes(restored.bytes); recordedBytesRef.current = restored.bytes; setElapsed(duration); elapsedRef.current = duration
-    setTrimStart(0); setTrimEnd(duration); setPlaybackRate(1); setPreviewCurrentMs(0)
+    setTrimStart(0); setTrimEnd(duration); setPlaybackRate(1); applyPreviewMs(0)
     setEditSegments([segment]); setActiveSegmentId(segment.id)
     setEditSettings({ speed: 1, crop: { left: 0, top: 0, right: 0, bottom: 0 }, rotation: 0, contrast: 1, saturation: 1, gamma: 1, audioVolume: 1 })
     setEditHistory([]); setEditFuture([]); setTranscriptSegments([])
@@ -1267,7 +1278,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     const video = previewVideoRef.current
     if (!video) return
     video.currentTime = Math.max(0, Math.min(elapsed, ms)) / 1000
-    setPreviewCurrentMs(Math.max(0, Math.min(elapsed, ms)))
+    applyPreviewMs(Math.max(0, Math.min(elapsed, ms)))
   }
 
   const playTrimmedPreview = (): void => {
@@ -1326,7 +1337,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
 
   const snapEditPoint = (value: number, segmentId = ''): number => {
     if (!timelineSnap) return Math.max(0, Math.min(elapsed, value))
-    const points = [previewCurrentMs, ...timeline.map((item) => item.at), ...editSegments.flatMap((segment) => segment.id === segmentId ? [] : [segment.startMs, segment.endMs])]
+    const points = [previewMsRef.current, ...timeline.map((item) => item.at), ...editSegments.flatMap((segment) => segment.id === segmentId ? [] : [segment.startMs, segment.endMs])]
     return snapRecordingTime(value, elapsed, points, Math.max(35, 140 / timelineZoom), fps)
   }
 
@@ -1369,7 +1380,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const splitActiveSegment = (): void => {
     if (!activeSegment) return
     if (videoTrackLocked) { flash('视频轨已锁定'); return }
-    const splitAt = snapEditPoint(previewCurrentMs, activeSegment.id)
+    const splitAt = snapEditPoint(previewMsRef.current, activeSegment.id)
     const next = splitRecordingSegment(editSegments, activeSegment.id, splitAt)
     if (next === editSegments) { flash('请把播放头移动到当前片段内部再拆分'); return }
     rememberEdit()
@@ -1427,7 +1438,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const addTimelineMarker = (): void => {
     if (markerTrackLocked) { flash('标记轨已锁定'); return }
     rememberEdit()
-    const at = snapEditPoint(previewCurrentMs)
+    const at = snapEditPoint(previewMsRef.current)
     setTimeline((items) => [...items, { at, type: 'marker' as const, label: `章节 ${items.filter((item) => item.type === 'marker').length + 1}` }].sort((a, b) => a.at - b.at))
   }
 
@@ -1788,11 +1799,11 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                     }}
                     onTimeUpdate={(event) => {
                       const current = event.currentTarget.currentTime * 1000
-                      setPreviewCurrentMs(current)
+                      applyPreviewMs(current)
                       const end = activeSegment?.endMs || trimEnd
                       const start = activeSegment?.startMs ?? trimStart
                       if (end > start && current >= end) {
-                        event.currentTarget.pause(); event.currentTarget.currentTime = start / 1000; setPreviewCurrentMs(start)
+                        event.currentTarget.pause(); event.currentTarget.currentTime = start / 1000; applyPreviewMs(start)
                       }
                     }}
                     onError={() => setPreviewError('录制已完成，但浏览器无法解码预览。可以先导出 MP4；若导出也失败，请重新录制。')}
@@ -1891,7 +1902,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                   <IconButton icon={Split} title="在播放头拆分视频片段" size={27} disabled={!activeSegment || videoTrackLocked} onClick={splitActiveSegment} />
                   <IconButton icon={Plus} title="在播放头添加章节" size={27} disabled={markerTrackLocked} onClick={addTimelineMarker} />
                   <IconButton icon={Magnet} title={timelineSnap ? '关闭帧与边界磁吸' : '开启帧与边界磁吸'} size={27} onClick={() => setTimelineSnap((value) => !value)} style={{ color: timelineSnap ? accent() : ink(3) }} />
-                  <span style={{ marginLeft: 5, ...text.num(10), color: ink(1) }}>{formatRecordingTime(previewCurrentMs)}</span>
+                  <span ref={(el) => { previewEls.current.label = el }} style={{ marginLeft: 5, ...text.num(10), color: ink(1) }}>{formatRecordingTime(previewMsRef.current)}</span>
                   <span style={{ ...text.faint(), fontSize: 9 }}>／ {formatRecordingTime(elapsed)}</span>
                   <span style={{ flex: 1 }} />
                   <span style={{ ...text.faint(), fontSize: 9 }}>{editSegments.filter((item) => item.enabled !== false).length} 段 · {timeline.filter((item) => item.type === 'marker').length} 章节</span>
@@ -1921,7 +1932,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                       <div style={{ height: 45, position: 'relative', cursor: 'crosshair' }} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seekPreview(snapEditPoint((event.clientX - rect.left) / rect.width * elapsed)) }}>
                         {timeline.filter((item) => item.type === 'marker' || item.type === 'start').map((item, index) => <button key={`${item.type}-${item.at}-${index}`} onClick={(event) => { event.stopPropagation(); seekPreview(item.at) }} title={`${formatRecordingTime(item.at)} ${item.label}`} style={{ position: 'absolute', left: `${elapsed ? item.at / elapsed * 100 : 0}%`, top: 5, bottom: 5, maxWidth: 130, padding: '0 6px', border: `0.5px solid ${semBg(item.type === 'start' ? sem.calm : sem.warn, 0.68)}`, borderRadius: 5, color: item.type === 'start' ? sem.calm : sem.warn, background: semBg(item.type === 'start' ? sem.calm : sem.warn, 0.13), fontFamily: 'inherit', fontSize: 8, whiteSpace: 'nowrap', cursor: 'pointer', transform: item.at >= elapsed * 0.92 ? 'translateX(-100%)' : undefined }}>{item.label}</button>)}
                       </div>
-                      <span style={{ position: 'absolute', left: `${elapsed ? previewCurrentMs / elapsed * 100 : 0}%`, top: 0, bottom: 0, width: 1.5, background: '#fff', boxShadow: '0 0 7px rgba(255,255,255,.65)', pointerEvents: 'none', zIndex: 4 }}><span style={{ position: 'absolute', left: -4, top: 0, width: 9, height: 7, clipPath: 'polygon(0 0,100% 0,50% 100%)', background: '#fff' }} /></span>
+                      <span ref={(el) => { previewEls.current.main = el }} style={{ position: 'absolute', left: `${elapsed ? previewMsRef.current / elapsed * 100 : 0}%`, top: 0, bottom: 0, width: 1.5, background: '#fff', boxShadow: '0 0 7px rgba(255,255,255,.65)', pointerEvents: 'none', zIndex: 4 }}><span style={{ position: 'absolute', left: -4, top: 0, width: 9, height: 7, clipPath: 'polygon(0 0,100% 0,50% 100%)', background: '#fff' }} /></span>
                     </div>
                   </div>
                 </div>
@@ -2139,7 +2150,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                   <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={labelStyle}>非破坏性时间线</span><span style={{ ...text.num(10), color: sem.calm }}>{formatRecordingTime(trimDuration)} 成片 · {editSegments.filter((item) => item.enabled !== false).length} 段</span></div>
                   <div onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seekPreview((event.clientX - rect.left) / rect.width * elapsed) }} style={{ height: 44, position: 'relative', borderRadius: R.sm, background: surface.inset().background, overflow: 'hidden', cursor: 'crosshair' }}>
                     {editSegments.map((segment, index) => <button key={segment.id} title={`${segment.label || `片段 ${index + 1}`} · ${formatRecordingTime(segment.startMs)}-${formatRecordingTime(segment.endMs)}`} onClick={(event) => { event.stopPropagation(); selectSegment(segment) }} style={{ position: 'absolute', left: `${segment.startMs / elapsed * 100}%`, width: `${Math.max(0.5, (segment.endMs - segment.startMs) / elapsed * 100)}%`, top: 7, bottom: 7, border: segment.id === activeSegment?.id ? `2px solid ${accent()}` : `0.5px solid ${hairline(0.2)}`, borderRadius: 5, background: segment.enabled === false ? surface.card().background : index % 2 ? semBg(sem.calm, 0.38) : semBg(accent(), 0.42), opacity: segment.enabled === false ? 0.42 : 1, cursor: 'pointer' }} />)}
-                    <span style={{ position: 'absolute', left: `${elapsed ? previewCurrentMs / elapsed * 100 : 0}%`, top: 2, bottom: 2, width: 2, background: '#fff', boxShadow: '0 0 5px rgba(0,0,0,.7)', pointerEvents: 'none' }} />
+                    <span ref={(el) => { previewEls.current.segment = el }} style={{ position: 'absolute', left: `${elapsed ? previewMsRef.current / elapsed * 100 : 0}%`, top: 2, bottom: 2, width: 2, background: '#fff', boxShadow: '0 0 5px rgba(0,0,0,.7)', pointerEvents: 'none' }} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 132, overflow: 'auto' }} className="ai-scroll">
                     {editSegments.map((segment, index) => <button key={segment.id} onClick={() => selectSegment(segment)} style={{ minHeight: 32, display: 'flex', alignItems: 'center', gap: 7, padding: '0 8px', border: segment.id === activeSegment?.id ? `1px solid ${accent()}` : 0, borderRadius: R.sm, background: surface.inset().background, color: ink(2), fontFamily: 'inherit', cursor: 'pointer', opacity: segment.enabled === false ? 0.48 : 1 }}><span style={{ width: 17, height: 17, display: 'grid', placeItems: 'center', borderRadius: 5, background: semBg(accent(), 0.17), color: accent(), fontSize: 8 }}>{index + 1}</span><span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left', fontSize: 10 }}>{segment.label || `片段 ${index + 1}`}</span><span style={{ ...text.num(9) }}>{formatRecordingTime(segment.endMs - segment.startMs)}</span><span role="switch" title={segment.enabled === false ? '启用片段' : '暂不导出'} onClick={(event) => { event.stopPropagation(); toggleSegmentEnabled(segment.id) }}><Eye size={12} /></span></button>)}
