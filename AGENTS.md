@@ -106,4 +106,5 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 
 - 回复用简体中文；每轮改动跑 `typecheck + build` + 相关 test 脚本；安全分类器不可用导致无法编译时，人工核对并**如实告知未编译**。
 - 用户显式要求才做 git 操作。改动追求最小 diff，匹配现有内联样式/OKLCH 写法。
+- **每次发版必须同步更新 README 与 CHANGELOG**：版本徽章、更新概览节、功能矩阵、离线测试数量、安装包文件名，并用 `npm run docs:capture` 重建真实截图（输出名随版本演进，如 `*-v067.png`，README 引用同步切换）。发布前跑一遍 capture 确认截图非空、版本号正确。
 - 长期记忆（进度流水、根因复盘）在 auto-memory 的 `m1-status.md`，比本文件更细。
