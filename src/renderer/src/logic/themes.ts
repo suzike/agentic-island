@@ -234,9 +234,13 @@ export function applyThemeTokens(input: Partial<ThemeTokenInput>): void {
     '--inset-l': String(Number(clamp(bg - (light ? 0.13 : 0.055), 0.04, 0.9).toFixed(3))),
     '--ink-l': t.tx,
     '--muted-ink-l': light ? '0.28' : '0.86',
-    '--ink-2-a': light ? '0.66' : '0.6',
-    '--ink-3-a': light ? '0.46' : '0.32',
-    '--ink-4-a': light ? '0.3' : '0.18',
+    // 浅色主题的次级文字透明度整体上调：深色文字叠在浅面板上会显得更细更虚，
+    // 原先 ink2/3/4 在浅色下只有 4.8 / 2.8 / 1.9 : 1（深色是 6.7 / 2.6 / 1.5），
+    // 而 text.faint()（ink3）是全应用用得最多的一档文字，2.8:1 连大字号 AA(3.0) 都没到。
+    // 上调后为 6.6 / 4.3 / 2.6 : 1（最浅的浅色预设更高），层级阶梯仍清晰。
+    '--ink-2-a': light ? '0.78' : '0.6',
+    '--ink-3-a': light ? '0.62' : '0.32',
+    '--ink-4-a': light ? '0.44' : '0.18',
     '--fill-l': light ? '0.99' : '0.96',
     '--line-l': light ? '0.16' : '0.96',
     '--tint-hi-l': light ? '0.94' : '0.3',
