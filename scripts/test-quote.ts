@@ -1,12 +1,13 @@
 // buildQuotedPrompt 单测：引用片段 + 疑问 + 输入 → 发给模型的完整提问。
 // 运行：node --experimental-strip-types scripts/test-quote.ts
 
-import { buildAgentContextPrompt, buildQuotedPrompt, chatMessageText, compactChatMessages, conversationBusy, conversationContextStats, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, sanitizeChatMessages, upsertAnswerAnalysis } from '../src/renderer/src/logic/chat.ts'
+import { buildAgentContextPrompt, buildQuotedPrompt, chatMessageText, compactChatMessages, conversationBusy, conversationContextStats, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, newAskBranchMeta, sanitizeChatMessages, upsertAnswerAnalysis } from '../src/renderer/src/logic/chat.ts'
 import type { ChatMessage, QuoteRef } from '../src/renderer/src/types.ts'
 
 let failed = 0
 const ok = (cond: boolean, msg: string): void => {
-  console.log((cond ? '✓' : '✗') + ' ' + msg)
+  
+console.log((cond ? '✓' : '✗') + ' ' + msg)
   if (!cond) failed++
 }
 
@@ -97,5 +98,15 @@ const hugeAttachment = 'x'.repeat(70000)
 const limitedAttachment = chatMessageText({ role: 'user', text: '分析附件', attachments: [{ type: 'file', name: 'large.txt', content: hugeAttachment }] })
 ok(limitedAttachment.length < 25000 && limitedAttachment.includes('内容过长已截断'), '历史附件按单文件预算截断，避免后续轮次无限膨胀')
 
+
+// 分支 id 唯一性：原实现 now*100+random(0..99) 在同一毫秒内新建两个分支有约 1% 概率撞 id，
+// 撞上时 patchAskBranchMessages 会同时写两条会话（静默串线）。改为毫秒时间戳 + 单调序列。
+const branchIds = Array.from({ length: 2000 }, (_, i) => newAskBranchMeta('分支' + i).id)
+ok(new Set(branchIds).size === branchIds.length, '连续创建 2000 个分支 id 不重复（消除同毫秒碰撞）')
+ok(branchIds.every((id, i) => i === 0 || id > branchIds[i - 1]), '分支 id 单调递增（便于稳定排序）')
+const sameMs = [newAskBranchMeta('a').id, newAskBranchMeta('b').id]
+ok(sameMs[0] !== sameMs[1], '同一毫秒内连续两次创建分支 id 不同')
+
 console.log(failed === 0 ? '\n✅ buildQuotedPrompt 全部通过' : `\n❌ ${failed} 项失败`)
 process.exit(failed === 0 ? 0 : 1)
+

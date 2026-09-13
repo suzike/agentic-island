@@ -1,7 +1,7 @@
 // 真实 Q&A 的系统提示与响应解析 —— 移植自原型 systemFor(561-576) + parseBlocks(578-596)。
 // 让模型只输出富文本块 JSON 数组，渲染层解析为 h/p/ul/code/note。
 
-import type { AnswerAnalysis, Block, ChatMessage, QuoteRef } from '../types'
+import type { AnswerAnalysis, AskBranchMeta, Block, ChatMessage, QuoteRef } from '../types'
 
 /**
  * 引用追问：把用户选中的若干片段（各带可选疑问）+ 本轮输入，组装成发给模型的完整提问。
@@ -68,6 +68,16 @@ export function conversationToMarkdown(msgs: ChatMessage[], throughIndex = msgs.
 export function forkConversation(msgs: ChatMessage[], msgIndex: number): ChatMessage[] {
   const end = Math.max(0, Math.min(msgIndex, msgs.length - 1))
   return msgs.slice(0, end + 1).filter((message) => !message.typing && !message.live).map((message) => ({ ...message }))
+}
+
+// 分支 id：原实现为 now*100 + random(0..99)，同一毫秒内新建两个分支有 1% 概率撞 id，
+// 撞上时 patchAskBranchMessages 会同时写两条会话（静默串线）。
+// 改为"时间戳与上次 id+1 取大"的严格单调序列：任何调用频率下都不重复，且仍贴近时间戳量级。
+let lastBranchId = 0
+export function newAskBranchMeta(title = '新会话', parentId?: number, forkAt?: number): AskBranchMeta {
+  const now = Date.now()
+  lastBranchId = Math.max(now, lastBranchId + 1)
+  return { id: lastBranchId, title, parentId, forkAt, createdAt: now, updatedAt: now, memory: '', instruction: '' }
 }
 
 export function conversationTitle(msgs: ChatMessage[], fallback = '新会话'): string {

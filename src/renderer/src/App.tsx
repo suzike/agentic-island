@@ -24,7 +24,7 @@ import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
 import { PROVIDERS, loadProviderSettings, migrateEmbeddingSettings, migrateProviderSettings, patchProviderDraft, providerConfigEquals, providerIsKeyless, providerModelChoices, saveProviderSettings, switchProviderSettings } from './logic/providers'
 import { automationDue, automationDayKey } from './logic/automation'
-import { branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, looseBlocks, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
+import { branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, looseBlocks, newAskBranchMeta, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
 import { ADVANCE_PROMPTS, analysisMethodById, answerMethodById, answerMethodInstruction } from './logic/methodologies'
 import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
 import { ThemeDesigner, type Tokens } from './components/ThemeDesigner'
@@ -84,10 +84,7 @@ const ambientSuggestionPrompt = (item: AmbientTextItem): string => {
   return `请结合软件开发和我的实际工作场景，展开这条灵感，并给出 3 条可执行建议：\n${item.text}`
 }
 
-const newAskBranch = (title = '新会话', parentId?: number, forkAt?: number): AskBranchMeta => {
-  const now = Date.now()
-  return { id: now * 100 + Math.floor(Math.random() * 100), title, parentId, forkAt, createdAt: now, updatedAt: now, memory: '', instruction: '' }
-}
+const newAskBranch = newAskBranchMeta
 
 // 桌面挂件「AI 速览」系统提示：只回一句极短中文提点
 const WIDGET_BRIEF_SYSTEM =
@@ -551,12 +548,16 @@ export function App(): React.JSX.Element {
     if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = undefined }
   }, [])
 
-  // 记录每个待审批请求的起始时间
+  // 记录每个待审批请求的起始时间；同时清理已裁决的键（否则长会话下无限累积）
   useEffect(() => {
     const ws = waitStartRef.current
+    const live = new Set<string>()
     pending.forEach((a) => {
-      if (a.requestId && !ws[a.requestId]) ws[a.requestId] = Date.now()
+      if (!a.requestId) return
+      live.add(a.requestId)
+      if (!ws[a.requestId]) ws[a.requestId] = Date.now()
     })
+    for (const id of Object.keys(ws)) if (!live.has(id)) delete ws[id]
   }, [pending])
   const waitSecs = useMemo(() => {
     const out: Record<string, number> = {}

@@ -79,10 +79,17 @@ const AI_ACTIONS = [
 ] as const
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
-const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => Promise.race([
-  promise,
-  new Promise<T>((_resolve, reject) => window.setTimeout(() => reject(new Error(message)), ms))
-])
+const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+  let timer = 0
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => { timer = window.setTimeout(() => reject(new Error(message)), ms) })
+    ])
+  } finally {
+    window.clearTimeout(timer) // 先完成的一侧负责清理，避免遗留定时器
+  }
+}
 const waitVideo = (video: HTMLVideoElement): Promise<void> => new Promise((resolve, reject) => {
   if (video.readyState >= 1 && video.videoWidth > 0) { resolve(); return }
   const timer = window.setTimeout(() => reject(new Error('桌面画面加载超时')), 8000)

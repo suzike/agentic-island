@@ -609,6 +609,9 @@ export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { t
     inputBuffers.delete(id)
     outputTails.delete(id)
     observedCwds.delete(id)
+    // 会话级执行状态一并清理（会话 id 不复用，不清则长跑会话缓慢泄漏）
+    runningCommands.delete(id)
+    pendingStartupCommands.delete(id)
     const remaining = tabs.filter((t) => t.id !== id)
     const next = remaining.length ? remaining : [newTerminalTab(1, undefined, shellProfile)]
     setTabs(next)
