@@ -231,7 +231,10 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 0 27px; /* 9px 内容边距 + 18px 补角区 */
+        /* --notch 是两侧外扩凹角的宽度：所有横向内边距都必须加它，
+           否则内容会落到轮廓之外被裁掉（compact 变体曾因此把状态图标切了一半）。 */
+        --notch: 18px;
+        padding: 0 calc(9px + var(--notch));
         border: 0;
         color: oklch(var(--ink-l) .006 var(--th) / .96);
         box-shadow: 0 10px 28px rgb(0 0 0 / calc(.28 * var(--shadow-k))), inset 0 -1px 0 oklch(var(--fill-l) 0 var(--th) / .06);
@@ -260,11 +263,6 @@
         backdrop-filter: blur(var(--glass-blur));
         border-color: oklch(var(--line-l) 0 var(--th) / .09);
         box-shadow: 0 8px 20px rgba(0,0,0,.22);
-      }
-      .ambient-outline {
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
       }
       .ambient-bar:hover {
         border-color: oklch(.8 calc(.12 * var(--cs, 1)) var(--th) / .36);
@@ -533,7 +531,7 @@
       .ambient-minimal .ambient-top-highlight { opacity: .45; }
       .ambient-compact .ambient-status { min-width: 30px; width: 30px; height: 30px; padding: 0; justify-content: center; }
       .ambient-compact .ambient-status-count { right: -4px; }
-      .ambient-compact { gap: 6px; padding-left: 7px; padding-right: 7px; }
+      .ambient-compact { gap: 6px; padding-left: calc(7px + var(--notch, 18px)); padding-right: calc(7px + var(--notch, 18px)); }
       .ambient-compact .ambient-nav > span,
       .ambient-compact .ambient-open-hint { display: none; }
       @media (prefers-reduced-motion: reduce) {

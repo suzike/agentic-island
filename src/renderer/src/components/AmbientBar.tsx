@@ -190,16 +190,6 @@ export function AmbientBar({ cfg, media, brief, pools, width, status, onMediaKey
     `A ${R} ${R} 0 0 0 0 0`,                          // 左上凹弧
     'Z'
   ].join(' ')
-  // 描边只画主体侧边与底边（不画顶边、不画凹角），与原始设计一致；
-  // 用 SVG 描边而非 border，是为了让它能与被裁切的轮廓精确对齐。
-  const rimPath = [
-    `M ${bodyRight} ${R}`,
-    `V ${H - R}`,
-    `A ${R} ${R} 0 0 1 ${bodyRight - R} ${H}`,
-    `H ${R * 2}`,
-    `A ${R} ${R} 0 0 1 ${R} ${H - R}`,
-    `V ${R}`
-  ].join(' ')
   const customStyle = {
     width: boxW,
     marginLeft: -R,
@@ -220,10 +210,6 @@ export function AmbientBar({ cfg, media, brief, pools, width, status, onMediaKey
         onClick={onOpen}
         title="点击展开灵动岛"
       >
-        <svg className="ambient-outline" width={boxW} height={H} viewBox={`0 0 ${boxW} ${H}`} aria-hidden focusable="false">
-          {/* 属性不解析 CSS var()，描边色走 style */}
-          <path d={rimPath} fill="none" strokeWidth={2} style={{ stroke: 'oklch(var(--line-l) calc(.02 * var(--cs, 1)) var(--th) / .18)' }} />
-        </svg>
         <div className="ambient-depth-grid" />
         <div className="ambient-surface-flow" />
         <div className="ambient-top-highlight" />
