@@ -30,7 +30,9 @@ const store = createTerminalWorkspaceStore({
 })
 const state = defaultTerminalWorkspace(now)
 state.settings.captureOutput = true
-state.sessions = [{ id: 's1', name: '项目', profile: 'powershell', createdAt: now, lastActiveAt: now, commandCount: 1, outputSnapshot: 'token=unsafe-value', outputSavedAt: now }]
+// outputSavedAt 须相对真实当前时间：normalize 按 retentionDays 从 Date.now() 倒推 cutoff，
+// 钉死的固定日期会随推移超出保留期、快照被（正确地）清理，测试随之腐化
+state.sessions = [{ id: 's1', name: '项目', profile: 'powershell', createdAt: now, lastActiveAt: now, commandCount: 1, outputSnapshot: 'token=unsafe-value', outputSavedAt: Date.now() - 60_000 }]
 state.envProfiles = [{ id: 'env-1', name: '开发', variables: [{ key: 'API_KEY', value: 'private-value' }], createdAt: now }]
 const exported = terminalWorkspaceExportState(state)
 assert.equal(exported.sessions[0].outputSnapshot, undefined, '工作区导出必须排除输出快照')
