@@ -219,66 +219,20 @@
         z-index: 4;
         animation: ambient-enter .52s cubic-bezier(.22,.8,.3,1) both;
       }
-      /* 轮廓描边：只画在真实边缘上。顶部 18px 是补块与主体的接合区，那里画描边会成为内部亮线，
-         因此用 mask 从 18px 起才显示；该区间的圆弧段描边由 .ambient-notch::after 衔接。 */
-      .ambient-rim {
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        pointer-events: none;
-        box-shadow: inset 0 0 0 1px oklch(var(--line-l) calc(.02 * var(--cs, 1)) var(--th) / .18);
-        mask-image: linear-gradient(180deg, transparent 0 18px, #000 18px);
-        -webkit-mask-image: linear-gradient(180deg, transparent 0 18px, #000 18px);
-      }
-      /* 贴顶外扩圆角：补块与主体共同构成"从屏幕边缘挂下"的轮廓（凹弧朝向主体）。
-         关键：形状用 mask 塑造、填充用纯色 + 与主体相同的 backdrop-filter。
-         先前用 radial-gradient 直接当背景时，补块只有颜色、没有背景模糊，
-         于是同一表面一半是"模糊后的桌面"、一半是"未模糊的桌面"，浅色壁纸下色差明显；
-         改用 mask 后 backdrop-filter 会被一并裁剪，不会在透明处漏出模糊方块。 */
-      .ambient-notch {
-        position: absolute;
-        top: 0;
-        width: 18px;
-        height: 18px;
-        pointer-events: none;
-        background: oklch(var(--panel-hi-l) var(--surface-c, calc(.02 * var(--css, 1))) var(--ths) / var(--glass-a));
-        backdrop-filter: blur(var(--glass-blur)) saturate(155%);
-      }
-      .ambient-notch::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background: radial-gradient(circle at 100% 100%, transparent 17.2px, oklch(var(--line-l) calc(.02 * var(--cs, 1)) var(--th) / .18) 17.7px 18.6px, transparent 19px);
-      }
-      .ambient-notch-left {
-        left: -18px;
-        mask-image: radial-gradient(circle at 0% 100%, transparent 0 17.4px, #000 17.9px);
-        -webkit-mask-image: radial-gradient(circle at 0% 100%, transparent 0 17.4px, #000 17.9px);
-      }
-      .ambient-notch-left::after {
-        background: radial-gradient(circle at 0% 100%, transparent 17.2px, oklch(var(--line-l) calc(.02 * var(--cs, 1)) var(--th) / .18) 17.7px 18.6px, transparent 19px);
-      }
-      .ambient-notch-right {
-        right: -18px;
-        mask-image: radial-gradient(circle at 100% 100%, transparent 0 17.4px, #000 17.9px);
-        -webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 0 17.4px, #000 17.9px);
-      }
       .ambient-bar {
         --ambient-state: var(--ambient-accent);
         position: relative;
-        width: 100%;
+        /* 单一元素轮廓：盒子比视觉主体宽 36px（两侧各 18px 作外扩凹角），
+           形状由 clip-path: path() 精确剪出（路径在 AmbientBar.tsx 按实际宽度生成）。
+           背景渐变、背景模糊、投影与描边同属一个元素 —— 不存在两个表面，也就不会再有接缝。 */
         height: 44px;
         box-sizing: border-box;
         overflow: hidden;
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 0 9px;
-        /* 描边改为透明占位：保持盒子几何与背景铺满范围不变，可见描边由 .ambient-rim 只画在真实轮廓上。
-           原先直接画 border 时，顶部 18px（被圆角补块接合的区域）那条竖边会变成切开连续表面的内部亮线。 */
-        border: 1px solid transparent;
-        border-top: 0;
-        border-radius: 0 0 18px 18px;
+        padding: 0 27px; /* 9px 内容边距 + 18px 补角区 */
+        border: 0;
         color: oklch(var(--ink-l) .006 var(--th) / .96);
         box-shadow: 0 10px 28px rgb(0 0 0 / calc(.28 * var(--shadow-k))), inset 0 -1px 0 oklch(var(--fill-l) 0 var(--th) / .06);
         cursor: pointer;
@@ -306,6 +260,11 @@
         backdrop-filter: blur(var(--glass-blur));
         border-color: oklch(var(--line-l) 0 var(--th) / .09);
         box-shadow: 0 8px 20px rgba(0,0,0,.22);
+      }
+      .ambient-outline {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
       }
       .ambient-bar:hover {
         border-color: oklch(.8 calc(.12 * var(--cs, 1)) var(--th) / .36);

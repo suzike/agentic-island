@@ -172,17 +172,44 @@ export function AmbientBar({ cfg, media, brief, pools, width, status, onMediaKey
   const ModeIcon = MODE_ICONS[mode] || Sparkles
   const appearance = cfg.appearance || 'glass'
   const motion = cfg.motion || 'balanced'
+  // 轮廓几何：视觉主体宽 barW；盒子两侧各留 R 作「贴顶外扩凹角」。
+  // 凹弧圆心落在 (bodyRight + R, R)，与主体侧边在 y=R 处相切 —— 接合点是数学相切，天然平滑无台阶。
+  const R = 18
+  const H = 44
+  const boxW = barW + R * 2
+  const bodyRight = barW + R
+  const outlinePath = [
+    `M 0 0`,
+    `H ${boxW}`,
+    `A ${R} ${R} 0 0 0 ${bodyRight} ${R}`,          // 右上凹弧（凹向主体）
+    `V ${H - R}`,
+    `A ${R} ${R} 0 0 1 ${bodyRight - R} ${H}`,       // 右下圆角
+    `H ${R * 2}`,
+    `A ${R} ${R} 0 0 1 ${R} ${H - R}`,               // 左下圆角
+    `V ${R}`,
+    `A ${R} ${R} 0 0 0 0 0`,                          // 左上凹弧
+    'Z'
+  ].join(' ')
+  // 描边只画主体侧边与底边（不画顶边、不画凹角），与原始设计一致；
+  // 用 SVG 描边而非 border，是为了让它能与被裁切的轮廓精确对齐。
+  const rimPath = [
+    `M ${bodyRight} ${R}`,
+    `V ${H - R}`,
+    `A ${R} ${R} 0 0 1 ${bodyRight - R} ${H}`,
+    `H ${R * 2}`,
+    `A ${R} ${R} 0 0 1 ${R} ${H - R}`,
+    `V ${R}`
+  ].join(' ')
   const customStyle = {
-    width: barW,
+    width: boxW,
+    marginLeft: -R,
+    clipPath: `path("${outlinePath}")`,
     '--ambient-accent': accent,
     '--ambient-rotation': `${rotationSeconds}s`
   } as CSSProperties
 
   return (
     <div className="ambient-shell" style={{ width: barW }}>
-      {/* 角部外扩：与主体一同构成"贴顶挂下"的圆角轮廓（几何修正见 index.html .ambient-notch-*） */}
-      <div className="ambient-notch ambient-notch-left" />
-      <div className="ambient-notch ambient-notch-right" />
       <div
         data-solid
         data-ambient-bar
@@ -193,7 +220,10 @@ export function AmbientBar({ cfg, media, brief, pools, width, status, onMediaKey
         onClick={onOpen}
         title="点击展开灵动岛"
       >
-        <div className="ambient-rim" />
+        <svg className="ambient-outline" width={boxW} height={H} viewBox={`0 0 ${boxW} ${H}`} aria-hidden focusable="false">
+          {/* 属性不解析 CSS var()，描边色走 style */}
+          <path d={rimPath} fill="none" strokeWidth={2} style={{ stroke: 'oklch(var(--line-l) calc(.02 * var(--cs, 1)) var(--th) / .18)' }} />
+        </svg>
         <div className="ambient-depth-grid" />
         <div className="ambient-surface-flow" />
         <div className="ambient-top-highlight" />
