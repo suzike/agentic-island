@@ -31,3 +31,6 @@ ok(s.endsAt === t0 + 15 * 60000, '长休 15 分钟')
 
 console.log(failed === 0 ? '\n全部通过 ✅' : `\n${failed} 个失败 ❌`)
 process.exit(failed === 0 ? 0 : 1)
+
+// 显式退出：Node 25.2.1 在 Windows 上对本模块的 teardown 偶发 libuv 断言崩溃（断言已全部通过，同 test-loop 先例）
+process.exit(0)

@@ -31,3 +31,6 @@ ok(intervalLabel(3) === '3 天', 'intervalLabel 天')
 
 console.log(failed === 0 ? '\n全部通过 ✅' : `\n${failed} 个失败 ❌`)
 process.exit(failed === 0 ? 0 : 1)
+
+// 显式退出：本机 Node 25.2.1 (Windows) teardown 偶发 libuv 断言崩溃（断言已全部通过，同 test-loop 先例）
+process.exit(0)

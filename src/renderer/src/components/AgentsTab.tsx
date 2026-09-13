@@ -17,6 +17,8 @@ interface AgentsTabProps {
   autoAllowSafe: boolean
   onToggleAutoAllow: () => void
   onDecide: (a: AgentVM, d: 'allow' | 'deny') => void
+  /** 本会话放行：同一会话内相同命令不再询问（主进程策略），并放行当前请求 */
+  onSessionAllow: (a: AgentVM) => void
   onJump: (a: AgentVM) => void
   onCopyCommit: (id: string, commit: string) => void
   copiedId: string | null
@@ -102,6 +104,7 @@ function AgentCard({
   autoAllowSafe,
   onToggleAutoAllow,
   onDecide,
+  onSessionAllow,
   onJump,
   onCopyCommit,
   copiedId,
@@ -271,6 +274,11 @@ function AgentCard({
             </div>
             <Button variant="ghost" onClick={() => onDecide(a, 'deny')} style={{ flex: 1 }}>拒绝 Deny</Button>
           </div>
+          {a.command && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+              <Button variant="ghost" sm onClick={() => onSessionAllow(a)} title="本会话内相同命令不再询问（记入策略审计流水）">本会话放行此命令</Button>
+            </div>
+          )}
           {risk.level === 'safe' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, cursor: 'pointer' }} onClick={onToggleAutoAllow}>
               {autoAllowSafe ? (

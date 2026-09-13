@@ -1,8 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState, UpdateState } from '../shared/protocol'
+import type { ApprovalAuditEntry, DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState, UpdateState } from '../shared/protocol'
 
 const api: IslandBridgeApi = {
   getRuntimeInfo: () => ipcRenderer.invoke('runtime-info'),
+  approvalSessionAllow: (agentId: string, command: string): void => ipcRenderer.send('approval-session-allow', agentId, command),
+  onApprovalAudit: (cb: (entry: ApprovalAuditEntry) => void): (() => void) => {
+    const handler = (_e: unknown, entry: ApprovalAuditEntry): void => cb(entry)
+    ipcRenderer.on('approval-audit', handler)
+    return () => ipcRenderer.removeListener('approval-audit', handler)
+  },
   checkForUpdates: (): void => ipcRenderer.send('update-check'),
   installUpdate: (): void => ipcRenderer.send('update-install'),
   onUpdateState: (cb: (s: UpdateState) => void): (() => void) => {

@@ -34,6 +34,7 @@ import { inspectTerminalProject } from './terminal-project'
 import { startClipboardWatch } from './clipboard-watch'
 import { startDndWatch } from './dnd-watch'
 import { initUpdater } from './updater'
+import { setApprovalPolicy, approvalSessionAllow, setApprovalAuditSink, policyAutoDecision, clearSessionAllows } from './approval-policy'
 import { createExternalYieldController, type ExternalYieldController } from './external-yield'
 import { createScreenshotPoller } from './screenshot-poller'
 import { recordingExportSubtitleSegments, recordingHasEdits, startRecordingFfmpeg } from './recording-export'
@@ -55,6 +56,8 @@ let win: BrowserWindow | null = null
 let externalYield: ExternalYieldController | null = null
 let rendererDialogRelease: (() => void) | null = null
 const store = new AgentsStore()
+// 审批策略钩子装配：命中规则/本会话放行即自动放行并记审计；会话结束清理临时放行
+store.setPolicyHooks({ autoDecision: policyAutoDecision, onSessionEnd: clearSessionAllows })
 
 // 统一发送通道：退出收尾期窗口可能已销毁，裸 `win?.` 判空挡不住 "Object has been destroyed"
 const safeSend = (channel: string, ...args: unknown[]): void => {
@@ -348,6 +351,8 @@ function createWindow(): void {
   win.webContents.on('render-process-gone', (_e, details) => {
     console.error('[renderer] crashed:', details.reason)
   })
+  // reload/导航会丢弃防抖中的挂起状态：导航开始时先强制落盘，保证"状态能存活 reload"（截图脚本依赖此不变量）
+  win.webContents.on('did-start-navigation', () => flushState())
 }
 
 // 智能截图：拉起 Windows 原生框选截图（ms-screenclip），图进剪贴板后轮询取到。
@@ -1500,11 +1505,15 @@ function wireIpc(): void {
   ipcMain.on('save-state', (_e, state: Record<string, unknown>) => {
     scheduleSave(state)
     // 同步主进程的提示音偏好（按类型的声效映射）—— 即时生效，不随防抖延迟
-    const s = state as { settings?: { sound?: boolean; clipWatch?: boolean }; soundMap?: Record<string, string> }
+    const s = state as { settings?: { sound?: boolean; clipWatch?: boolean }; soundMap?: Record<string, string>; approvalPolicy?: Parameters<typeof setApprovalPolicy>[0] }
     if (typeof s.settings?.sound === 'boolean') soundPref.on = s.settings.sound
     if (typeof s.settings?.clipWatch === 'boolean') setClipboardWatch(s.settings.clipWatch)
     if (s.soundMap && typeof s.soundMap === 'object') Object.assign(soundPref.map, s.soundMap)
+    // 审批策略随 save-state 全量同步（主进程为强制执行方）
+    if (s.approvalPolicy && typeof s.approvalPolicy === 'object') setApprovalPolicy(s.approvalPolicy)
   })
+  // 审批卡片「本会话放行」：记住该会话的这条命令（当前请求由渲染层另行 decide 放行）
+  ipcMain.on('approval-session-allow', (_e, agentId: string, command: string) => approvalSessionAllow(String(agentId), String(command)))
 }
 
 // 单实例锁：隔离运行审计可显式放行多实例，但生产环境始终保持单实例。
@@ -1528,6 +1537,7 @@ app.whenReady().then(async () => {
   }
   codexTail.start() // Codex 实时接入：跟随 rollout 日志
   initUpdater((s) => safeSend('update-state', s)) // 自动更新：设置页可检查/安装
+  setApprovalAuditSink((entry) => safeSend('approval-audit', entry)) // 审批策略审计流水推送
   kb.initKb(app.getPath('userData')) // 知识库索引存放于 userData/kb-index.json
   recordingSessions = new RecordingSessionStore(join(app.getPath('userData'), 'recordings'))
   await recordingSessions.initialize()
@@ -1538,7 +1548,7 @@ app.whenReady().then(async () => {
   // 应用持久化的开机自启与显示器偏好，并按需自动接入所有 CLI/终端
   try {
     const st = loadState() as
-      | { settings?: { autostart?: boolean; multiMonitor?: boolean; autoConnect?: boolean; sound?: boolean; largeSize?: boolean; clipWatch?: boolean }; activeMonitor?: number; selectedSound?: string }
+      | { settings?: { autostart?: boolean; multiMonitor?: boolean; autoConnect?: boolean; sound?: boolean; largeSize?: boolean; clipWatch?: boolean }; activeMonitor?: number; selectedSound?: string; approvalPolicy?: Parameters<typeof setApprovalPolicy>[0] }
       | null
     if (st?.settings) {
       if (typeof st.settings.autostart === 'boolean') app.setLoginItemSettings({ openAtLogin: st.settings.autostart })
@@ -1546,6 +1556,8 @@ app.whenReady().then(async () => {
       if (typeof st.settings.sound === 'boolean') soundPref.on = st.settings.sound
       if (typeof st.settings.clipWatch === 'boolean') clipWatchEnabled = st.settings.clipWatch
     }
+    // 审批策略启动即生效（渲染层首帧前主进程就要能自动放行）
+    if (st?.approvalPolicy && typeof st.approvalPolicy === 'object') setApprovalPolicy(st.approvalPolicy)
     if (typeof st?.activeMonitor === 'number') monitorIndex = Math.max(0, st.activeMonitor - 1)
     const stm = (st as { soundMap?: Record<string, string> } | null)?.soundMap
     if (stm && typeof stm === 'object') Object.assign(soundPref.map, stm)

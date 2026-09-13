@@ -4,11 +4,11 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Activity, CalendarClock, ChevronDown, GlassWater, MessageSquare, Minus, PanelTop, Palette, RefreshCw,
+  Activity, CalendarClock, ChevronDown, GlassWater, MessageSquare, Minus, PanelTop, Palette, RefreshCw, ShieldCheck,
   Moon, Pencil, Play, Plug, Plus, Power, Settings2, Sparkles, Sun, Terminal, TimerReset, TriangleAlert,
   Waves, Wind, Wrench, X, Zap
 } from 'lucide-react'
-import type { DisplayInfo, RuntimeInfo, UpdateState } from '../../../shared/protocol'
+import type { ApprovalAuditEntry, ApprovalPolicy, DisplayInfo, RuntimeInfo, UpdateState } from '../../../shared/protocol'
 import type { BarConfig } from '../types'
 import { SOUNDS, SOUND_TYPES, type SoundMap } from '../logic/sounds'
 import { PROVIDERS, providerConfigEquals, type ProviderSettingsSnapshot } from '../logic/providers'
@@ -119,6 +119,10 @@ interface SettingsTabProps {
   updateState: UpdateState | null
   onCheckUpdates: () => void
   onInstallUpdate: () => void
+  /** 审批策略：放行规则 + 自动放行审计流水（主进程强制执行） */
+  approvalPolicy: ApprovalPolicy
+  onSetApprovalPolicy: (p: ApprovalPolicy) => void
+  approvalAudit: ApprovalAuditEntry[]
 }
 
 const FONT_OPTIONS: { key: string; label: string }[] = [
@@ -345,6 +349,45 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
         </div>
         {/* 自动更新（GitHub Releases）：静默后台检查，下载完成后用户确认重启安装 */}
         <UpdateRow p={p} />
+      </Section>
+
+      {/* 审批策略：命中放行规则的命令不再阻塞审批，全部自动放行记入审计流水 */}
+      <Section icon={ShieldCheck} title="审批策略">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ ...text.body(), fontSize: FS.small, fontWeight: 650 }}>启用自动放行规则</div>
+              <div style={text.faint()}>命中规则的命令不再阻塞审批，直接放行并记入审计流水；危险命令词仍始终强制确认</div>
+            </div>
+            <Switch on={p.approvalPolicy.enabled} onChange={(on) => p.onSetApprovalPolicy({ ...p.approvalPolicy, enabled: on })} />
+          </div>
+          <div>
+            <div style={{ ...text.faint(), fontSize: 10, marginBottom: 5 }}>放行规则（子串匹配命令原文，大小写不敏感；只添加完全信任的命令片段）</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 7 }}>
+              {p.approvalPolicy.rules.map((rule) => (
+                <Chip key={rule} onClick={() => p.onSetApprovalPolicy({ ...p.approvalPolicy, rules: p.approvalPolicy.rules.filter((x) => x !== rule) })} title="点击移除该规则">
+                  {rule} <X size={10} strokeWidth={2.2} style={{ display: 'inline', verticalAlign: -1, opacity: 0.7 }} />
+                </Chip>
+              ))}
+              {!p.approvalPolicy.rules.length && <span style={text.faint()}>暂无规则</span>}
+            </div>
+            <RuleInput onAdd={(rule) => { if (rule.trim() && !p.approvalPolicy.rules.includes(rule.trim())) p.onSetApprovalPolicy({ ...p.approvalPolicy, rules: [...p.approvalPolicy.rules, rule.trim()] }) }} />
+          </div>
+          {p.approvalAudit.length > 0 && (
+            <div>
+              <div style={{ ...text.faint(), fontSize: 10, marginBottom: 5 }}>自动放行审计流水（最近 {p.approvalAudit.length} 条）</div>
+              <div className="ai-scroll" style={{ maxHeight: 130, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {p.approvalAudit.slice(0, 30).map((entry, i) => (
+                  <div key={entry.ts + '-' + i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, minWidth: 0 }}>
+                    <span style={{ ...text.mono(10), color: ink(3), flex: 'none' }}>{new Date(entry.ts).toLocaleTimeString('zh-CN', { hour12: false })}</span>
+                    <span style={{ color: entry.scope === 'rule' ? accent(0.85) : ink(2), flex: 'none', fontWeight: 650 }}>{entry.scope === 'rule' ? '规则' : '会话'}</span>
+                    <span title={entry.command} style={{ ...text.mono(10), color: ink(2), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{entry.command}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </Section>
 
       {/* 主题 */}
@@ -864,4 +907,13 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
       </div>
     </div>
   )
+}
+
+/** 放行规则输入：回车或失焦时提交（去重由父级处理） */
+function RuleInput({ onAdd }: { onAdd: (rule: string) => void }): React.JSX.Element {
+  const [value, setValue] = useState('')
+  const submit = (): void => { if (value.trim()) { onAdd(value); setValue('') } }
+  return <Input value={value} onChange={setValue} placeholder="添加规则，如 git status / npm run test，回车确认"
+    onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+    style={{ maxWidth: 380 }} />
 }

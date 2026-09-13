@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import type { AgentCliEvent, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo, UpdateState } from '../../shared/protocol'
+import type { AgentCliEvent, ApprovalAuditEntry, ApprovalPolicy, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo, UpdateState } from '../../shared/protocol'
 import type { ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
@@ -100,6 +100,8 @@ export function App(): React.JSX.Element {
   const [snap, setSnap] = useState<IslandSnapshot>({ agents: [] })
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>({ enabled: false, rules: [] })
+  const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>([])
   const [bridgeConnected, setBridgeConnected] = useState(false)
 
   const [tab, setTab] = useState<Tab>('agents')
@@ -296,6 +298,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     island.getRuntimeInfo().then(setRuntimeInfo).catch(() => setRuntimeInfo(null))
     const offUpdate = island.onUpdateState(setUpdateState)
+    const offAudit = island.onApprovalAudit((entry) => setApprovalAudit((list) => [entry, ...list].slice(0, 100)))
     island.getSnapshot().then((next) => { setSnap(next); setBridgeConnected(true) }).catch(() => setBridgeConnected(false))
     const off = island.onSnapshot((next) => { setSnap(next); setBridgeConnected(true) })
     // 载入持久化配置
@@ -317,6 +320,7 @@ export function App(): React.JSX.Element {
         if (typeof s.githubToken === 'string') setGithubToken(s.githubToken)
         if (Array.isArray(s.repoBookmarks)) setRepoBookmarks(s.repoBookmarks as GitHubRepo[])
         if (Array.isArray(s.shortcuts)) setShortcuts(s.shortcuts as ShortcutDef[])
+        if (s.approvalPolicy && typeof s.approvalPolicy === 'object') setApprovalPolicy(s.approvalPolicy as ApprovalPolicy)
         if (s.askEngine === 'llm' || s.askEngine === 'claude' || s.askEngine === 'codex') setAskEngine(s.askEngine)
         if (typeof s.agentCwd === 'string') setAgentCwd(s.agentCwd)
         if (s.srsState && typeof s.srsState === 'object') setSrsState(s.srsState as Record<number, SrsCard>)
@@ -371,7 +375,7 @@ export function App(): React.JSX.Element {
         monitorIndex: (typeof s?.activeMonitor === 'number' ? s.activeMonitor : 1) - 1
       })
     })
-    return () => { off(); offUpdate() }
+    return () => { off(); offUpdate(); offAudit() }
   }, [])
 
   const agents: AgentVM[] = useMemo(() => snap.agents.map((a) => ({ ...a })), [snap])
@@ -602,6 +606,7 @@ export function App(): React.JSX.Element {
     if (!hydrated.current) return
     island.saveState({
       settings,
+      approvalPolicy,
       soundMap,
       activeMonitor,
       todos,
@@ -656,7 +661,7 @@ export function App(): React.JSX.Element {
         providerCatalogVersion: llm.providerCatalogVersion
       }
     })
-  }, [settings, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
+  }, [settings, approvalPolicy, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
 
   // 字体与缩放应用（--font 变量 + 主进程 zoomFactor）
   useEffect(() => {
@@ -1186,6 +1191,12 @@ export function App(): React.JSX.Element {
   }, [settings.sound, soundMap.todo])
 
   // ===== 审批裁决 =====
+  // 审批卡片「本会话放行」：记住该会话的这条命令（主进程策略），并放行当前请求
+  const sessionAllow = useCallback((a: AgentVM): void => {
+    if (!a.requestId || !a.command) return
+    island.approvalSessionAllow(a.id, a.command)
+    island.decide({ requestId: a.requestId, decision: 'allow' })
+  }, [])
   const decide = useCallback((a: AgentVM, d: 'allow' | 'deny'): void => {
     if (!a.requestId) return
     const risk = riskOf(a.command)
@@ -2560,7 +2571,7 @@ export function App(): React.JSX.Element {
             {tab === 'agents' && (
               <AgentsTab
                 agents={agents} armed={armed} autoAllowSafe={autoAllowSafe} onToggleAutoAllow={() => setAutoAllowSafe((v) => !v)}
-                onDecide={decide}
+                onDecide={decide} onSessionAllow={sessionAllow}
                 onJump={jump} onCopyCommit={copyCommit} copiedId={copiedId} waitSecs={waitSecs}
               />
             )}
@@ -2735,6 +2746,7 @@ export function App(): React.JSX.Element {
               <SettingsTab
                 runtimeInfo={runtimeInfo} bridgeConnected={bridgeConnected}
                 updateState={updateState} onCheckUpdates={() => island.checkForUpdates()} onInstallUpdate={() => island.installUpdate()}
+                approvalPolicy={approvalPolicy} onSetApprovalPolicy={setApprovalPolicy} approvalAudit={approvalAudit}
                 activeAgents={agents.filter((a) => a.status !== 'done').length} totalAgents={agents.length}
                 settings={settings} onToggle={toggleSetting}
                 soundMap={soundMap} soundPickerOpen={soundPickerOpen} onToggleSoundPicker={() => settings.sound && setSoundPickerOpen((v) => !v)} onSetSound={setSoundFor} onPreviewSound={previewSound}

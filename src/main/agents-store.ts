@@ -4,7 +4,13 @@
 
 import { EventEmitter } from 'events'
 import { basename } from 'path'
-import type { AgentState, Backend, BridgeEvent, ChangeSummary, Decision, IslandSnapshot } from '../shared/protocol'
+import type { AgentState, Backend, BridgeEvent, ChangeSummary, Decision, IslandSnapshot, ApprovalAuditEntry } from '../shared/protocol'
+
+/** 审批策略钩子（依赖注入，保持本模块 raw-node 可加载）：主进程注入 policyAutoDecision/clearSessionAllows */
+export interface PolicyHooks {
+  autoDecision?: (agentId: string, command?: string) => ApprovalAuditEntry | null
+  onSessionEnd?: (agentId: string) => void
+}
 
 /** 裁决结果：decision + 可选的回传理由（deny 时会被 Claude Code 采纳并据此调整） */
 export interface DecisionResult {
@@ -44,7 +50,13 @@ export class AgentsStore extends EventEmitter {
   private pending = new Map<string, PendingRequest>()
   /** 每会话的审批队列（requestId 有序）：并行工具调用会产生多个挂起审批，卡片展示队首，裁决后依次顶上 */
   private queues = new Map<string, string[]>()
+  private policyHooks: PolicyHooks | null = null
   private seq = 0
+
+  /** 注入审批策略钩子（index.ts 装配；测试可不注入 = 无自动放行） */
+  setPolicyHooks(hooks: PolicyHooks | null): void {
+    this.policyHooks = hooks
+  }
 
   /** 审批默认超时（毫秒）：超时未裁决则 fail-open 回退到 CLI 自身提示 */
   private static APPROVAL_TIMEOUT = 5 * 60 * 1000
@@ -102,10 +114,21 @@ export class AgentsStore extends EventEmitter {
     return removed
   }
 
-  /** 处理一条 permission 事件：登记挂起请求并返回一个在用户裁决时 resolve 的 Promise */
+  /** 处理一条 permission 事件：先过审批策略（命中即自动放行并记审计），否则登记挂起请求阻塞等待裁决 */
   handlePermission(e: BridgeEvent): Promise<DecisionResult> {
-    const requestId = `req-${++this.seq}-${Date.now()}`
     const agentId = agentKey(e)
+    // 策略放行：命中「本会话放行」或用户规则 → 不阻塞，卡片短暂提示后回到运行态
+    const auto = this.policyHooks?.autoDecision?.(agentId, e.command) ?? null
+    if (auto) {
+      this.upsertAgent(e, {
+        status: 'running',
+        detail: `已按策略自动放行 · ${auto.scope === 'session' ? '本会话放行' : `规则「${auto.rule}」`} · ${auto.command.slice(0, 120)}`,
+        command: undefined,
+        requestId: undefined
+      })
+      return Promise.resolve({ decision: 'allow' })
+    }
+    const requestId = `req-${++this.seq}-${Date.now()}`
     return new Promise<DecisionResult>((resolve) => {
       const timer = setTimeout(() => {
         // 超时：fail-open，交回 CLI 自身的权限提示
@@ -214,6 +237,7 @@ export class AgentsStore extends EventEmitter {
     const queue = this.queues.get(key)
     if (queue) for (const id of [...queue]) this.resolvePending(id, 'ask')
     this.queues.delete(key)
+    this.policyHooks?.onSessionEnd?.(key)
     if (this.agents.delete(key)) this.emit('change')
   }
 

@@ -290,6 +290,22 @@ export interface UpdateState {
   error?: string
 }
 
+/** 审批策略：用户自定义放行规则，主进程在阻塞审批前强制执行并记审计。
+ *  匹配器与默认值在 src/main/approval-policy.ts（raw-node 可加载），本文件只声明类型。 */
+export interface ApprovalPolicy {
+  enabled: boolean
+  /** 放行规则：对命令原文做子串匹配（大小写不敏感），例如 "git status"、"npm run test" */
+  rules: string[]
+}
+
+/** 一次自动放行的审计记录（scope: rule=命中策略规则 · session=本会话放行命令） */
+export interface ApprovalAuditEntry {
+  ts: number
+  command: string
+  rule: string
+  scope: 'rule' | 'session'
+}
+
 /** 渲染进程 → 主进程：用户对某请求的裁决 */
 export interface DecisionMessage {
   requestId: string
@@ -480,6 +496,10 @@ export interface IslandBridgeApi {
   installUpdate: () => void
   /** 更新状态推送（检查中/发现新版本/下载进度/已就绪/失败） */
   onUpdateState: (cb: (s: UpdateState) => void) => () => void
+  /** 本会话放行：同一 Agent 会话内相同命令不再询问（当前请求仍需单独 decide） */
+  approvalSessionAllow: (agentId: string, command: string) => void
+  /** 自动放行审计流水推送（主进程每次按策略放行时推一条） */
+  onApprovalAudit: (cb: (entry: ApprovalAuditEntry) => void) => () => void
   onSnapshot: (cb: (snap: IslandSnapshot) => void) => () => void
   getSnapshot: () => Promise<IslandSnapshot>
   decide: (msg: DecisionMessage) => void
