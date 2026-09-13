@@ -240,7 +240,9 @@ export function applyThemeTokens(input: Partial<ThemeTokenInput>): void {
     // 上调后为 6.6 / 4.3 / 2.6 : 1（最浅的浅色预设更高），层级阶梯仍清晰。
     '--ink-2-a': light ? '0.78' : '0.6',
     '--ink-3-a': light ? '0.62' : '0.32',
-    '--ink-4-a': light ? '0.44' : '0.18',
+    // ink4 是"最弱提示"档，原值在两个主题下都低于任何可读底线（浅色 1.9 / 深色 1.5），
+    // 上调后仍明显弱于 ink3，层级不变。
+    '--ink-4-a': light ? '0.44' : '0.24',
     '--fill-l': light ? '0.99' : '0.96',
     '--line-l': light ? '0.16' : '0.96',
     '--tint-hi-l': light ? '0.94' : '0.3',
@@ -256,7 +258,7 @@ export function applyThemeTokens(input: Partial<ThemeTokenInput>): void {
     '--accent2-l-shift': String(Number(secondaryShift.toFixed(2))),
     '--gradient-angle': `${t.gr}deg`,
     // 强调色作为文字时的明度上限：浅色主题下 accent() 的明度高于面板，小字号文字对比度不足（实测 2.4–2.9:1）
-    '--accent-text-max-l': light ? '0.44' : '1',
+    '--accent-text-max-l': light ? '0.40' : '1',
     '--on-primary-l': Number(t.l1) > 0.66 ? '0.14' : '0.98',
     '--overlay-mask-l': light ? '0.16' : '0.04'
   }
