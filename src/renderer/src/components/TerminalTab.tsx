@@ -20,7 +20,7 @@ import { island } from '../bridge'
 import { buildTerminalDiagnosisPrompt, buildTerminalHandoffPrompt, consumeTerminalInput, extractPowerShellCwd, extractTerminalExitCode, isDangerousTerminalCommand, quotePowerShellLiteral, setLocationCommand, summarizeTerminalOutput, terminalOutputTail, terminalProjectId, TERMINAL_COMMANDS, updateTerminalCwd, type TerminalCommandGroup, type TerminalHistoryEntry } from '../logic/terminal'
 import { Badge, Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
-import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
+import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
 import { TerminalRecoveryCenter } from './TerminalRecoveryCenter'
 
 type TermTab = TerminalSavedSession
@@ -266,7 +266,7 @@ function AgentCard({ a, now }: { a: AgentVM; now: number }): React.JSX.Element {
       ) : null}
       {/* 当前动作 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: ink(2), fontSize: FS.small, overflow: 'hidden' }}>
-        <ChevronRight size={11} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+        <ChevronRight size={11} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.detail || '待命中…'}</span>
       </div>
       {/* 活动轨迹 */}
@@ -935,7 +935,7 @@ export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { t
         </div>
         {searchOpen && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: `0.5px solid ${hairline(0.06)}`, background: 'rgba(0,0,0,.22)' }}>
-            <Search size={12} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+            <Search size={12} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
             <input autoFocus value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setSearchStatus('') }} onKeyDown={(e) => { if (e.key === 'Enter') findInTerminal(e.shiftKey ? -1 : 1); if (e.key === 'Escape') setSearchOpen(false) }} placeholder="搜索当前终端缓冲区" style={{ flex: 1, minWidth: 0, height: 26, borderRadius: R.sm, border: `0.5px solid ${hairline(0.1)}`, background: 'rgba(0,0,0,.3)', color: ink(1), outline: 'none', padding: '0 8px', fontSize: 10, fontFamily: MONO }} />
             <span style={{ minWidth: 45, ...text.faint(), fontSize: 9 }}>{searchStatus}</span>
             <IconButton icon={ChevronUp} size={24} onClick={() => findInTerminal(-1)} title="上一个" />
@@ -944,7 +944,7 @@ export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { t
           </div>
         )}
         <div ref={hostRef} data-terminal-host data-terminal-session-id={active} style={{ height: terminalHeight, minHeight: 250, padding: '8px 4px 8px 10px', boxSizing: 'border-box', overflow: 'hidden' }} />
-        {dragActive && <div style={{ position: 'absolute', inset: 0, zIndex: 25, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,.72)', color: accent(), pointerEvents: 'none' }}><div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: R.md, background: semBg(accent(), 0.18), fontWeight: 700 }}><FolderOpen size={17} />松开后把本地路径安全粘贴到终端</div></div>}
+        {dragActive && <div style={{ position: 'absolute', inset: 0, zIndex: 25, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,.72)', color: accentText(), pointerEvents: 'none', '--accent-text-max-l': 1 }}><div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: R.md, background: semBg(accent(), 0.18), fontWeight: 700 }}><FolderOpen size={17} />松开后把本地路径安全粘贴到终端</div></div>}
         {/* 底部状态栏 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 11px', borderTop: `0.5px solid ${hairline(0.06)}`, background: `linear-gradient(180deg, ${semBg(sem.run, 0.1)}, rgba(0,0,0,.3))`, fontFamily: MONO, fontSize: 9, color: ink(3) }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: ptyOk ? sem.run : sem.danger }}><span style={{ width: 5, height: 5, borderRadius: 999, background: ptyOk ? sem.run : sem.danger, boxShadow: ptyOk ? `0 0 5px ${sem.run}` : undefined }} />{ptyOk ? 'ConPTY 已连接' : 'PTY 未就绪'}</span>

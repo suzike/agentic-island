@@ -13,7 +13,7 @@ import { island } from '../bridge'
 import { Markdown } from './Markdown'
 import { Button, Chip, EmptyState, IconButton, Input, Segmented } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accent, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accentText, accent, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 
 interface Repo { path: string }
 interface GitInfo { ok: boolean; branch?: string; dirty?: number; commit?: string; subject?: string; when?: string; ahead?: number; behind?: number; error?: string }
@@ -143,7 +143,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
             </span>
           )}
           {repo.topics.slice(0, 3).map((t) => (
-            <span key={t} style={{ padding: '1px 7px', borderRadius: R.pill, background: semBg(accent(), 0.12), color: accent(0.82, 0.85), fontSize: 8.5, fontWeight: 600 }}>{t}</span>
+            <span key={t} style={{ padding: '1px 7px', borderRadius: R.pill, background: semBg(accent(), 0.12), color: accentText(0.82, 0.85), fontSize: 8.5, fontWeight: 600 }}>{t}</span>
           ))}
           <span style={{ flex: 1 }} />
           <span className="hv" title={saved ? '取消收藏' : '收藏'} onClick={() => onToggleBookmark(repo)}
@@ -247,7 +247,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
             <motion.div variants={fadeScaleIn} initial={false} animate="animate" className="ai-card"
               style={{ display: 'flex', flexDirection: 'column', gap: SP.sm + 1, padding: SP.lg - 2, ...surface.card() }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <Github size={14} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+                <Github size={14} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
                 <span style={text.subtitle()}>连接你的 GitHub（3 步）</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -319,7 +319,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
                   <span style={{ flex: 1, minWidth: 0, ...text.subtitle(), fontSize: FS.body, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{baseName(r.path)}</span>
                   {s?.ok && (
                     <span style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 5, fontSize: FS.tiny, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 8px', borderRadius: R.pill, background: semBg(accent(), 0.14), color: accent(0.85) }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 8px', borderRadius: R.pill, background: semBg(accent(), 0.14), color: accentText(0.85) }}>
                         <GitBranch size={10} strokeWidth={1.75} />{s.branch}
                       </span>
                       {!!s.dirty && <span style={{ display: 'inline-flex', alignItems: 'center', color: sem.warn }}>±{s.dirty}</span>}
@@ -333,7 +333,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
                     onClick={() => onRemove(r.path)} />
                 </div>
                 <div style={{ ...text.mono(10), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {s?.ok ? <>· <b style={{ color: accent(0.8) }}>{s.commit}</b> {s.subject} <span style={{ opacity: 0.7 }}>· {s.when}</span></> : (s?.error || '读取中…')}
+                  {s?.ok ? <>· <b style={{ color: accentText(0.8) }}>{s.commit}</b> {s.subject} <span style={{ opacity: 0.7 }}>· {s.when}</span></> : (s?.error || '读取中…')}
                 </div>
               </motion.div>
             )

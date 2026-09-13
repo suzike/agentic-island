@@ -18,7 +18,7 @@ import { applyMarkdownPowerAction, MARKDOWN_POWER_ACTIONS, type MarkdownPowerGro
 import { island } from '../bridge'
 import { Button, Chip, IconButton, Input, Segmented, Slider } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
-import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
+import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
 
 interface Props {
   open: boolean
@@ -467,7 +467,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
           {powerOpen && (
             <motion.div variants={overlayPop} initial="initial" animate="animate" className="ai-scroll" style={pop({ left: 0, width: 'min(430px, calc(100vw - 90px))', maxHeight: 410, overflowY: 'auto', padding: SP.md })}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: SP.sm }}>
-                <Wand2 size={12} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+                <Wand2 size={12} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
                 <span style={{ ...text.overline(), marginRight: 4 }}>文档工具</span>
                 {(['结构', '整理', '审计', '块'] as MarkdownPowerGroup[]).map((group) => (
                   <Chip key={group} active={powerGroup === group} onClick={() => setPowerGroup(group)} style={{ padding: '2px 8px', fontSize: 10 }}>{group}</Chip>
@@ -487,14 +487,14 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
               <div style={{ gridColumn: '1 / -1', ...text.faint(), fontSize: 9.5, marginBottom: 2 }}>选中文字则处理选区，否则处理全文</div>
               {AI_ACTIONS.map((a) => (
                 <div key={a.label} className="hv" onClick={() => void runAI(a)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: R.sm, cursor: 'pointer', background: fill(2), border: 'none', color: ink(1), fontSize: 10.5, fontWeight: 600 }}>
-                  <a.icon size={12} strokeWidth={1.9} style={{ color: accent(0.85), flex: 'none' }} />{a.label}
+                  <a.icon size={12} strokeWidth={1.9} style={{ color: accentText(0.85), flex: 'none' }} />{a.label}
                 </div>
               ))}
               <div className="hv" onClick={() => void runMermaid()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: R.sm, cursor: 'pointer', background: fill(2), border: 'none', color: ink(1), fontSize: 10.5, fontWeight: 600 }}>
-                <Workflow size={12} strokeWidth={1.9} style={{ color: accent(0.85), flex: 'none' }} />生成图表
+                <Workflow size={12} strokeWidth={1.9} style={{ color: accentText(0.85), flex: 'none' }} />生成图表
               </div>
               <div className="hv" onClick={() => { setAskOpen(true); setAiMenu(false) }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: R.sm, cursor: 'pointer', background: fill(2), border: 'none', color: ink(1), fontSize: 10.5, fontWeight: 600 }}>
-                <MessageSquare size={12} strokeWidth={1.9} style={{ color: accent(0.85), flex: 'none' }} />问文档
+                <MessageSquare size={12} strokeWidth={1.9} style={{ color: accentText(0.85), flex: 'none' }} />问文档
               </div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 5, marginTop: 4 }}>
                 <Input value={customAi} onChange={setCustomAi} onKeyDown={(e) => { if (e.key === 'Enter') void runCustom() }} placeholder="自定义指令，如：改成产品文案…" icon={Wand2} style={{ flex: 1 }} />
@@ -528,18 +528,18 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
           )}
           {cheat && (
             <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 0, zIndex: 5, width: 260, padding: `${SP.sm}px ${SP.md}px`, display: 'flex', flexDirection: 'column' })}>
-              {CHEATS.map(([syn, desc], i) => <div key={desc} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10, padding: '4.5px 2px', borderTop: i > 0 ? `0.5px solid ${hairline(0.07)}` : 'none' }}><code style={{ ...text.mono(10), color: accent(0.85) }}>{syn}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
+              {CHEATS.map(([syn, desc], i) => <div key={desc} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10, padding: '4.5px 2px', borderTop: i > 0 ? `0.5px solid ${hairline(0.07)}` : 'none' }}><code style={{ ...text.mono(10), color: accentText(0.85) }}>{syn}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
             </motion.div>
           )}
           {keysOpen && (
             <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 60, zIndex: 5, width: 280, padding: `${SP.sm}px ${SP.md}px`, display: 'flex', flexDirection: 'column' })}>
-              <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2, padding: '2px 2px 5px' }}><Keyboard size={11} strokeWidth={2} style={{ color: accent() }} />快捷键</div>
-              {KEYS.map(([k, desc]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10, padding: '4.5px 2px', borderTop: `0.5px solid ${hairline(0.07)}` }}><code style={{ ...text.mono(10), color: accent(0.85) }}>{k}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
+              <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2, padding: '2px 2px 5px' }}><Keyboard size={11} strokeWidth={2} style={{ color: accentText() }} />快捷键</div>
+              {KEYS.map(([k, desc]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10, padding: '4.5px 2px', borderTop: `0.5px solid ${hairline(0.07)}` }}><code style={{ ...text.mono(10), color: accentText(0.85) }}>{k}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
             </motion.div>
           )}
           {snapMenu && snaps.current.length > 0 && (
             <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 120, zIndex: 6, width: 250, padding: `${SP.sm}px ${SP.sm + 1}px`, display: 'flex', flexDirection: 'column' })}>
-              <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2, padding: '2px 2px 5px' }}><History size={11} strokeWidth={2} style={{ color: accent() }} />版本快照（点击回滚，本次会话内有效）</div>
+              <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2, padding: '2px 2px 5px' }}><History size={11} strokeWidth={2} style={{ color: accentText() }} />版本快照（点击回滚，本次会话内有效）</div>
               {snaps.current.map((sn) => (
                 <div key={sn.t} className="hv" onClick={() => restoreSnap(sn)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5.5px 8px', borderRadius: R.sm, cursor: 'pointer', borderTop: `0.5px solid ${hairline(0.07)}` }}>
                   <span style={{ ...text.mono(10), color: ink(1), fontWeight: 700 }}>{new Date(sn.t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span>
@@ -618,7 +618,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
           {tbtn(light ? Moon : Sun, light ? '暗色编辑' : '亮色编辑', () => setLight((v) => !v))}
           {tbtn(Save, autoSave ? '自动保存:开' : '自动保存:关', () => setAutoSave((v) => !v), autoSave)}
           {tbtn(zen ? Minimize : Maximize, zen ? '退出专注' : '专注写作', () => setZen((v) => !v), zen)}
-          {msg && <span style={{ color: accent(0.85), fontSize: FS.tiny, fontWeight: 600, flex: 'none' }}>{msg}</span>}
+          {msg && <span style={{ color: accentText(0.85), fontSize: FS.tiny, fontWeight: 600, flex: 'none' }}>{msg}</span>}
           {tbtn(FolderOpen, '打开本地 .md', () => void openFile())}
           {tbtn(Copy, '复制富文本', copyRich)}
           <div style={{ position: 'relative', flex: 'none' }}>
@@ -632,7 +632,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
                   ))}
                 </div>
                 {([['pdf', 'PDF', FileText], ['html', 'HTML', Globe], ['txt', 'TXT', FileText], ['md', 'Markdown', FileDown]] as const).map(([k, l, Icon], i) => (
-                  <div key={k} className="hv" onClick={() => void exportAs(k)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 9px', borderRadius: R.sm, cursor: 'pointer', borderTop: i > 0 ? `0.5px solid ${hairline(0.07)}` : 'none', color: ink(1), fontSize: 11 }}><Icon size={12} strokeWidth={1.9} style={{ color: accent(0.85) }} />{l}</div>
+                  <div key={k} className="hv" onClick={() => void exportAs(k)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 9px', borderRadius: R.sm, cursor: 'pointer', borderTop: i > 0 ? `0.5px solid ${hairline(0.07)}` : 'none', color: ink(1), fontSize: 11 }}><Icon size={12} strokeWidth={1.9} style={{ color: accentText(0.85) }} />{l}</div>
                 ))}
               </motion.div>
             )}
@@ -653,7 +653,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
         <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12, padding: zen ? '14px 8vw' : 14 }}>
           {tocOpen && !zen && (
             <div className="ai-scroll" style={{ width: 190, flex: 'none', overflowY: 'auto', borderRight: `0.5px solid ${ui.bd}`, paddingRight: 10, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}><List size={11} strokeWidth={2} style={{ color: accent() }} />大纲</div>
+              <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}><List size={11} strokeWidth={2} style={{ color: accentText() }} />大纲</div>
               {toc.length ? toc.map((t) => <div key={t.idx} className="hv" onClick={() => jumpToc(t.idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '3px 6px', borderRadius: R.sm, color: ui.fg, opacity: t.level <= 2 ? 0.9 : 0.7, paddingLeft: 6 + (t.level - 1) * 11, fontWeight: t.level <= 2 ? 600 : 400 }}>{t.text.slice(0, 22)}</div>) : <div style={{ color: ui.sub, fontSize: 10 }}>用 # 写标题生成大纲</div>}
             </div>
           )}
@@ -664,7 +664,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
           {askOpen && !zen && (
             <div style={{ width: 260, flex: 'none', display: 'flex', flexDirection: 'column', gap: 8, borderLeft: `0.5px solid ${ui.bd}`, paddingLeft: 12, minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <MessageSquare size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+                <MessageSquare size={13} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
                 <span style={{ ...text.subtitle(), fontSize: FS.small, fontWeight: 800 }}>问文档</span>
                 <span style={{ flex: 1 }} />
                 <button type="button" className="hv" onClick={() => setAskOpen(false)} style={{ width: 20, height: 20, padding: 0, border: 'none', background: 'transparent', display: 'grid', placeItems: 'center', cursor: 'pointer', color: ink(3) }}><X size={12} strokeWidth={2} /></button>

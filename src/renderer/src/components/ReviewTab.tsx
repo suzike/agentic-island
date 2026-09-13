@@ -17,7 +17,7 @@ import { InsightsPanel } from './InsightsPanel'
 import { PetPanel } from './PetPanel'
 import { Button, Chip, IconButton } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accent, FS, ink, R, sem, SP, surface, text, tintSurface } from '../ui/tokens'
+import { accentText, accent, FS, ink, R, sem, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface ReviewTabProps {
   todos: TodoItem[]
@@ -124,7 +124,7 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Sunrise size={14} strokeWidth={1.75} style={{ color: accent(0.9), flex: 'none' }} />
+          <Sunrise size={14} strokeWidth={1.75} style={{ color: accentText(0.9), flex: 'none' }} />
           <span style={{ ...text.subtitle(), fontSize: FS.body }}>今日作战地图</span>
           <span style={{ flex: 1 }} />
           {morningMd && (
@@ -164,7 +164,7 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
       {/* 今日复盘 */}
       <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <NotebookPen size={13} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+          <NotebookPen size={13} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
           <span style={{ ...text.subtitle(), fontSize: FS.body }}>{sel === todayKey ? '今日复盘' : '当日复盘'}</span>
           <span style={{ flex: 1 }} />
           {dayMd && busy !== dayReviewKey && (
@@ -212,7 +212,7 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
       {/* 周报 */}
       <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm, marginTop: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <BarChart3 size={13} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+          <BarChart3 size={13} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
           <span style={{ ...text.subtitle(), fontSize: FS.body }}>本周周报</span>
           <span style={{ flex: 1 }} />
           {weekMd && busy !== weekReviewKey && (

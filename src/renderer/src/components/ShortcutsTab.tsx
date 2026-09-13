@@ -15,7 +15,7 @@ import { ProjectContextBar } from './ProjectContextBar'
 import { Ico, type LucideIcon } from '../ui/icons'
 import { Button, Chip, EmptyState, IconButton, Input, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop, staggerContainer, staggerItem } from '../ui/motion'
-import { accent, accent2, fill, FS, hairline, hueAccent, ink, R, sem, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
+import { accentText, accent, accent2, fill, FS, hairline, hueAccent, ink, R, sem, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface Props {
   projects: WorkbenchProject[]
@@ -238,7 +238,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
       <div style={{ display: 'grid', gridTemplateColumns: '1.35fr repeat(3, 1fr)', gap: 0.5, overflow: 'hidden', borderRadius: R.lg, background: hairline(0.07) }}>
         <div style={{ padding: '10px 12px', background: fill(2), display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Ico.shortcuts size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+            <Ico.shortcuts size={13} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
             <span style={{ ...text.subtitle(), fontSize: FS.body }}>工程工作流</span>
           </div>
           <div style={{ marginTop: 3, ...text.faint() }}>质量 · 交付 · 模型 · 需求</div>
@@ -400,14 +400,14 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
               {/* 仓库选择 */}
               {run.repoPick && (
                 <div style={{ padding: 11, borderRadius: R.md, ...surface.card(), border: `0.5px solid ${accent(0.65, 0.35)}`, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: accent(0.9, 0.95), fontSize: FS.small, fontWeight: 700 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: accentText(0.9, 0.95), fontSize: FS.small, fontWeight: 700 }}>
                     <Ico.repos size={12} strokeWidth={2} />选择目标仓库
                   </div>
                   {p.repos.length === 0
                     ? <div style={{ color: sem.warn, fontSize: FS.tiny, lineHeight: 1.6 }}>「仓库」分区里还没钉本地仓库。先去 <b>仓库 › 本地</b> 添加一个，或在指令编辑里填目标仓库路径。</div>
                     : p.repos.map((r) => (
                       <div key={r.path} className="hv" onClick={() => { const rp = run.repoPick; setRun((x) => x && { ...x, repoPick: undefined }); rp?.resolve(r.path) }} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px', borderRadius: R.sm, cursor: 'pointer', background: fill(2) }}>
-                        <Ico.repos size={12} strokeWidth={1.75} style={{ color: accent(0.85, 0.8), flex: 'none' }} />
+                        <Ico.repos size={12} strokeWidth={1.75} style={{ color: accentText(0.85, 0.8), flex: 'none' }} />
                         <span style={{ flex: 1, minWidth: 0, color: ink(1), fontSize: FS.small, fontWeight: 600 }}>{baseName(r.path)}</span>
                         <span style={{ ...text.mono(9), opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{r.path}</span>
                       </div>
@@ -431,7 +431,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
               {/* 运行时输入 */}
               {run.input && (
                 <div style={{ padding: 11, borderRadius: R.md, ...surface.card(), border: `0.5px solid ${accent(0.65, 0.35)}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: accent(0.9, 0.95), fontSize: FS.small, fontWeight: 700 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: accentText(0.9, 0.95), fontSize: FS.small, fontWeight: 700 }}>
                     <Ico.keyboard size={12} strokeWidth={2} />{run.input.label}
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
@@ -457,7 +457,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
         <div data-solid onMouseDown={() => setEdit(null)} style={{ position: 'fixed', inset: 0, zIndex: 225, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'oklch(var(--overlay-mask-l) 0.02 var(--ths) / .55)', backdropFilter: 'blur(4px)', animation: 'ai-fadein .15s ease' }}>
           <motion.div variants={overlayPop} initial="initial" animate="animate" onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(600px, 92vw)', maxHeight: '86vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...surface.overlay(), borderRadius: R.xl }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 15px', borderBottom: `0.5px solid ${hairline(0.08)}` }}>
-              <Ico.shortcuts size={15} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+              <Ico.shortcuts size={15} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
               <span style={{ flex: 1, ...text.subtitle() }}>{p.shortcuts.some((s) => s.id === edit.id) ? '编辑指令' : '新建指令'}</span>
               <IconButton icon={Ico.close} onClick={() => setEdit(null)} size={24} />
             </div>
@@ -495,7 +495,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
                 return (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 10, ...surface.inset(), borderRadius: R.md }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: accent(0.85, 0.85), fontSize: 10, fontWeight: 800 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: accentText(0.85, 0.85), fontSize: 10, fontWeight: 800 }}>
                       <KindIco size={11} strokeWidth={2} />步骤 {i + 1}
                     </span>
                     <select value={s.kind} onChange={(e) => setEdit((x) => x && { ...x, steps: x.steps.map((st, si) => (si === i ? defaultStep(e.target.value as StepKind) : st)) })} style={{ ...inp, width: 118, padding: '4px 6px' }}>
@@ -576,7 +576,7 @@ function AutomationsEditor({ automations, onChange, shortcuts }: { automations: 
   return (
     <div style={{ ...surface.section(), padding: '9px 11px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <Ico.shortcuts size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+        <Ico.shortcuts size={13} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
         <span style={{ ...text.subtitle(), fontSize: FS.small }}>定时自动化</span>
         <span style={text.faint()}>每日定时到点执行（启动补跑错过的任务），或由「Agent 会话结束 / 番茄钟专注结束 / 会议开始前 / 会议结束后」事件触发</span>
         <span style={{ flex: 1 }} />

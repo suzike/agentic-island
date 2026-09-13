@@ -8,7 +8,7 @@ import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste
 import type { LucideIcon } from '../ui/icons'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
-import { accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accentText, accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 import { island } from '../bridge'
 import { clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, sanitizeScreenshotName } from '../logic/screenshot'
 import type { Point as Pt, Rect, ScreenshotFormat } from '../logic/screenshot'
@@ -746,7 +746,7 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
       <motion.div variants={overlayPop} initial="initial" animate="animate" onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(1000px, 72vw)', height: 'min(680px, 68vh)', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...surface.overlay(), borderRadius: R.panel }}>
         {/* 头 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 52, padding: `0 ${SP.md}px`, borderBottom: `0.5px solid ${hairline(0.1)}` }}>
-          <div style={{ width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accent(), flex: 'none' }}>
+          <div style={{ width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accentText(), flex: 'none' }}>
             <Camera size={14} strokeWidth={1.75} />
           </div>
           <span style={text.subtitle()}>截图工坊</span>

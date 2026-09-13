@@ -255,6 +255,8 @@ export function applyThemeTokens(input: Partial<ThemeTokenInput>): void {
     '--accent1-l-shift': String(Number(primaryShift.toFixed(2))),
     '--accent2-l-shift': String(Number(secondaryShift.toFixed(2))),
     '--gradient-angle': `${t.gr}deg`,
+    // 强调色作为文字时的明度上限：浅色主题下 accent() 的明度高于面板，小字号文字对比度不足（实测 2.4–2.9:1）
+    '--accent-text-max-l': light ? '0.44' : '1',
     '--on-primary-l': Number(t.l1) > 0.66 ? '0.14' : '0.98',
     '--overlay-mask-l': light ? '0.16' : '0.04'
   }

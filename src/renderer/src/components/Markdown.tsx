@@ -5,7 +5,7 @@
 import { createContext, memo, useContext, useRef, useState, useLayoutEffect } from 'react'
 import { island } from '../bridge'
 import { safeUrl } from '../logic/mdHtml'
-import { accent, fill, gradient, hairline, ink, surface } from '../ui/tokens'
+import { accent, accentText, fill, gradient, hairline, ink, surface } from '../ui/tokens'
 
 // 双向链接跳转回调（便签用）：Markdown 提供，Inline 消费；不提供时 [[..]] 按普通文字渲染
 const WikiCtx = createContext<((title: string) => void) | null>(null)
@@ -27,12 +27,12 @@ function Inline({ text }: { text: string }): React.JSX.Element {
         // [文字](链接)
         {
           const md = p.match(/^\[([^\]]+)\]\(((?:https?:\/\/|data:)[^)\s]+)\)$/)
-          if (md) return <span key={i} onClick={() => island.openExternal(md[2])} title="在浏览器打开" style={{ color: accent(.76), textDecoration: 'underline', cursor: 'pointer' }}>{md[1]}</span>
+          if (md) return <span key={i} onClick={() => island.openExternal(md[2])} title="在浏览器打开" style={{ color: accentText(.76), textDecoration: 'underline', cursor: 'pointer' }}>{md[1]}</span>
         }
         if (p.startsWith('[[') && p.endsWith(']]')) {
           const title = p.slice(2, -2).trim()
           return (
-            <span key={i} onClick={() => onWiki?.(title)} title={onWiki ? '跳到该便签' : undefined} style={{ color: accent(.76), background: fill(3), padding: '0 5px', borderRadius: 5, cursor: onWiki ? 'pointer' : 'default', fontWeight: 600, fontSize: '0.94em' }}>
+            <span key={i} onClick={() => onWiki?.(title)} title={onWiki ? '跳到该便签' : undefined} style={{ color: accentText(.76), background: fill(3), padding: '0 5px', borderRadius: 5, cursor: onWiki ? 'pointer' : 'default', fontWeight: 600, fontSize: '0.94em' }}>
               🔗 {title}
             </span>
           )
@@ -51,7 +51,7 @@ function Inline({ text }: { text: string }): React.JSX.Element {
           )
         if (/^https?:\/\//.test(p))
           return (
-            <span key={i} onClick={() => island.openExternal(p)} title="在浏览器打开" style={{ color: accent(.76), textDecoration: 'underline', cursor: 'pointer', wordBreak: 'break-all' }}>
+            <span key={i} onClick={() => island.openExternal(p)} title="在浏览器打开" style={{ color: accentText(.76), textDecoration: 'underline', cursor: 'pointer', wordBreak: 'break-all' }}>
               {p}
             </span>
           )

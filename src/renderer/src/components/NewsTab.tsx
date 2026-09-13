@@ -14,7 +14,7 @@ import { island } from '../bridge'
 import { ProjectContextBar } from './ProjectContextBar'
 import { Button, Chip, EmptyState, Group, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accent, accent2, fill, FS, gradient, hairline, ink, MOTION, R, sem, semBg, surface, text, transition } from '../ui/tokens'
+import { accentText, accent, accent2, fill, FS, gradient, hairline, ink, MOTION, R, sem, semBg, surface, text, transition } from '../ui/tokens'
 
 interface NewsTabProps {
   projects: WorkbenchProject[]
@@ -232,7 +232,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
           {rich && (
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7 }}>
               <span style={{ color: ink(1), fontSize: FS.big, fontWeight: 700, letterSpacing: '-0.022em' }}>{d.getMonth() + 1} 月 {d.getDate()} 日</span>
-              <span style={{ color: accent(0.82, 0.85), fontSize: FS.tiny, fontWeight: 700, letterSpacing: '.15em' }}>AI 日报</span>
+              <span style={{ color: accentText(0.82, 0.85), fontSize: FS.tiny, fontWeight: 700, letterSpacing: '.15em' }}>AI 日报</span>
             </div>
           )}
           <div style={{ color: ink(1), fontSize: FS.body, lineHeight: 1.7 }}>{report.intro}</div>
@@ -260,7 +260,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
           )
         })}
         {report.outlook && (
-          <div style={{ ...surface.inset(), padding: '9px 13px', display: 'flex', alignItems: 'flex-start', gap: 7, color: accent(0.8, 0.85), fontSize: FS.small, fontStyle: 'italic', lineHeight: 1.6 }}>
+          <div style={{ ...surface.inset(), padding: '9px 13px', display: 'flex', alignItems: 'flex-start', gap: 7, color: accentText(0.8, 0.85), fontSize: FS.small, fontStyle: 'italic', lineHeight: 1.6 }}>
             <Telescope size={12} strokeWidth={1.75} style={{ flex: 'none', marginTop: 2 }} />
             <span>{report.outlook}</span>
           </div>
@@ -302,7 +302,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 3, fontSize: 9, color: ink(3) }}>
               <span>{it.sourceName}</span>
               {it.tag && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><Tag size={8.5} strokeWidth={2} />{it.tag}</span>}
-              {it.summary && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2.5, color: accent(0.82, 0.75) }}><Sparkles size={9} strokeWidth={2} />有详细总结</span>}
+              {it.summary && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2.5, color: accentText(0.82, 0.75) }}><Sparkles size={9} strokeWidth={2} />有详细总结</span>}
               {watchMap.has(it.id) && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2.5, color: sem.calm }}><Crosshair size={9} strokeWidth={2} />命中 {watchMap.get(it.id)?.length} 个观察</span>}
               {it.signalStatus && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: it.signalStatus === 'actioned' ? sem.calm : tracking ? sem.run : ink(3) }}>
@@ -331,7 +331,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
           <div style={{ padding: '0 12px 11px 44px', display: 'flex', flexDirection: 'column', gap: 8, animation: 'ai-fadein .2s ease' }}>
             {it.summary ? (
               <div style={{ padding: '9px 11px', borderRadius: R.md, background: semBg(accent(), 0.07), border: `0.5px solid ${accent(0.65, 0.22)}` }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: accent(0.88), fontSize: 10, fontWeight: 800, marginBottom: 5 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: accentText(0.88), fontSize: 10, fontWeight: 800, marginBottom: 5 }}>
                   <Sparkles size={11} strokeWidth={2} />AI 详细总结（基于全文）
                 </div>
                 <div style={{ fontSize: FS.small }}>
@@ -490,7 +490,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
             {interestDraft.trim() !== p.interests && <Button sm variant="primary" onClick={() => p.onSetInterests(interestDraft.trim())} style={{ alignSelf: 'flex-start' }}>保存</Button>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ ...text.dim(), flex: 'none' }}>精选门槛 <b style={{ color: accent() }}>{p.minScore}</b> 分</span>
+            <span style={{ ...text.dim(), flex: 'none' }}>精选门槛 <b style={{ color: accentText() }}>{p.minScore}</b> 分</span>
             <div style={{ flex: 1, minWidth: 110 }}><Slider min={40} max={85} step={5} value={p.minScore} onChange={p.onSetMinScore} /></div>
             <span style={{ ...text.dim(), flex: 'none' }}>AI 流水线</span>
             <Switch on={p.aiEnrich} onChange={() => p.onToggleAiEnrich()} />
@@ -559,7 +559,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
       {view === 'daily' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <Newspaper size={14} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+            <Newspaper size={14} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
             <span style={text.subtitle()}>AI 日报</span>
             <span style={{ flex: 1 }} />
             {p.dailies[todayKey] && !dailyBusy && (
@@ -610,8 +610,8 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
       {view === 'picks' && top3.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 3px' }}>
-            <Flame size={12} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
-            <span style={{ ...text.overline(), color: accent(0.85, 0.9) }}>今日热点 TOP</span>
+            <Flame size={12} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
+            <span style={{ ...text.overline(), color: accentText(0.85, 0.9) }}>今日热点 TOP</span>
             <span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} />
           </div>
           {top3.map((it, i) => (
@@ -624,7 +624,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
               onClick={() => toggleExpand(it)}
               style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', cursor: 'pointer', background: `linear-gradient(135deg, ${semBg(accent(), 0.13)}, ${semBg(accent2(), 0.06)})`, border: `0.5px solid ${accent(0.65, 0.25)}`, borderRadius: R.lg }}
             >
-              <span style={{ flex: 'none', fontSize: 15, fontWeight: 900, color: accent(0.85 - i * 0.08), fontStyle: 'italic', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+              <span style={{ flex: 'none', fontSize: 15, fontWeight: 900, color: accentText(0.85 - i * 0.08), fontStyle: 'italic', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ color: ink(1), fontSize: FS.body, fontWeight: 700, lineHeight: 1.4 }}>{it.title}</div>
                 {it.brief && <div style={{ color: ink(2), fontSize: FS.tiny, lineHeight: 1.5, marginTop: 3 }}>{it.brief}</div>}

@@ -52,7 +52,7 @@ import { synthesisPrompt } from './logic/newsIntel'
 import { island } from './bridge'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, BellOff, Camera, Check, ChevronDown, Download, Expand, Maximize2, Minimize2, Moon, Pin, Shrink, Timer, Video, Waves, X } from 'lucide-react'
-import { accent, fill, gradient, hairline, ink } from './ui/tokens'
+import { accentText, accent, fill, gradient, hairline, ink } from './ui/tokens'
 import { Ico } from './ui/icons'
 
 type Tab = 'agents' | 'plan' | 'ask' | 'shortcuts' | 'todos' | 'notes' | 'news' | 'review' | 'repos' | 'term' | 'settings'
@@ -2519,7 +2519,7 @@ export function App(): React.JSX.Element {
           )}
           {dropActive && (
             <div style={{ position: 'absolute', inset: 6, zIndex: 20, borderRadius: 16, border: `2px dashed ${accent(.78, .7)}`, background: 'oklch(var(--overlay-l) var(--surface-c) var(--ths) / .86)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, pointerEvents: 'none' }}>
-              <Download size={26} strokeWidth={1.5} style={{ color: accent() }} />
+              <Download size={26} strokeWidth={1.5} style={{ color: accentText() }} />
               <div style={{ color: ink(1), fontSize: 13, fontWeight: 600 }}>松手投喂到问答助手</div>
               <div style={{ color: ink(3), fontSize: 11 }}>图片 / 文件都可以</div>
             </div>
@@ -2867,7 +2867,7 @@ export function App(): React.JSX.Element {
       )}
       {jumpToast && (
         <div style={{ position: 'fixed', top: 'calc(100vh - 78px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 999, background: 'oklch(var(--overlay-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a))', backdropFilter: 'blur(var(--glass-blur))', border: `1px solid ${accent(.7, .3)}`, color: ink(1), fontSize: 12, boxShadow: '0 14px 34px rgb(0 0 0 / calc(.5 * var(--shadow-k)))' }}>
-          <ArrowUpRight size={13} strokeWidth={2} style={{ color: accent() }} />{jumpToast}
+          <ArrowUpRight size={13} strokeWidth={2} style={{ color: accentText() }} />{jumpToast}
         </div>
       )}
       {capsuleOpen && <Capsule onSubmit={capsuleSubmit} onClose={closeCapsule} />}

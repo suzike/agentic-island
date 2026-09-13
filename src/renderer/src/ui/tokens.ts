@@ -63,6 +63,14 @@ export const FS = {
 export const accent = (lightness = 0.82, alpha = 1): string =>
   `oklch(calc(${lightness} + var(--accent1-l-shift, var(--accent-l-shift, 0))) var(--accent-c, calc(0.16 * var(--cs, 1))) var(--th) / ${alpha})`
 
+/** 强调色文字：与 accent() 同签名，但浅色主题下把明度钳到"作为文字可读"的上限。
+    原因：accent() 的明度参数是按深色主题设计的（深色下 accent-l-shift ≈ 0），浅色下同一 shift 为负，
+    默认 0.82 落到 0.54、传 0.85 落到 0.57，叠在浅色面板上只有 2.4–2.9:1，小字号文字明显吃力。
+    深色主题下 --accent-text-max-l = 1，行为与 accent() 完全一致。
+    始终为深底的局部表面（终端预览、放映遮罩、拖拽遮罩）需局部把该变量重置为 1。 */
+export const accentText = (lightness = 0.82, alpha = 1): string =>
+  `oklch(min(calc(${lightness} + var(--accent1-l-shift, var(--accent-l-shift, 0))), var(--accent-text-max-l, 1)) var(--accent-c, calc(0.16 * var(--cs, 1))) var(--th) / ${alpha})`
+
 /** 强调色渐变副色 */
 export const accent2 = (lightness = 0.82, alpha = 1): string =>
   `oklch(calc(${lightness} + var(--accent2-l-shift, var(--accent-l-shift, 0))) var(--accent2-c, calc(0.15 * var(--cs, 1))) var(--th2) / ${alpha})`

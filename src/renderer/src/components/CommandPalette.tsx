@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { EmptyState } from '../ui/components'
 import { overlayPop } from '../ui/motion'
-import { accent, fill, FS, hairline, ink, R, semBg, SP, surface, text, transition } from '../ui/tokens'
+import { accentText, accent, fill, FS, hairline, ink, R, semBg, SP, surface, text, transition } from '../ui/tokens'
 import { Ico } from '../ui/icons'
 
 export interface Command {
@@ -79,7 +79,7 @@ export function CommandPalette({ open, commands, onClose }: { open: boolean; com
       >
         {/* 搜索框 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: `${SP.md}px ${SP.lg - 1}px`, borderBottom: `0.5px solid ${hairline()}` }}>
-          <Ico.search size={14} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+          <Ico.search size={14} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
           <input
             ref={inputRef}
             value={q}

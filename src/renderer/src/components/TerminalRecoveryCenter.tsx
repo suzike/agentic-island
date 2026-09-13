@@ -1,7 +1,7 @@
 import { Clock3, FileClock, Folder, History, Play, RotateCcw, ShieldCheck, Terminal as TerminalIcon } from 'lucide-react'
 import type { TerminalWorkspaceState } from '../../../shared/protocol'
 import { Badge, Button, Chip, Switch } from '../ui/components'
-import { accent, fill, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accent, accentText, fill, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 
 const age = (ts: number): string => {
   const delta = Math.max(0, Date.now() - ts)
@@ -25,7 +25,7 @@ export function TerminalRecoveryCenter(props: {
   return (
     <div data-terminal-recovery style={{ ...surface.panel(), minHeight: 390, padding: SP.lg, display: 'flex', flexDirection: 'column', gap: SP.md, borderRadius: R.panel }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: R.md, color: accent(), background: semBg(accent(), 0.16) }}><RotateCcw size={19} strokeWidth={1.8} /></div>
+        <div style={{ width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: R.md, color: accentText(), background: semBg(accent(), 0.16) }}><RotateCcw size={19} strokeWidth={1.8} /></div>
         <div style={{ minWidth: 0 }}>
           <div style={{ ...text.title(), fontSize: 16 }}>恢复上次开发现场</div>
           <div style={text.faint()}>保存于 {new Date(state.updatedAt).toLocaleString('zh-CN')} · 恢复只会创建新终端，不会自动重跑旧命令</div>
@@ -51,7 +51,7 @@ export function TerminalRecoveryCenter(props: {
                 <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Clock3 size={9} />{age(session.lastActiveAt)}</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><History size={9} />{session.commandCount} 条命令</span>
                 {session.outputSnapshot && <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: sem.calm }}><FileClock size={9} />有快照</span>}
-                {session.handoff && <span style={{ color: accent() }}>有交接摘要</span>}
+                {session.handoff && <span style={{ color: accentText() }}>有交接摘要</span>}
               </div>
             </button>
           )

@@ -13,7 +13,7 @@ import {
 } from '../logic/themes'
 import { Button, Chip, IconButton, Input, Segmented, Slider } from '../ui/components'
 import { overlayPop } from '../ui/motion'
-import { accent, accent2, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accentText, accent, accent2, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 
 export interface Tokens {
   th: number
@@ -121,7 +121,7 @@ function ControlPreview({ mode }: { mode: ThemeMode }): React.JSX.Element {
 
 function WorkspacePreview(): React.JSX.Element {
   return <div style={{ ...previewShell, display: 'flex', flexDirection: 'column', gap: 7 }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}><span style={{ ...text.subtitle(), flex: 1 }}>今日工作台</span><span style={{ ...text.faint(), color: accent() }}>3 个进行中</span></div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}><span style={{ ...text.subtitle(), flex: 1 }}>今日工作台</span><span style={{ ...text.faint(), color: accentText() }}>3 个进行中</span></div>
     {['修复浅色主题兼容', '整理版本发布清单', '审核 Agent 运行记录'].map((label, i) => <div key={label} style={{ ...tile, display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ width: 15, height: 15, borderRadius: R.pill, border: `2px solid ${i ? hairline(.25) : accent()}`, background: i ? 'transparent' : semBg(accent(), .2) }} /><div style={{ flex: 1 }}><div style={{ ...text.dim(), color: ink(1) }}>{label}</div><div style={text.faint()}>{i === 0 ? '高优先级 · 今天' : '项目任务 · 本周'}</div></div><span style={{ width: 5, height: 22, borderRadius: R.pill, background: i === 1 ? accent2() : accent() }} /></div>)}
     <div style={{ display: 'flex', gap: 6 }}><Button sm variant="primary">开始专注</Button><Button sm variant="ghost">AI 拆解</Button></div>
   </div>
@@ -138,7 +138,7 @@ function DataPreview(): React.JSX.Element {
 function TerminalPreview(): React.JSX.Element {
   return <div style={{ ...previewShell, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px', background: fill(2), borderBottom: `0.5px solid ${hairline(.1)}` }}><span style={{ width: 8, height: 8, borderRadius: R.pill, background: sem.danger }} /><span style={{ width: 8, height: 8, borderRadius: R.pill, background: sem.warn }} /><span style={{ width: 8, height: 8, borderRadius: R.pill, background: sem.calm }} /><span style={{ ...text.faint(), marginLeft: 4 }}>PowerShell · 项目终端</span></div>
-    <div style={{ flex: 1, padding: 13, background: 'oklch(.095 .015 var(--ths))', color: 'oklch(.92 .01 var(--th))', font: "11px/1.75 'Cascadia Code', monospace" }}><div><span style={{ color: accent() }}>PS</span> npm run typecheck</div><div style={{ color: sem.calm }}>✓ renderer types passed</div><div style={{ color: sem.calm }}>✓ node types passed</div><div style={{ color: 'oklch(.72 .02 var(--th))' }}>ready in 1.84s</div><div><span style={{ color: accent2() }}>PS</span> <span style={{ opacity: .7 }}>_</span></div></div>
+    <div style={{ flex: 1, padding: 13, background: 'oklch(.095 .015 var(--ths))', color: 'oklch(.92 .01 var(--th))', font: "11px/1.75 'Cascadia Code', monospace", '--accent-text-max-l': 1 }}><div><span style={{ color: accentText() }}>PS</span> npm run typecheck</div><div style={{ color: sem.calm }}>✓ renderer types passed</div><div style={{ color: sem.calm }}>✓ node types passed</div><div style={{ color: 'oklch(.72 .02 var(--th))' }}>ready in 1.84s</div><div><span style={{ color: accent2() }}>PS</span> <span style={{ opacity: .7 }}>_</span></div></div>
   </div>
 }
 
@@ -300,10 +300,10 @@ export function ThemeDesigner({ open, seed, seedName, seedDescription, seedTags,
     <motion.div variants={overlayPop} initial="initial" animate="animate" onMouseDown={(e) => e.stopPropagation()}
       style={{ width: 'min(900px, 95vw)', maxHeight: '92vh', overflow: 'hidden', ...surface.overlay(), background: 'oklch(var(--overlay-l) calc(0.025 * var(--css, 1)) var(--ths) / .96)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: `${SP.md}px ${SP.lg}px`, borderBottom: `0.5px solid ${hairline(.1)}` }}>
-        <span style={{ width: 25, height: 25, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: fill(3), color: accent() }}><Palette size={14} /></span>
+        <span style={{ width: 25, height: 25, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: fill(3), color: accentText() }}><Palette size={14} /></span>
         <div style={{ minWidth: 0 }}><div style={text.subtitle()}>{editKey ? `编辑主题 · ${seedName || ''}` : '主题设计器'}</div><div style={text.faint()}>OKLCH 多通道工作台 · 实时全局预览</div></div>
         <span style={{ flex: 1 }} />
-        {msg && <span style={{ ...text.faint(), color: accent() }}>{msg}</span>}
+        {msg && <span style={{ ...text.faint(), color: accentText() }}>{msg}</span>}
         <IconButton icon={Undo2} title="撤销" disabled={!history.length} onClick={undo} />
         <IconButton icon={Redo2} title="重做" disabled={!future.length} onClick={redo} />
         <IconButton icon={X} title="关闭" onClick={onClose} />

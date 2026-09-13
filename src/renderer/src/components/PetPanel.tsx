@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import type { ActivityEntry, TodoItem } from '../types'
 import { computeXp, petFrom, STAGES } from '../logic/pet'
 import { dayKey } from '../logic/review'
-import { accent, accent2, fill, hairline, ink, tintSurface } from '../ui/tokens'
+import { accent, accentText, accent2, fill, hairline, ink, tintSurface } from '../ui/tokens'
 
 export function PetPanel({ pomoDone, todos, activities }: { pomoDone: Record<string, number>; todos: TodoItem[]; activities: ActivityEntry[] }): React.JSX.Element {
   const [pat, setPat] = useState(0)
@@ -31,7 +31,7 @@ export function PetPanel({ pomoDone, todos, activities }: { pomoDone: Record<str
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
             <span style={{ color: ink(1), fontSize: 14, fontWeight: 800 }}>{pet.name}</span>
-            <span style={{ color: accent(.78), fontSize: 11, fontWeight: 700 }}>Lv.{pet.level}</span>
+            <span style={{ color: accentText(.78), fontSize: 11, fontWeight: 700 }}>Lv.{pet.level}</span>
             <span style={{ flex: 1 }} />
             {todayXp > 0 && <span style={{ color: 'oklch(0.8 0.13 145)', fontSize: 10.5, fontWeight: 700 }}>今日 +{todayXp} XP</span>}
           </div>

@@ -15,7 +15,7 @@ import { island } from '../bridge'
 import { IslandChat } from './IslandChat'
 import { Button, Chip, Segmented } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
-import { accent, fill, FS, gradient, hairline, hueAccent, ink, R, sem, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
+import { accentText, accent, fill, FS, gradient, hairline, hueAccent, ink, R, sem, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface AskTabProps {
   modelLabel: string
@@ -94,7 +94,7 @@ function ToolItem({ icon: Icon, title, detail, count, onClick, disabled }: { ico
       className="hv"
       style={{ display: 'grid', gridTemplateColumns: '30px minmax(0, 1fr) auto', alignItems: 'center', gap: 8, minHeight: 48, padding: '7px 9px', border: 'none', borderRadius: R.md, background: fill(1), color: ink(1), textAlign: 'left', fontFamily: 'var(--font)', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.48 : 1 }}
     >
-      <span style={{ width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent() }}>
+      <span style={{ width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accentText() }}>
         <Icon size={14} strokeWidth={1.8} />
       </span>
       <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -200,7 +200,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
       <AnimatePresence>
       {confirmNew && !p.empty && (
         <motion.div variants={fadeScaleIn} initial="initial" animate="animate" exit="exit" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', ...surface.inset(), borderRadius: R.md }}>
-          <MessageSquare size={13} strokeWidth={1.8} style={{ color: accent(), flex: 'none' }} />
+          <MessageSquare size={13} strokeWidth={1.8} style={{ color: accentText(), flex: 'none' }} />
           <span style={{ flex: 1, color: ink(2), fontSize: FS.small }}>当前对话会自动保存到历史记录，然后打开一个空白对话。</span>
           <Button variant="ghost" sm onClick={() => setConfirmNew(false)}>取消</Button>
           <Button variant="primary" sm onClick={() => { setConfirmNew(false); p.onNew() }}>保存并新建</Button>
@@ -211,7 +211,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
       {/* 本地 Agent 引擎配置：可用性 + 工作目录（本地技能/MCP/CLAUDE.md 按目录生效） */}
       {p.engine !== 'llm' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px', borderRadius: R.md, background: semBg(accent(), 0.1), border: `0.5px solid ${accent(0.6, 0.25)}` }}>
-          <span style={{ flex: 'none', display: 'inline-flex', color: accent() }}>{p.engine === 'claude' ? <Terminal size={13} strokeWidth={1.75} /> : <Hexagon size={13} strokeWidth={1.75} />}</span>
+          <span style={{ flex: 'none', display: 'inline-flex', color: accentText() }}>{p.engine === 'claude' ? <Terminal size={13} strokeWidth={1.75} /> : <Hexagon size={13} strokeWidth={1.75} />}</span>
           <span style={{ flex: 'none', color: engineStat.startsWith('✗') ? sem.danger : sem.calm, fontSize: 9.5, fontWeight: 600 }}>{engineStat || '…'}</span>
           <input
             value={p.agentCwd}
@@ -240,7 +240,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
                 <span style={{ color: ink(1), fontSize: 11, fontFamily: "ui-monospace,'Cascadia Code',monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</span>
                 {m.detail && <span style={{ color: ink(3), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.detail}</span>}
               </span>
-              {m.active && <span style={{ color: accent(), fontSize: 10, fontWeight: 700 }}>使用中</span>}
+              {m.active && <span style={{ color: accentText(), fontSize: 10, fontWeight: 700 }}>使用中</span>}
             </div>
           ))}
           <div className="hv" onClick={() => { setShowModels(false); p.onOpenLlmSettings() }} style={{ textAlign: 'center', padding: '6px 0', borderRadius: R.md, color: ink(3), fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>
@@ -268,10 +268,10 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
       {manage && (
         <motion.div variants={overlayPop} initial="initial" animate="animate" exit="exit" style={{ ...panelBox, gap: 7 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: ink(1), fontSize: 11, fontWeight: 700 }}><Pencil size={11} strokeWidth={2} style={{ color: accent() }} />提问模板</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: ink(1), fontSize: 11, fontWeight: 700 }}><Pencil size={11} strokeWidth={2} style={{ color: accentText() }} />提问模板</span>
             <span style={{ flex: 1 }} />
             <span className="hv" onClick={p.onResetPrompts} title="恢复出厂 6 条默认指令" style={{ color: ink(3), fontSize: 10, cursor: 'pointer' }}>恢复默认</span>
-            <span className="hv" onClick={() => { setManage(false); setEdit(emptyEdit) }} style={{ color: accent(), fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>完成</span>
+            <span className="hv" onClick={() => { setManage(false); setEdit(emptyEdit) }} style={{ color: accentText(), fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>完成</span>
           </div>
           {/* 已有指令列表：✎ 载入编辑 / ✕ 删除 */}
           {p.prompts.map((q) => (
@@ -315,7 +315,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
       {showClips && p.clips.length > 0 && (
         <motion.div variants={overlayPop} initial="initial" animate="animate" exit="exit" style={{ ...panelBox, gap: 6, maxHeight: 220, overflowY: 'auto' }} className="ai-scroll">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: ink(1), fontSize: 11, fontWeight: 700 }}><ClipboardList size={11} strokeWidth={2} style={{ color: accent() }} />剪贴板</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: ink(1), fontSize: 11, fontWeight: 700 }}><ClipboardList size={11} strokeWidth={2} style={{ color: accentText() }} />剪贴板</span>
             <span style={{ ...text.faint(), fontSize: 9.5 }}>★ 收藏才落盘</span>
             <span style={{ flex: 1 }} />
             <span className="hv" onClick={p.onClusterClips} title="AI 把片段按主题聚成集" style={{ color: p.clipClustering ? ink(4) : accent(0.85), fontSize: 10, cursor: 'pointer' }}>{p.clipClustering ? '聚类中…' : '🧩 归类'}</span>
@@ -350,7 +350,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
                   <span style={{ flex: 'none', padding: '1px 6px', borderRadius: 5, background: tintSurface(String(hue), .72, true), color: hueAccent(String(hue), .11), fontSize: 9, fontWeight: 700 }}>{c.tag}</span>
                   <span className="hv" onClick={() => { p.conv.onText(txt); setShowClips(false) }} title="填入输入框" style={{ flex: 1, minWidth: 0, color: ink(2), fontSize: 10.5, fontFamily: "ui-monospace,'Cascadia Code',monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{txt.replace(/\s+/g, ' ').slice(0, 60)}</span>
                   {CLIP_ACTIONS.map((a) => (
-                    <span key={a.key} className="hv" onClick={() => { p.onSendClip(a.prefix + txt); setShowClips(false) }} title={`AI ${a.title}`} style={{ flex: 'none', padding: '2px 6px', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent(0.85), fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>{a.label}</span>
+                    <span key={a.key} className="hv" onClick={() => { p.onSendClip(a.prefix + txt); setShowClips(false) }} title={`AI ${a.title}`} style={{ flex: 'none', padding: '2px 6px', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accentText(0.85), fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>{a.label}</span>
                   ))}
                   {fav}{del}
                 </div>
@@ -368,7 +368,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
                   if (!items.length) return null
                   return (
                     <div key={name} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                      <div style={{ color: accent(0.72, 0.85), fontSize: 10, fontWeight: 700, marginTop: 2 }}>🧩 {name}</div>
+                      <div style={{ color: accentText(0.72, 0.85), fontSize: 10, fontWeight: 700, marginTop: 2 }}>🧩 {name}</div>
                       {items.map(renderClip)}
                     </div>
                   )
@@ -458,7 +458,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
                 onClick={s.go}
                 style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 38, padding: '8px 12px', borderRadius: R.lg, background: fill(2), color: ink(2), fontSize: 11.5, cursor: 'pointer', boxSizing: 'border-box' }}
               >
-                <Lightbulb size={12} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+                <Lightbulb size={12} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
                 <span style={{ flex: 'none', color: ink(4), fontSize: 9.5 }}>{s.source}</span>
               </motion.div>

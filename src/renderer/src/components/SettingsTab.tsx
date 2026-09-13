@@ -15,7 +15,7 @@ import { PROVIDERS, providerConfigEquals, providerIsKeyless, type ProviderSettin
 import { normalizeThemeTokens, THEMES, type ThemeDef } from '../logic/themes'
 import { Badge, Button, Chip, Group, IconButton, Input, SectionHeader, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, separatorRow, SP, surface, text } from '../ui/tokens'
+import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, separatorRow, SP, surface, text } from '../ui/tokens'
 import type { LucideIcon } from '../ui/icons'
 
 export interface LlmState extends ProviderSettingsSnapshot {
@@ -423,12 +423,12 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: sel ? ink(1) : ink(2), fontSize: FS.body, fontWeight: sel ? 700 : 500 }}>
-                    {custom && <Sparkles size={10} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />}
+                    {custom && <Sparkles size={10} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />}
                     {t.label}
                     <span title={light ? '浅色主题' : '深色主题'} style={{ display: 'inline-flex', color: ink(3) }}>{light ? <Sun size={9} /> : <Moon size={9} />}</span>
-                    {sel && <span style={{ marginLeft: 2, fontSize: 9.5, fontWeight: 700, color: accent() }}>使用中</span>}
+                    {sel && <span style={{ marginLeft: 2, fontSize: 9.5, fontWeight: 700, color: accentText() }}>使用中</span>}
                   </span>
-                  {!!t.tags?.length && <span title={t.tags.join(' · ')} style={{ display: 'flex', gap: 4, minWidth: 0, overflow: 'hidden' }}>{t.tags.slice(0, 4).map((tag) => <span key={tag} style={{ color: accent(), fontSize: 8.5, fontWeight: 650, whiteSpace: 'nowrap' }}>#{tag}</span>)}</span>}
+                  {!!t.tags?.length && <span title={t.tags.join(' · ')} style={{ display: 'flex', gap: 4, minWidth: 0, overflow: 'hidden' }}>{t.tags.slice(0, 4).map((tag) => <span key={tag} style={{ color: accentText(), fontSize: 8.5, fontWeight: 650, whiteSpace: 'nowrap' }}>#{tag}</span>)}</span>}
                   <span title={`${t.desc} · 透明度 ${Math.round(+tk.ga * 100)}%`} style={{ color: ink(3), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.desc} · {Math.round(+tk.ga * 100)}%</span>
                 </div>
                 {custom && (
@@ -450,7 +450,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <span style={text.body()}>灵动岛宽度</span>
-              <span style={{ marginLeft: 'auto', ...text.num(FS.small), color: accent(0.78) }}>{p.islandWidth}px</span>
+              <span style={{ marginLeft: 'auto', ...text.num(FS.small), color: accentText(0.78) }}>{p.islandWidth}px</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ ...text.faint(), fontSize: 9.5, flex: 'none' }}>380</span>
@@ -472,7 +472,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ ...text.body(), flex: 'none' }}>界面缩放</span>
               <Slider min={0.9} max={1.3} step={0.05} value={p.uiZoom} onChange={(v) => p.onSetUiZoom(v)} style={{ flex: 1 }} />
-              <span style={{ ...text.num(FS.small), color: accent(0.78), flex: 'none' }}>{Math.round(p.uiZoom * 100)}%</span>
+              <span style={{ ...text.num(FS.small), color: accentText(0.78), flex: 'none' }}>{Math.round(p.uiZoom * 100)}%</span>
             </div>
             <span style={text.faint()}>透明窗口没有亚像素渲染，小字发虚是系统限制——调大缩放 / 换微软雅黑 UI 可明显改善</span>
           </div>
@@ -516,7 +516,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                             return (
                               <Chip key={snd.key} active={sel} title={snd.desc} onClick={() => p.onSetSound(st2.key, snd.key)} style={{ fontSize: FS.tiny }}>
                                 {snd.label}
-                                <span className="hv" onClick={(e) => p.onPreviewSound(e, snd.key)} title="试听" style={{ display: 'inline-flex', color: accent(0.8, 0.85), cursor: 'pointer' }}>
+                                <span className="hv" onClick={(e) => p.onPreviewSound(e, snd.key)} title="试听" style={{ display: 'inline-flex', color: accentText(0.8, 0.85), cursor: 'pointer' }}>
                                   <Play size={8} strokeWidth={2} fill="currentColor" />
                                 </span>
                               </Chip>
@@ -557,7 +557,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
           </Group>
           {/* 自动化规则：当 X 则 Y（inset grouped 行列表） */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: accent(0.75, 0.85), fontSize: FS.tiny, fontWeight: 700, letterSpacing: '.04em' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: accentText(0.75, 0.85), fontSize: FS.tiny, fontWeight: 700, letterSpacing: '.04em' }}>
               <Wrench size={11} strokeWidth={2} />自动化 · 当 X 则 Y
             </div>
             <Group>
@@ -581,7 +581,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
         title="问答助手模型"
         open={p.llm.open}
         onToggle={p.onToggleLlm}
-        summary={<span style={{ ...text.faint(), color: accent(0.75, 0.85) }}>{llmSummary}</span>}
+        summary={<span style={{ ...text.faint(), color: accentText(0.75, 0.85) }}>{llmSummary}</span>}
       >
         <div style={{ ...surface.inset(), borderRadius: R.lg, display: 'flex', flexDirection: 'column', gap: 12, padding: SP.md }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -609,7 +609,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                   return (
                     <div key={m} onClick={() => p.onPickModel(m)} className="hv" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: R.sm, background: sel ? semBg(accent(), 0.14) : fill(2), border: sel ? `0.5px solid ${accent(0.7, 0.5)}` : 'none', cursor: 'pointer' }}>
                       <span style={{ ...text.mono(11), color: sel ? ink(1) : ink(2) }}>{m}</span>
-                      {sel && <span style={{ color: accent(), fontSize: 9, fontWeight: 700 }}>使用中</span>}
+                      {sel && <span style={{ color: accentText(), fontSize: 9, fontWeight: 700 }}>使用中</span>}
                       {activeProvider.modelDiscovery !== false && (
                         <span onClick={(e) => { e.stopPropagation(); p.onRemoveModel(m) }} title="删除此型号" style={{ display: 'inline-flex', color: ink(3), cursor: 'pointer' }}>
                           <X size={11} strokeWidth={2} />
@@ -669,7 +669,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                       <span style={{ ...text.mono(FS.small), color: ink(1), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                       <span style={{ ...text.faint(), fontSize: 9 }}>{endpointHost(c.baseUrl)} · 配置 {String(c.id).slice(-4)}</span>
                     </span>
-                    {active && <span style={{ color: accent(), fontSize: 10, fontWeight: 700 }}>使用中</span>}
+                    {active && <span style={{ color: accentText(), fontSize: 10, fontWeight: 700 }}>使用中</span>}
                     <span onClick={(e) => { e.stopPropagation(); p.onDeleteLlm(c.id) }} style={{ display: 'inline-flex', color: ink(3), cursor: 'pointer' }}>
                       <X size={12} strokeWidth={2} />
                     </span>
@@ -726,7 +726,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
         open={barOpen}
         onToggle={() => setBarOpen((v) => !v)}
         summary={
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: FS.tiny, color: accent(0.75, 0.85) }}>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: FS.tiny, color: accentText(0.75, 0.85) }}>
             {p.settings.ambientBar ? `已开启 · ${p.barCfg.modes.length} 种内容` : '未开启（在上方通用里开启）'}
           </span>
         }
@@ -770,7 +770,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <TimerReset size={13} strokeWidth={1.75} style={{ color: accent(0.75), flex: 'none' }} />
+            <TimerReset size={13} strokeWidth={1.75} style={{ color: accentText(0.75), flex: 'none' }} />
             <span style={{ ...labelSm, margin: 0, whiteSpace: 'nowrap' }}>轮播节奏 · {p.barCfg.rotationSeconds || 12}s</span>
             <Slider min={6} max={30} step={1} value={p.barCfg.rotationSeconds || 12} onChange={(v) => p.onSetBarCfg({ ...p.barCfg, rotationSeconds: v })} style={{ flex: 1 }} />
           </div>
@@ -872,7 +872,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
           <Button variant="ghost" onClick={() => { p.onInstallHooks(); setHookMsg('已接入 · 全局写入，所有会话的生命周期会实时反映到岛') }} style={{ flex: 1 }}>立即重新接入</Button>
           <Button variant="ghost" onClick={() => { p.onUninstallHooks(); setHookMsg('已断开 · 已从全局配置移除本工具的 hook（可还原）') }} style={{ flex: 1 }}>暂时断开</Button>
         </div>
-        {hookMsg && <div style={{ color: accent(0.8), fontSize: FS.tiny, marginTop: 8, lineHeight: 1.5 }}>{hookMsg}</div>}
+        {hookMsg && <div style={{ color: accentText(0.8), fontSize: FS.tiny, marginTop: 8, lineHeight: 1.5 }}>{hookMsg}</div>}
         <div style={{ ...text.faint(), marginTop: 8, lineHeight: 1.5 }}>全局合并写入 ~/.claude/settings.json 与 ~/.codex/hooks.json（不覆盖已有配置，可随时还原）。覆盖会话开始 / 对话 / 工具活动 / 命令审批 / 完成全生命周期；岛未运行时 CLI 照常工作，零影响。</div>
       </Section>
 

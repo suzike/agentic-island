@@ -9,7 +9,7 @@ import { hashText, topKByCosine } from '../logic/vector'
 import { Markdown } from './Markdown'
 import { Button, IconButton, Input } from '../ui/components'
 import { fadeScaleIn, overlayPop, staggerContainer, staggerItem } from '../ui/motion'
-import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 import { Ico } from '../ui/icons'
 
 interface Props {
@@ -126,9 +126,9 @@ export function BrainSearch({ open, sources, onClose, onGenerate, onJump, llmRea
           )}
           {answer && (
             <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ ...surface.card(), padding: SP.md }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 7, color: accent(0.82, 0.85) }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 7, color: accentText(0.82, 0.85) }}>
                 <Ico.ai size={12} strokeWidth={2} />
-                <span style={{ ...text.overline(), color: accent(0.82, 0.7) }}>AI 答疑 · 带出处</span>
+                <span style={{ ...text.overline(), color: accentText(0.82, 0.7) }}>AI 答疑 · 带出处</span>
               </div>
               <div style={{ fontSize: FS.body, lineHeight: 1.65 }}>
                 <Markdown text={answer} />
@@ -149,7 +149,7 @@ export function BrainSearch({ open, sources, onClose, onGenerate, onJump, llmRea
                   onClick={() => { onJump(d.tab); onClose() }}
                   style={{ display: 'flex', alignItems: 'center', gap: SP.sm, padding: '7px 10px', borderRadius: R.md, cursor: 'pointer', background: fill(1) }}
                 >
-                  <span style={{ flex: 'none', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent(0.85) }}>{d.source}</span>
+                  <span style={{ flex: 'none', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accentText(0.85) }}>{d.source}</span>
                   <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: ink(2), fontSize: FS.small }}>{d.title}</span>
                   <ArrowUpRight size={12} strokeWidth={2} style={{ flex: 'none', color: ink(3) }} />
                 </motion.div>

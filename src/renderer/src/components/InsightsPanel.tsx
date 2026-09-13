@@ -9,7 +9,7 @@ import type { ActivityEntry, TodoItem } from '../types'
 import { buildInsights, hourBand } from '../logic/insights'
 import { EmptyState } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accent, fill, FS, gradient, ink, R, SP, surface, text } from '../ui/tokens'
+import { accentText, accent, fill, FS, gradient, ink, R, SP, surface, text } from '../ui/tokens'
 import { Ico } from '../ui/icons'
 
 const rad = (deg: number): number => (deg * Math.PI) / 180
@@ -84,7 +84,7 @@ export function InsightsPanel({ todos, activities, pomoDone }: { todos: TodoItem
       {/* 标题 + 一句洞察 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Ico.trend size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+          <Ico.trend size={13} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
           <span style={{ ...text.subtitle(), fontSize: FS.body }}>工作节律洞察</span>
           <span style={{ ...text.faint(), marginLeft: 'auto' }}>近 7 天</span>
         </div>
@@ -145,7 +145,7 @@ export function InsightsPanel({ todos, activities, pomoDone }: { todos: TodoItem
             <text x="60" y="57" textAnchor="middle" style={{ fill: ink(1), fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{ins.peakHour >= 0 ? `${ins.peakHour}:00` : '—'}</text>
             <text x="60" y="69" textAnchor="middle" style={{ fill: ink(3), fontSize: 7.5 }}>高效时段</text>
           </svg>
-          <span style={{ ...text.faint(), color: ink(2) }}>你在 <b style={{ color: accent(0.86), fontWeight: 700 }}>{hourBand(ins.peakHour)}</b> 最活跃</span>
+          <span style={{ ...text.faint(), color: ink(2) }}>你在 <b style={{ color: accentText(0.86), fontWeight: 700 }}>{hourBand(ins.peakHour)}</b> 最活跃</span>
         </div>
 
         {/* 项目环形图 */}

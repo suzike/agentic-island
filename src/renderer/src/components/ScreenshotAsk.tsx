@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import { BarChart3, BookOpen, Bug, Languages, Lightbulb, type LucideIcon } from 'lucide-react'
 import { Button, Chip, IconButton } from '../ui/components'
 import { overlayPop } from '../ui/motion'
-import { accent, FS, ink, R, SP, surface, text as txt } from '../ui/tokens'
+import { accentText, accent, FS, ink, R, SP, surface, text as txt } from '../ui/tokens'
 import { Ico } from '../ui/icons'
 
 interface ScreenshotAskProps {
@@ -42,7 +42,7 @@ export function ScreenshotAsk({ dataUrl, onAsk, onClose }: ScreenshotAskProps): 
         style={{ width: 'min(600px, 82vw)', overflow: 'hidden', ...surface.overlay() }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px 0' }}>
-          <Ico.shot size={14} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+          <Ico.shot size={14} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
           <span style={txt.subtitle()}>截图问 AI</span>
           <span style={{ flex: 1 }} />
           <IconButton icon={Ico.close} onClick={onClose} title="关闭" />

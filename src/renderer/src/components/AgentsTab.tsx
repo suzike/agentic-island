@@ -9,7 +9,7 @@ import { riskOf } from '../logic/risk'
 import { Markdown, Collapsible } from './Markdown'
 import { Button, EmptyState } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 
 interface AgentsTabProps {
   agents: AgentVM[]
@@ -185,8 +185,8 @@ function AgentCard({
       {showApproval && a.isPlan && (
         <div style={{ marginTop: 3, padding: '10px 11px', borderRadius: R.lg, background: fill(3), border: `0.5px solid ${accent(0.7, 0.3)}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
-            <ClipboardList size={14} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
-            <span style={{ color: accent(0.88, 0.95), fontSize: FS.small, fontWeight: 700 }}>实施计划待审阅</span>
+            <ClipboardList size={14} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
+            <span style={{ color: accentText(0.88, 0.95), fontSize: FS.small, fontWeight: 700 }}>实施计划待审阅</span>
             {wait > 0 && (
               <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: ink(3), fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>
                 <Clock size={10} strokeWidth={2} />{fmtWait(wait)}
@@ -297,15 +297,15 @@ function AgentCard({
         </div>
       )}
 
-      {decided && a.detail.includes('已允许') && <div style={{ fontSize: 11, color: accent(), fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={12} strokeWidth={2.5} />已允许，继续执行中…</div>}
+      {decided && a.detail.includes('已允许') && <div style={{ fontSize: 11, color: accentText(), fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={12} strokeWidth={2.5} />已允许，继续执行中…</div>}
       {decided && a.detail.includes('已拒绝') && <div style={{ fontSize: 11, color: 'oklch(0.7 0.1 30)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}><X size={12} strokeWidth={2.5} />已拒绝，已通知 Agent</div>}
 
       {a.summary && (
         <div style={{ marginTop: 3, padding: '10px 11px', borderRadius: R.lg, background: fill(3), border: `0.5px solid ${accent(0.6, 0.25)}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-            <span style={{ color: accent(0.88, 0.95), fontSize: 11, fontWeight: 700 }}>变更小结</span>
+            <span style={{ color: accentText(0.88, 0.95), fontSize: 11, fontWeight: 700 }}>变更小结</span>
             <span style={{ ...text.mono(10.5) }}>{a.summary.files} 文件</span>
-            <span style={{ color: accent(), fontSize: 10.5, fontFamily: 'ui-monospace,monospace' }}>+{a.summary.added}</span>
+            <span style={{ color: accentText(), fontSize: 10.5, fontFamily: 'ui-monospace,monospace' }}>+{a.summary.added}</span>
             <span style={{ color: sem.danger, fontSize: 10.5, fontFamily: 'ui-monospace,monospace' }}>−{a.summary.removed}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -314,7 +314,7 @@ function AgentCard({
             </div>
             <Button sm variant="ghost" icon={Copy} onClick={() => onCopyCommit(a.id, a.summary!.commit)}>复制</Button>
           </div>
-          {copiedId === a.id && <div style={{ color: accent(), fontSize: 10, marginTop: 5, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={10} strokeWidth={2.5} />提交信息已复制</div>}
+          {copiedId === a.id && <div style={{ color: accentText(), fontSize: 10, marginTop: 5, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={10} strokeWidth={2.5} />提交信息已复制</div>}
         </div>
       )}
 

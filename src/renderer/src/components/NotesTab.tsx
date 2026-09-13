@@ -15,7 +15,7 @@ import {
 import type { LucideIcon } from '../ui/icons'
 import { Button, Chip, EmptyState, IconButton, Input, Segmented } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
-import { accent, fill, FS, hairline, hueAccent, ink, R, sem, semBg, solidInk, SP, surface, text, tintSurface } from '../ui/tokens'
+import { accentText, accent, fill, FS, hairline, hueAccent, ink, R, sem, semBg, solidInk, SP, surface, text, tintSurface } from '../ui/tokens'
 import type { StickyNote } from '../types'
 import { NOTE_COLORS, colorOf } from '../logic/noteAi'
 import { imageToCompactDataUrl, selectLocalFiles } from '../logic/files'
@@ -766,7 +766,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 5 }}>
             {NOTE_TOOLS.map((t) => (
               <div key={t.key} className="hv" title={t.hint} onClick={() => void runTool(t.key)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '9px 4px', borderRadius: R.md, cursor: 'pointer', background: toolBusy === t.key ? semBg(accent(), 0.16) : fill(2), border: toolBusy === t.key ? `0.5px solid ${accent(0.7, 0.3)}` : 'none' }}>
-                <t.Icon size={15} strokeWidth={1.75} style={{ color: accent(0.82, toolBusy === t.key ? 1 : 0.7) }} />
+                <t.Icon size={15} strokeWidth={1.75} style={{ color: accentText(0.82, toolBusy === t.key ? 1 : 0.7) }} />
                 <span style={{ color: ink(1), fontSize: FS.tiny - 1, fontWeight: 600 }}>{toolBusy === t.key ? '…' : t.label}</span>
               </div>
             ))}
@@ -791,7 +791,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
       {powerOpen && (
         <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm - 1, padding: SP.md - 2, ...surface.section() }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-            <Wrench size={12} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+            <Wrench size={12} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
             <span style={{ ...text.overline(), marginRight: 4 }}>便签库管理</span>
             {(['整理', '质检', '索引', '洞察', '导出'] as NotePowerGroup[]).map((group) => (
               <Chip key={group} active={powerGroup === group} onClick={() => setPowerGroup(group)}>{group} · {NOTE_POWER_ACTIONS.filter((x) => x.group === group).length}</Chip>
@@ -834,7 +834,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         return (
           <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: SP.sm + 1, padding: SP.md - 1, ...surface.section() }}>
             <div style={{ display: 'flex', gap: 14, ...text.dim(), fontSize: FS.tiny - 0.5 }}>
-              <span>共 <b style={{ color: accent(0.85) }}>{live.length}</b> 条</span>
+              <span>共 <b style={{ color: accentText(0.85) }}>{live.length}</b> 条</span>
               <span>收藏 <b style={{ color: sem.warn }}>{live.filter((n) => n.starred).length}</b></span>
               <span>本周新增 <b style={{ color: sem.calm }}>{live.filter((n) => n.createdAt > Date.now() - 7 * 86400_000).length}</b></span>
               <span>累计 <b style={{ color: ink(1) }}>{Math.round(live.reduce((s, n) => s + n.md.length, 0) / 1000)}k</b> 字</span>
@@ -950,7 +950,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
           ))}
         </div>
       )}
-      {aiIds && <div style={{ color: accent(0.8, 0.9), fontSize: FS.tiny - 0.5 }}><Sparkles size={10} strokeWidth={2} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 3 }} />AI 找到 {filtered.length} 条相关便签（<span className="hv" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setAiIds(null)}>返回全部</span>）</div>}
+      {aiIds && <div style={{ color: accentText(0.8, 0.9), fontSize: FS.tiny - 0.5 }}><Sparkles size={10} strokeWidth={2} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 3 }} />AI 找到 {filtered.length} 条相关便签（<span className="hv" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setAiIds(null)}>返回全部</span>）</div>}
 
       {/* 控制条：视图 / 排序 / 收藏 / 颜色 / 随机 / 导出 / 多选 / 回收站 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
@@ -1019,7 +1019,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
           const editing = editId === n.id && draft
           // 时间线形态：日期变化处插分组头
           const dayHead = layout === 'timeline' && !showTrash && (idx === 0 || dayKey(filtered[idx - 1].createdAt) !== dayKey(n.createdAt))
-            ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px 4px' }}><span style={{ ...text.overline(), color: accent(0.8, 0.9) }}>{dayLabel(n.createdAt)}</span><span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} /></div>
+            ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px 4px' }}><span style={{ ...text.overline(), color: accentText(0.8, 0.9) }}>{dayLabel(n.createdAt)}</span><span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} /></div>
             : null
           if (editing) {
             return (
@@ -1232,7 +1232,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         if (!pool.length) return null
         const n = pool[showIdx % pool.length]; const h = colorOf(n.color)
         return (
-          <motion.div data-solid initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} style={{ position: 'fixed', inset: 0, zIndex: 231, display: 'flex', flexDirection: 'column', background: `radial-gradient(120% 90% at 50% 0%, oklch(0.28 0.06 ${h} / .5), oklch(0.06 0.02 var(--ths)) 70%)`, ...({ '--ink-l': '.96', '--line-l': '.96', '--fill-l': '.96', '--inset-l': '.1' } as React.CSSProperties) }}>
+          <motion.div data-solid initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} style={{ position: 'fixed', inset: 0, zIndex: 231, display: 'flex', flexDirection: 'column', background: `radial-gradient(120% 90% at 50% 0%, oklch(0.28 0.06 ${h} / .5), oklch(0.06 0.02 var(--ths)) 70%)`, ...({ '--ink-l': '.96', '--line-l': '.96', '--fill-l': '.96', '--inset-l': '.1', '--accent-text-max-l': '1' } as React.CSSProperties) }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px' }}>
               <span style={{ ...text.num(FS.small), color: solidInk(.72) }}>{(showIdx % pool.length) + 1} / {pool.length}</span>
               <Button sm icon={showAuto ? Pause : Play} onClick={() => setShowAuto((v) => !v)} style={showAuto ? { color: sem.calm } : undefined}>{showAuto ? '暂停' : '自动'}</Button>

@@ -7,7 +7,7 @@ import { TriangleAlert } from 'lucide-react'
 import type { CapsuleResult } from '../logic/capsuleAi'
 import { Button, IconButton } from '../ui/components'
 import { overlayPop } from '../ui/motion'
-import { accent, ink, R, sem, semBg, SP, surface, text as txt } from '../ui/tokens'
+import { accentText, accent, ink, R, sem, semBg, SP, surface, text as txt } from '../ui/tokens'
 import { Ico, type LucideIcon } from '../ui/icons'
 
 interface CapsuleProps {
@@ -66,7 +66,7 @@ export function Capsule({ onSubmit, onClose }: CapsuleProps): React.JSX.Element 
         ) : (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px 0' }}>
-              <Ico.shortcuts size={14} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+              <Ico.shortcuts size={14} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
               <span style={txt.subtitle()}>闪念胶囊</span>
               <span style={txt.faint()}>AI 自动归类到 待办 / 便签 / 问答</span>
               <span style={{ flex: 1 }} />

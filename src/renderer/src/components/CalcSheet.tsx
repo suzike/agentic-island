@@ -7,7 +7,7 @@ import { AlertTriangle } from 'lucide-react'
 import { evalSheet } from '../logic/calc'
 import { IconButton } from '../ui/components'
 import { overlayPop } from '../ui/motion'
-import { accent, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
+import { accent, accentText, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 import { Ico } from '../ui/icons'
 
 const LH = 22 // 行高，两栏共用以对齐
@@ -29,7 +29,7 @@ export function CalcSheet({ open, value, onChange, onClose }: { open: boolean; v
       >
         {/* 标题栏 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: `${SP.md}px ${SP.lg}px`, borderBottom: `0.5px solid ${hairline(0.1)}`, flex: 'none' }}>
-          <div style={{ width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accent(), flex: 'none' }}>
+          <div style={{ width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accentText(), flex: 'none' }}>
             <Ico.calc size={14} strokeWidth={1.75} />
           </div>
           <span style={{ ...text.subtitle(), fontSize: FS.subtitle }}>工程计算</span>

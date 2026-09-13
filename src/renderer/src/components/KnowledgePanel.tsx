@@ -11,7 +11,7 @@ import { Markdown } from './Markdown'
 import { Badge, Button, EmptyState, IconButton, Input } from '../ui/components'
 import { Ico, type LucideIcon } from '../ui/icons'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
-import { accent, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
+import { accentText, accent, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
 
 interface Props {
   open: boolean
@@ -112,7 +112,7 @@ export function KnowledgePanel({ open, onClose, embedCfg, onSetEmbedConfig, onCh
       >
         {/* 头 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 15px', borderBottom: `0.5px solid ${hairline(0.1)}` }}>
-          <div style={{ width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accent(), flex: 'none' }}>
+          <div style={{ width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accentText(), flex: 'none' }}>
             <Ico.kb size={14} strokeWidth={1.75} />
           </div>
           <span style={{ flex: 1, ...text.subtitle(), fontSize: FS.subtitle, fontWeight: 700 }}>知识库 · 本地 RAG</span>
@@ -194,7 +194,7 @@ export function KnowledgePanel({ open, onClose, embedCfg, onSetEmbedConfig, onCh
             const Glyph = KIND_GLYPH[s.kind] || FileText
             return (
               <motion.div key={s.id} variants={fadeScaleIn} initial="initial" animate="animate" className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', ...surface.card() }}>
-                <div style={{ flex: 'none', width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.12), color: accent(0.85) }}>
+                <div style={{ flex: 'none', width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.12), color: accentText(0.85) }}>
                   <Glyph size={13} strokeWidth={1.75} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>

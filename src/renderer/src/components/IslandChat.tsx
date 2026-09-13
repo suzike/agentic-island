@@ -14,7 +14,7 @@ import { readAttachment, downscaleDataUrl, selectLocalFiles } from '../logic/fil
 import { island } from '../bridge'
 import { Button, Chip, IconButton } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
-import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
+import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
 
 /** 附件类型图标（文件/图像） */
 const AttIcon = ({ t, size = 12 }: { t: string; size?: number }): React.JSX.Element =>
@@ -145,7 +145,7 @@ function AnswerBody({ blocks }: { blocks?: Block[] }): React.JSX.Element {
         if (b.t === 'steps')
           return (
             <div key={bi} style={{ opacity: 0.85 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: accent(0.78, 0.85), fontSize: FS.tiny, fontWeight: 600, marginBottom: 3 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: accentText(0.78, 0.85), fontSize: FS.tiny, fontWeight: 600, marginBottom: 3 }}>
                 <Wrench size={10.5} strokeWidth={1.75} style={{ flex: 'none' }} />
                 执行过程 · {(b.steps || []).length} 步
               </div>
@@ -166,7 +166,7 @@ function AnswerBody({ blocks }: { blocks?: Block[] }): React.JSX.Element {
             <div key={bi} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {(b.items || []).map((li, li2) => (
                 <div key={li2} style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
-                  <div style={{ color: accent(), fontSize: FS.small, lineHeight: 1.5 }}>•</div>
+                  <div style={{ color: accentText(), fontSize: FS.small, lineHeight: 1.5 }}>•</div>
                   <div style={{ color: ink(1), fontSize: FS.small, lineHeight: 1.5 }}>{li}</div>
                 </div>
               ))}
@@ -174,7 +174,7 @@ function AnswerBody({ blocks }: { blocks?: Block[] }): React.JSX.Element {
           )
         if (b.t === 'code')
           return (
-            <div key={bi} style={{ ...surface.inset(), ...text.mono(FS.small), color: accent(0.86), padding: '8px 10px', overflowX: 'auto', whiteSpace: 'pre' }}>
+            <div key={bi} style={{ ...surface.inset(), ...text.mono(FS.small), color: accentText(0.86), padding: '8px 10px', overflowX: 'auto', whiteSpace: 'pre' }}>
               {b.text}
             </div>
           )
@@ -225,7 +225,7 @@ function AnswerAnalyses({ items }: { items: AnswerAnalysis[] }): React.JSX.Eleme
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 8, ...surface.inset(), borderRadius: R.md }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-        <ShieldCheck size={11} strokeWidth={1.9} style={{ color: accent(), flex: 'none' }} />
+        <ShieldCheck size={11} strokeWidth={1.9} style={{ color: accentText(), flex: 'none' }} />
         <span style={{ color: ink(2), fontSize: FS.tiny, fontWeight: 700 }}>气泡分析</span>
         {items.map((item) => <Chip key={item.id} active={item.id === current.id} onClick={() => setActive(item.id)}>{item.label}</Chip>)}
         <span style={{ flex: 1 }} />
@@ -233,7 +233,7 @@ function AnswerAnalyses({ items }: { items: AnswerAnalysis[] }): React.JSX.Eleme
       </div>
       {method && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: ink(3), fontSize: 9.5 }}>
-          <span style={{ color: accent(0.82), fontWeight: 650 }}>{method.framework}</span>
+          <span style={{ color: accentText(0.82), fontWeight: 650 }}>{method.framework}</span>
           <span>·</span>
           <span>{method.outcome}</span>
         </div>
@@ -246,7 +246,7 @@ function AnswerAnalyses({ items }: { items: AnswerAnalysis[] }): React.JSX.Eleme
 function ForkConfirmation({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }): React.JSX.Element {
   return (
     <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 9px', ...surface.inset(), borderRadius: R.md }}>
-      <GitFork size={12} strokeWidth={1.9} style={{ color: accent(), flex: 'none' }} />
+      <GitFork size={12} strokeWidth={1.9} style={{ color: accentText(), flex: 'none' }} />
       <span style={{ flex: 1, color: ink(2), fontSize: FS.tiny, lineHeight: 1.45 }}>当前会话会保留；新分支只继承这条消息以前的内容，并立即切换过去。</span>
       <Button variant="ghost" sm onClick={onCancel}>取消</Button>
       <Button variant="primary" sm onClick={onConfirm}>创建并切换</Button>
@@ -272,7 +272,7 @@ function QuoteCard({ q, onRemove, compact }: { q: QuoteRef; onRemove?: () => voi
       <div style={{ width: 3, flex: 'none', background: gradient.brand() }} />
       <div style={{ flex: 1, minWidth: 0, padding: compact ? '5px 8px' : '6px 9px', display: 'flex', flexDirection: 'column', gap: 3 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-          <Quote size={10} strokeWidth={2} style={{ flex: 'none', color: accent(0.8, 0.9), marginTop: 2 }} />
+          <Quote size={10} strokeWidth={2} style={{ flex: 'none', color: accentText(0.8, 0.9), marginTop: 2 }} />
           <span style={{ flex: 1, minWidth: 0, color: ink(2), fontSize: FS.tiny, lineHeight: 1.45, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: compact ? 2 : 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {q.text}
           </span>
@@ -283,7 +283,7 @@ function QuoteCard({ q, onRemove, compact }: { q: QuoteRef; onRemove?: () => voi
           )}
         </div>
         {q.note && q.note.trim() && (
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4, color: accent(0.86, 0.92), fontSize: FS.tiny, lineHeight: 1.4, paddingLeft: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4, color: accentText(0.86, 0.92), fontSize: FS.tiny, lineHeight: 1.4, paddingLeft: 16 }}>
             <CornerDownRight size={10} strokeWidth={2} style={{ flex: 'none', opacity: 0.6, marginTop: 1.5 }} />
             <span style={{ minWidth: 0 }}>{q.note}</span>
           </div>
@@ -547,7 +547,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
             <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ ...surface.inset(), borderRadius: R.lg, padding: 9, display: 'flex', flexDirection: 'column', gap: 7 }}>
               <div style={{ ...text.faint(), fontSize: FS.tiny, lineHeight: 1.45 }}>不同思路分别推进；切换保留各自对话，合并只把目标分支的结论写入当前记忆。</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <GitFork size={13} strokeWidth={1.8} style={{ color: accent(), flex: 'none' }} />
+                <GitFork size={13} strokeWidth={1.8} style={{ color: accentText(), flex: 'none' }} />
                 <input
                   value={rename}
                   onChange={(event) => setRename(event.target.value)}
@@ -605,7 +605,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
             <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ ...surface.inset(), borderRadius: R.lg, padding: 9, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ ...text.faint(), fontSize: FS.tiny, lineHeight: 1.45 }}>选择至少两个已保存模型，让它们分别回答、汇总结论或比较分歧。</div>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 8px', borderRadius: R.sm, background: fill(1) }}>
-                <Quote size={10} strokeWidth={2} style={{ color: accent(), flex: 'none', marginTop: 2 }} />
+                <Quote size={10} strokeWidth={2} style={{ color: accentText(), flex: 'none', marginTop: 2 }} />
                 <span style={{ ...text.faint(), flex: 'none' }}>讨论目标</span>
                 <span style={{ color: ink(2), fontSize: FS.tiny, lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastQuestion || '请先提出一个问题'}</span>
               </div>
@@ -676,7 +676,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                   </div>
                 )}
                 {m.answerMethodLabel && (
-                  <span title="本轮回答采用的方法，只影响紧随其后的回答" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: R.pill, background: semBg(accent(), 0.12), color: accent(0.84), fontSize: 9, fontWeight: 650 }}>
+                  <span title="本轮回答采用的方法，只影响紧随其后的回答" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: R.pill, background: semBg(accent(), 0.12), color: accentText(0.84), fontSize: 9, fontWeight: 650 }}>
                     <WandSparkles size={9} strokeWidth={2} />
                     回答方法 · {m.answerMethodLabel}
                   </span>
@@ -722,7 +722,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                   {/* 就地追问子线程：问答都嵌套在本气泡内，形成一条对话支线 */}
                   {(m.followups?.length ?? 0) > 0 && (
                     <div style={{ marginTop: 5, padding: '7px 8px 7px 10px', borderLeft: `2px solid ${accent(0.7, 0.5)}`, borderRadius: `0 ${R.md}px ${R.md}px 0`, background: fill(1), display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: accent(0.82), fontSize: FS.tiny, fontWeight: 700 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: accentText(0.82), fontSize: FS.tiny, fontWeight: 700 }}>
                         <CornerDownRight size={11} strokeWidth={2} />本回答的追问支线 · {m.followups!.filter((item) => item.role === 'user').length} 轮
                       </div>
                       {m.followups!.map((fm, fi) =>
@@ -786,7 +786,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                     return (
                       <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 8, ...surface.inset() }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
-                          <ShieldCheck size={13} strokeWidth={2} style={{ color: accent(), flex: 'none', marginTop: 1 }} />
+                          <ShieldCheck size={13} strokeWidth={2} style={{ color: accentText(), flex: 'none', marginTop: 1 }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ color: ink(1), fontSize: FS.small, fontWeight: 700 }}>回答分析中心</div>
                             <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.4 }}>方法会围绕当前气泡生成独立分析，不新增主消息、不改变后续上下文。同一方法再次执行会替换旧结果。</div>
@@ -801,14 +801,14 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                             const Icon = methodGroupIcon(method.group)
                             return (
                               <button key={method.id} type="button" disabled={!!analysisBusy || p.busy} onClick={() => runAnswerAnalysis(mi, method.id, method.label)} className="hv" style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr)', gap: 7, alignItems: 'start', minHeight: 70, padding: '7px 8px', border: 'none', borderRadius: R.md, background: fill(1), color: ink(1), textAlign: 'left', fontFamily: 'var(--font)', cursor: analysisBusy || p.busy ? 'default' : 'pointer', opacity: analysisBusy || p.busy ? 0.55 : 1 }}>
-                                <span style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent() }}><Icon size={13} strokeWidth={1.9} /></span>
+                                <span style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accentText() }}><Icon size={13} strokeWidth={1.9} /></span>
                                 <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                                   <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, flexWrap: 'wrap' }}>
                                     <strong style={{ fontSize: FS.small }}>{method.label}</strong>
                                     <span style={{ ...text.faint(), fontSize: 8.5 }}>{method.framework}</span>
                                   </span>
                                   <span style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.35 }}>{method.description}</span>
-                                  <span style={{ color: accent(0.8), fontSize: 9, lineHeight: 1.3 }}>产出：{method.outcome}</span>
+                                  <span style={{ color: accentText(0.8), fontSize: 9, lineHeight: 1.3 }}>产出：{method.outcome}</span>
                                 </span>
                               </button>
                             )
@@ -822,7 +822,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                       <span style={{ ...text.overline() }}>可继续追问</span>
                       {m.suggestions!.map((suggestion) => (
                         <button key={suggestion} onClick={() => p.onUseSuggestion?.(suggestion)} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, border: 'none', background: fill(2), borderRadius: R.sm, color: ink(2), padding: '6px 8px', textAlign: 'left', fontSize: FS.tiny, lineHeight: 1.4, cursor: 'pointer', fontFamily: 'var(--font)' }}>
-                          <CornerDownRight size={10} strokeWidth={2} style={{ flex: 'none', marginTop: 2, color: accent() }} />
+                          <CornerDownRight size={10} strokeWidth={2} style={{ flex: 'none', marginTop: 2, color: accentText() }} />
                           <span style={{ flex: 1 }}>{suggestion}</span>
                           <span style={{ ...text.faint(), fontSize: 9, whiteSpace: 'nowrap' }}>填入主输入框</span>
                         </button>
@@ -926,7 +926,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
             {answerMethodOpen && (
               <motion.div variants={fadeScaleIn} initial="initial" animate="animate" style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 8, ...surface.inset() }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
-                  <WandSparkles size={13} strokeWidth={2} style={{ color: accent(), flex: 'none', marginTop: 1 }} />
+                  <WandSparkles size={13} strokeWidth={2} style={{ color: accentText(), flex: 'none', marginTop: 1 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ color: ink(1), fontSize: FS.small, fontWeight: 700 }}>选择这一问的回答方法</div>
                     <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.4 }}>仅影响下一次发送，回答气泡会记录所用方法；发送完成后自动恢复默认。</div>
@@ -943,14 +943,14 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                     const active = method.id === p.answerMethodId
                     return (
                       <button key={method.id} type="button" onClick={() => { p.onAnswerMethodChange?.(method.id); setAnswerMethodOpen(false) }} className="hv" style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr)', gap: 7, alignItems: 'start', minHeight: 72, padding: '7px 8px', border: `0.5px solid ${active ? accent(0.7, 0.5) : hairline(0.06)}`, borderRadius: R.md, background: active ? semBg(accent(), 0.13) : fill(1), color: ink(1), textAlign: 'left', fontFamily: 'var(--font)', cursor: 'pointer' }}>
-                        <span style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accent() }}><Icon size={13} strokeWidth={1.9} /></span>
+                        <span style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accentText() }}><Icon size={13} strokeWidth={1.9} /></span>
                         <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                           <span style={{ display: 'flex', alignItems: 'baseline', gap: 5, flexWrap: 'wrap' }}>
                             <strong style={{ fontSize: FS.small }}>{method.label}</strong>
                             <span style={{ ...text.faint(), fontSize: 8.5 }}>{method.framework}</span>
                           </span>
                           <span style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.35 }}>{method.description}</span>
-                          <span style={{ color: accent(0.8), fontSize: 9, lineHeight: 1.3 }}>产出：{method.outcome}</span>
+                          <span style={{ color: accentText(0.8), fontSize: 9, lineHeight: 1.3 }}>产出：{method.outcome}</span>
                         </span>
                       </button>
                     )
@@ -1010,7 +1010,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
             animate="animate"
             style={{ position: 'fixed', left: sel.x, top: sel.y, zIndex: 41, width: 250, padding: 10, ...surface.overlay(), display: 'flex', flexDirection: 'column', gap: 8 }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: accent(0.85), fontSize: FS.tiny, fontWeight: 700 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: accentText(0.85), fontSize: FS.tiny, fontWeight: 700 }}>
               <Quote size={11} strokeWidth={2} style={{ flex: 'none' }} />
               <span>引用追问</span>
             </div>

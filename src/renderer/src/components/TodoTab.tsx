@@ -15,7 +15,7 @@ import { stripFence, parseJsonArray, normPrio, parseDue } from '../logic/todoAi'
 import { ProjectContextBar } from './ProjectContextBar'
 import { Button, Chip, EmptyState, Group, IconButton, Segmented } from '../ui/components'
 import { Ico } from '../ui/icons'
-import { accent, accent2, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text as txt, transition } from '../ui/tokens'
+import { accentText, accent, accent2, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text as txt, transition } from '../ui/tokens'
 
 interface TodoTabProps {
   projects: WorkbenchProject[]
@@ -498,7 +498,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
             title={label}
             style={{ minWidth: 0, height: 34, padding: '0 6px', borderRadius: R.md, border: `0.5px solid ${aiTool === key ? accent(0.72, 0.5) : hairline(0.07)}`, background: aiTool === key ? semBg(accent(), 0.2) : fill(1), color: ink(1), cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontFamily: 'var(--font)', transition: transition('background, border-color') }}
           >
-            <Icon size={12} strokeWidth={1.75} style={{ color: accent(), flex: 'none' }} />
+            <Icon size={12} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 650 }}>{label}</span>
           </button>
         ))}
@@ -507,7 +507,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
       {aiTool && (
         <div style={{ padding: SP.md, ...surface.card(), border: `0.5px solid ${accent(0.65, 0.35)}`, animation: 'ai-fadein .18s ease' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: aiTool === 'plan' || aiTool === 'clarify' || aiPanel || aiPlanItems ? 9 : 0 }}>
-            <Ico.ai size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
+            <Ico.ai size={13} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
             <span style={txt.subtitle()}>
               {aiTool === 'plan' ? '目标拆解与执行建模' : aiTool === 'schedule' ? '智能排期' : aiTool === 'focus' ? '今日聚焦' : aiTool === 'risk' ? '执行风险诊断' : aiTool === 'standup' ? '站会报告' : aiTool === 'week' ? '本周计划' : 'AI 增强'}
             </span>
@@ -533,7 +533,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {aiPlanItems.map((item, i) => (
                 <div key={i} style={{ display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr) auto', gap: 8, alignItems: 'start', padding: '8px 9px', borderRadius: R.md, background: fill(1), border: `0.5px solid ${hairline(0.05)}` }}>
-                  <span style={{ ...txt.num(10), color: accent(0.72) }}>{String(i + 1).padStart(2, '0')}</span>
+                  <span style={{ ...txt.num(10), color: accentText(0.72) }}>{String(i + 1).padStart(2, '0')}</span>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ color: ink(1), fontSize: FS.small, fontWeight: 650, lineHeight: 1.4 }}>{item.text}</div>
                     <div style={{ marginTop: 4, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
@@ -668,7 +668,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
 
       {view === 'active' && selecting && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px', borderRadius: R.md, background: semBg(accent(), 0.1), border: `0.5px solid ${accent(0.62, 0.3)}` }}>
-          <span style={{ color: accent(0.88), fontSize: 10.5, fontWeight: 700 }}>已选 {selected.size}</span>
+          <span style={{ color: accentText(0.88), fontSize: 10.5, fontWeight: 700 }}>已选 {selected.size}</span>
           <span style={{ flex: 1 }} />
           <button type="button" className="hv" disabled={!selected.size} onClick={bulkDone} style={bulkBtn}>完成</button>
           <button type="button" className="hv" disabled={!selected.size} onClick={bulkTomorrow} style={bulkBtn}>明天</button>
@@ -858,7 +858,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5 }}>
-                            {t.pinned && <Ico.pin size={9} strokeWidth={2} style={{ flex: 'none', color: accent(), marginTop: 2 }} />}
+                            {t.pinned && <Ico.pin size={9} strokeWidth={2} style={{ flex: 'none', color: accentText(), marginTop: 2 }} />}
                             <span style={{ flex: 1, color: ink(1), fontSize: FS.small, lineHeight: 1.45, textDecoration: key === 'done' ? 'line-through' : undefined, opacity: key === 'done' ? 0.55 : 1, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}>{t.text}</span>
                             {/* 悬停快速推进 */}
                             <div className="row-acts" style={{ flex: 'none', display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -962,7 +962,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                       title="双击编辑"
                       style={{ color: t.done ? ink(3) : ink(1), fontSize: FS.body, lineHeight: 1.45, textDecoration: t.done ? 'line-through' : 'none', transition: 'color .3s', wordBreak: 'break-word', cursor: t.done ? undefined : 'text' }}
                     >
-                      {t.pinned && <Ico.pin size={10} strokeWidth={2} style={{ color: accent(), marginRight: 4, verticalAlign: -1 }} />}{t.text}
+                      {t.pinned && <Ico.pin size={10} strokeWidth={2} style={{ color: accentText(), marginRight: 4, verticalAlign: -1 }} />}{t.text}
                     </span>
                     )}
                     {/* 元信息 chips */}
@@ -1020,7 +1020,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                         placeholder="添加子任务，Enter 连续添加…"
                         style={{ ...inputBase, flex: 1, fontSize: FS.small, background: surface.inset().background, border: `0.5px solid ${hairline(0.09)}`, borderRadius: R.sm, padding: '5.5px 9px' }}
                       />
-                      <span className="hv" onClick={() => breakdown(t.id)} title="AI 把这个任务拆解成子步骤" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 4, padding: '0 11px', borderRadius: R.sm, cursor: 'pointer', background: semBg(accent(), 0.18), border: `0.5px solid ${accent(0.7, 0.4)}`, color: accent(0.88), fontSize: 10.5, fontWeight: 700 }}>
+                      <span className="hv" onClick={() => breakdown(t.id)} title="AI 把这个任务拆解成子步骤" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 4, padding: '0 11px', borderRadius: R.sm, cursor: 'pointer', background: semBg(accent(), 0.18), border: `0.5px solid ${accent(0.7, 0.4)}`, color: accentText(0.88), fontSize: 10.5, fontWeight: 700 }}>
                         <Ico.ai size={11} strokeWidth={2} />{breaking === t.id ? '拆解中…' : 'AI 拆解'}
                       </span>
                     </div>
@@ -1061,7 +1061,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                       <button type="button" className="hv" onClick={() => void aiEstimate(t)} style={microBtn}><Ico.timer size={10} strokeWidth={2} />{aiEstBusy === t.id ? '估时中…' : 'AI 估时'}</button>
                       <button type="button" className="hv" onClick={() => void aiSmart(t)} style={microBtn}><Ico.magic size={10} strokeWidth={2} />{aiSmartBusy === t.id ? '改写中…' : 'SMART 改写'}</button>
                       <button type="button" className="hv" onClick={() => void aiAutoTag(t)} style={microBtn}><Ico.tag size={10} strokeWidth={2} />{aiTagBusy === t.id ? '归类中…' : 'AI 归类'}</button>
-                      {(t.tags || []).map((tag) => <button key={tag} type="button" className="hv" onClick={() => toggleTag(t, tag)} title="移除标签" style={{ ...microBtn, color: accent(0.76) }}>#{tag} ×</button>)}
+                      {(t.tags || []).map((tag) => <button key={tag} type="button" className="hv" onClick={() => toggleTag(t, tag)} title="移除标签" style={{ ...microBtn, color: accentText(0.76) }}>#{tag} ×</button>)}
                       {tagDraft?.id === t.id
                         ? <input autoFocus value={tagDraft.text} onChange={(e) => setTagDraft({ id: t.id, text: e.target.value })} onBlur={commitTagDraft} onKeyDown={(e) => { if (e.key === 'Enter') commitTagDraft(); if (e.key === 'Escape') setTagDraft(null) }} placeholder="标签" style={{ ...detailInput, width: 80, padding: '4px 7px' }} />
                         : <button type="button" className="hv" onClick={() => setTagDraft({ id: t.id, text: '' })} style={microBtn}>+ 标签</button>}

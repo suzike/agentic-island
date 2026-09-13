@@ -9,7 +9,7 @@ import type { AgentVM } from '../types'
 import { Markdown, Collapsible } from './Markdown'
 import { Button, EmptyState } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accent, fill, FS, ink, R, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
+import { accent, accentText, fill, FS, ink, R, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface PlanTabProps {
   /** 待审阅的计划（agents 里 isPlan 的待审批项） */
@@ -29,7 +29,7 @@ export function PlanTab(p: PlanTabProps): React.JSX.Element {
         title="暂无待审阅的计划"
         desc="在 Claude Code 里按 Shift+Tab 切到计划模式，Claude 提交实施方案时会弹到这里，你可以批准或打回继续规划。"
         action={
-          <div style={{ ...surface.inset(), padding: '7px 13px', color: accent(0.78), fontSize: FS.tiny, fontFamily: "ui-monospace,'Cascadia Code',monospace" }}>
+          <div style={{ ...surface.inset(), padding: '7px 13px', color: accentText(0.78), fontSize: FS.tiny, fontFamily: "ui-monospace,'Cascadia Code',monospace" }}>
             想先看看效果？项目目录里运行：npm run demo:plan
           </div>
         }
@@ -56,7 +56,7 @@ export function PlanTab(p: PlanTabProps): React.JSX.Element {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 24, height: 24, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accent(), flex: 'none' }}>
+              <div style={{ width: 24, height: 24, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accentText(), flex: 'none' }}>
                 <ClipboardList size={13} strokeWidth={1.75} />
               </div>
               <span style={{ color: ink(1), fontSize: FS.body, fontWeight: 700 }}>实施计划待审阅</span>
