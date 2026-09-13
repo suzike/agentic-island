@@ -122,6 +122,10 @@ export class BridgeServer {
         reply({ ok: true })
         // 轮次结束 → 异步采集真实 git 变更小结（Stop 现走 notification/waiting，故用显式标记）
         if (event.turnEnd) {
+          // Claude 的 Stop 顺带携带模型/上下文占用（从 transcript 尾部提取）：补齐卡片元信息
+          if (event.model || typeof event.contextTokens === 'number') {
+            this.store.attachMeta(event, { model: event.model, contextTokens: event.contextTokens })
+          }
           this.summarize?.(event.cwd)
             .then((sum) => { if (sum) this.store.attachSummary(event, sum) })
             .catch(() => {})

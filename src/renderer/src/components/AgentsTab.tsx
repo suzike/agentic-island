@@ -148,6 +148,7 @@ function AgentCard({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             <span style={{ ...text.subtitle(), fontSize: FS.body, letterSpacing: '.01em' }}>{a.tool}</span>
+            {a.model && <span title={a.model} style={{ ...text.mono(9.5), background: semBg(sem.focus, 0.14), color: sem.focus, padding: '1px 7px', borderRadius: R.sm, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 'none' }}>{a.model}</span>}
             <span style={{ ...text.mono(10), background: fill(1), padding: '1px 7px', borderRadius: R.sm, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{a.proj}</span>
           </div>
           {elapsed && <span style={{ ...text.faint(), fontSize: 9 }}>已运行 {elapsed}</span>}

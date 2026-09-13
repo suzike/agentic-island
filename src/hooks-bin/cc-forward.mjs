@@ -4,7 +4,7 @@
 //
 // 关键：任何异常都必须 fail-open（静默 exit 0）—— 岛没开/桥不可达时绝不能卡住用户的 CLI。
 
-import { readFileSync, appendFileSync, writeFileSync, openSync, readSync, closeSync, statSync } from 'fs'
+import { readFileSync, appendFileSync, writeFileSync, renameSync, openSync, readSync, closeSync, statSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { request } from 'http'
@@ -14,9 +14,12 @@ import { execFile } from 'child_process'
 const BRIDGE_FILE = process.env.AIISLAND_BRIDGE_FILE || join(homedir(), '.agentic-island', 'bridge.json')
 const EVENTS_LOG = join(homedir(), '.agentic-island', 'events.log')
 const T0 = Date.now()
-// 延迟诊断日志：记录 hook 启动与桥响应耗时（排查"终端先弹、岛后弹"用）
+// 延迟诊断日志：记录 hook 启动与桥响应耗时（排查"终端先弹、岛后弹"用）；超 1MB 轮转为 .old，不无限增长
 const trace = (msg) => {
-  try { appendFileSync(EVENTS_LOG, `${new Date().toISOString()} +${Date.now() - T0}ms ${msg}\n`) } catch { /* */ }
+  try {
+    try { if (existsSync(EVENTS_LOG) && statSync(EVENTS_LOG).size > 1_000_000) renameSync(EVENTS_LOG, EVENTS_LOG + '.old') } catch { /* 首次写入前无文件 */ }
+    appendFileSync(EVENTS_LOG, `${new Date().toISOString()} +${Date.now() - T0}ms ${msg}\n`)
+  } catch { /* */ }
 }
 
 const readStdin = () =>
@@ -212,8 +215,9 @@ async function main() {
     kind = 'notification'
     detail = last ? `本轮完成 · 等待你的回复\n\n${last}` : '本轮完成 · 等待你的回复…'
     withTermInfo = true
-    // 标记轮次结束：岛端据此采集 git 变更小结
-    const jobs2 = [report(bridge, { backend, kind, sessionId, cwd, detail, turnEnd: true }), ensureTermInfo(bridge, backend, sessionId, cwd)]
+    // 标记轮次结束：岛端据此采集 git 变更小结；顺带携带模型/上下文占用（岛卡片展示）
+    const usage = lastUsage(input.transcript_path) || {}
+    const jobs2 = [report(bridge, { backend, kind, sessionId, cwd, detail, turnEnd: true, model: usage.model, contextTokens: usage.contextTokens }), ensureTermInfo(bridge, backend, sessionId, cwd)]
     await Promise.all(jobs2)
     process.exit(0)
   }
@@ -315,6 +319,38 @@ function lastAssistantText(transcriptPath) {
     return ''
   } catch {
     return ''
+  }
+}
+
+/* ============ 从 transcript 尾部提取模型与上下文占用（Stop 时给岛卡片） ============ */
+// 上下文占用 = 最近一次 API 调用的 input + cache_read + cache_creation（反映整个会话的真实上下文压力）
+function lastUsage(transcriptPath) {
+  try {
+    if (!transcriptPath) return null
+    const size = statSync(transcriptPath).size
+    const want = Math.min(size, 131072)
+    const fd = openSync(transcriptPath, 'r')
+    const buf = Buffer.alloc(want)
+    readSync(fd, buf, 0, want, size - want)
+    closeSync(fd)
+    const lines = buf.toString('utf8').split('\n').filter((l) => l.trim())
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const j = JSON.parse(lines[i])
+        const msg = j && j.type === 'assistant' && j.message
+        if (msg && msg.usage) {
+          const u = msg.usage
+          const contextTokens = (Number(u.input_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0)
+          return {
+            model: typeof msg.model === 'string' ? msg.model.slice(0, 60) : undefined,
+            contextTokens: contextTokens > 0 ? contextTokens : undefined
+          }
+        }
+      } catch { /* 跳过不完整行 */ }
+    }
+    return null
+  } catch {
+    return null
   }
 }
 

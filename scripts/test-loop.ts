@@ -4,7 +4,7 @@
 
 import { spawn } from 'child_process'
 import { join } from 'path'
-import { mkdtempSync } from 'fs'
+import { mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { AgentsStore } from '../src/main/agents-store.ts'
 import { BridgeServer } from '../src/main/bridge-server.ts'
@@ -90,6 +90,25 @@ async function run(): Promise<void> {
     process.exit(1)
   }
   console.log('[island] ✓ 用户接力理由已作为 deny 理由回传给 CLI')
+
+  // ===== 场景 3：Stop + transcript → 卡片补齐模型名与上下文占用 =====
+  const transcript = join(mkdtempSync(join(tmpdir(), 'aiisland-tl-')), 'transcript.jsonl')
+  writeFileSync(transcript, [
+    JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }),
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-sonnet-4-5', content: [{ type: 'text', text: '你好' }], usage: { input_tokens: 4, cache_read_input_tokens: 12000, cache_creation_input_tokens: 300, output_tokens: 42 } } }),
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-sonnet-4-5', content: [{ type: 'text', text: '最终回复' }], usage: { input_tokens: 4, cache_read_input_tokens: 15000, cache_creation_input_tokens: 500, output_tokens: 88 } } })
+  ].join('\n'), 'utf8')
+  const child3 = spawn('node', [script, 'claude-code', 'Stop'], { stdio: ['pipe', 'pipe', 'pipe'] })
+  child3.stdin.write(JSON.stringify({ session_id: 'test-sess', cwd: process.cwd(), transcript_path: transcript }))
+  child3.stdin.end()
+  await new Promise((resolve) => child3.on('close', resolve))
+  await sleep(400)
+  const withMeta = store.snapshot().agents.find((a) => a.id === 'claude-code:test-sess')
+  if (withMeta?.model !== 'claude-sonnet-4-5' || withMeta?.contextTokens !== 15504) {
+    console.error(`❌ 卡片元信息缺失：model=${withMeta?.model} contextTokens=${withMeta?.contextTokens}（期望 claude-sonnet-4-5 / 15504）`)
+    process.exit(1)
+  }
+  console.log('[island] ✓ Stop 事件已补齐卡片：model=claude-sonnet-4-5 · 上下文 15504 tok')
 
   bridge.stop()
   console.log('\n✅ M1 + 接力 steer 验证通过：审批裁决与"拒绝并说明理由"双向回传全链路成立')
