@@ -21,21 +21,19 @@
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
-    "electron-store": "^10.0.0",
-    "ffmpeg-static": "^5.2.0",
-    "framer-motion": "^12.42.2",
-    "lucide-react": "^0.468.0",
-    "mammoth": "^1.12.0",
-    "onnxruntime-web": "^1.27.0",
-    "pdf-parse": "^2.4.5"
+    "electron-updater": "^6.8.9",
+    "ffmpeg-static": "^5.2.0"
   },
   "build": {
     "appId": "com.agentic.island",
     "productName": "Agentic-Island",
     "directories": {
       "output": "dist"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "suzike",
+      "repo": "agentic-island"
     },
     "files": [
       "out/**/*"
@@ -62,7 +60,8 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "Agentic-Island-Setup-${version}.${ext}"
+      "artifactName": "Agentic-Island-Setup-${version}.${ext}",
+      "verifyUpdateCodeSignature": false
     },
     "nsis": {
       "oneClick": false,
@@ -76,9 +75,16 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "electron": "^39.8.10",
     "electron-builder": "^26.15.6",
     "electron-vite": "^2.3.0",
+    "framer-motion": "^12.42.2",
+    "lucide-react": "^0.468.0",
+    "mammoth": "^1.12.0",
+    "onnxruntime-web": "^1.27.0",
+    "pdf-parse": "^2.4.5",
     "png-to-ico": "^3.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
