@@ -35,7 +35,9 @@ export function automationDue(rule: Pick<AutomationRule, 'enabled' | 'trigger' |
 export function automationTriggerLabel(trigger: AutomationTrigger): string {
   if (trigger.kind === 'daily') return `每日 ${trigger.time}`
   if (trigger.kind === 'agent-end') return 'Agent 会话结束'
-  return '番茄钟专注结束'
+  if (trigger.kind === 'pomo-end') return '番茄钟专注结束'
+  if (trigger.kind === 'meeting-start') return `会议开始前 ${trigger.leadMin} 分钟`
+  return '会议结束后'
 }
 
 /**
@@ -57,19 +59,25 @@ export function normalizeAutomationRules(input: unknown): AutomationRule[] {
     if (t && typeof t === 'object' && typeof t.kind === 'string') {
       if (t.kind === 'daily') trigger = { kind: 'daily', time: typeof t.time === 'string' ? t.time : '09:30' }
       else if (t.kind === 'agent-end' || t.kind === 'pomo-end') trigger = { kind: t.kind }
+      else if (t.kind === 'meeting-start') trigger = { kind: 'meeting-start', leadMin: clampMinutes(t.leadMin, 5) }
+      else if (t.kind === 'meeting-end') trigger = { kind: 'meeting-end' }
       else continue
     } else if (typeof item.time === 'string') {
       trigger = { kind: 'daily', time: item.time } // 旧版迁移
     } else {
       continue
     }
+    const firedKeys = Array.isArray(item.firedKeys)
+      ? item.firedKeys.filter((k): k is string => typeof k === 'string').slice(-100)
+      : undefined
     out.push({
       id,
       name: typeof item.name === 'string' ? item.name : '自动化任务',
       enabled: item.enabled !== false,
       trigger,
       action,
-      lastRunDay: typeof item.lastRunDay === 'string' ? item.lastRunDay : undefined
+      lastRunDay: typeof item.lastRunDay === 'string' ? item.lastRunDay : undefined,
+      firedKeys
     })
   }
   return out
@@ -84,4 +92,69 @@ export function disappearedAgents(previousIds: string[], currentIds: string[]): 
 /** 番茄钟"专注结束"边沿：仅 work → 非 work 视为一轮专注结束（休息结束不触发） */
 export function pomoFocusEnded(previous: PomoPhase, current: PomoPhase): boolean {
   return previous === 'work' && current !== 'work'
+}
+
+/** 提前量钳制：1–120 分钟，非法值回退默认值 */
+export function clampMinutes(value: unknown, fallback: number): number {
+  const n = Math.round(Number(value))
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(120, Math.max(1, n))
+}
+
+/** 会议触发器判定所需的日历事件字段（结构化类型：便于测试注入） */
+export interface MeetingLike {
+  id: string
+  title: string
+  start: number
+  end: number
+  allDay?: boolean
+}
+
+export interface MeetingTriggerHit {
+  key: string
+  title: string
+  /** 事件驱动的动作提示，如「会议开始前 5 分钟」 */
+  label: string
+}
+
+/**
+ * 会议触发器判定（纯函数）：
+ * · 会前触发：进入 [start - leadMin, start) 窗口即命中；
+ * · 会后触发：进入 [end, end + graceMin] 窗口即命中（宽限用于跨重启补触发）；
+ * · 全天事件不参与；已触发过的实例（firedKeys 里的 `${id}@${时间戳}`）不再命中；
+ * · 若同时命中多场，返回开始最早的一场，由调用方按 tick 依次推进。
+ */
+export function meetingTriggerDue(
+  trigger: AutomationTrigger,
+  meetings: MeetingLike[],
+  now: number,
+  firedKeys: readonly string[] = [],
+  endGraceMin = 10
+): MeetingTriggerHit | null {
+  if (trigger.kind !== 'meeting-start' && trigger.kind !== 'meeting-end') return null
+  const fired = new Set(firedKeys)
+  const leadMs = trigger.kind === 'meeting-start' ? clampMinutes(trigger.leadMin, 5) * 60_000 : 0
+  let best: MeetingTriggerHit | null = null
+  let bestStart = Number.POSITIVE_INFINITY
+  for (const m of meetings) {
+    if (!m || m.allDay || !m.id) continue
+    if (trigger.kind === 'meeting-start') {
+      if (now < m.start - leadMs || now >= m.start) continue
+      const key = `${m.id}@${m.start}`
+      if (fired.has(key)) continue
+      if (m.start < bestStart) { bestStart = m.start; best = { key, title: m.title, label: `会议开始前 ${clampMinutes(trigger.leadMin, 5)} 分钟` } }
+    } else {
+      if (now < m.end || now > m.end + endGraceMin * 60_000) continue
+      const key = `${m.id}@${m.end}`
+      if (fired.has(key)) continue
+      if (m.start < bestStart) { bestStart = m.start; best = { key, title: m.title, label: '会议结束' } }
+    }
+  }
+  return best
+}
+
+/** 记录一个已触发键（保留最近 100 个，避免规则数据无界增长） */
+export function withFiredKey(firedKeys: readonly string[] | undefined, key: string): string[] {
+  const next = [...(firedKeys || []).filter((k) => k !== key), key]
+  return next.slice(-100)
 }

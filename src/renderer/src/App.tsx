@@ -23,7 +23,7 @@ import { MarkdownStudio } from './components/MarkdownStudio'
 import { riskOf } from './logic/risk'
 import { playSound, DEFAULT_SOUND_MAP, type SoundMap } from './logic/sounds'
 import { PROVIDERS, loadProviderSettings, migrateEmbeddingSettings, migrateProviderSettings, patchProviderDraft, providerConfigEquals, providerIsKeyless, providerModelChoices, saveProviderSettings, switchProviderSettings } from './logic/providers'
-import { automationDue, automationDayKey, disappearedAgents, normalizeAutomationRules } from './logic/automation'
+import { automationDue, automationDayKey, disappearedAgents, meetingTriggerDue, normalizeAutomationRules, withFiredKey } from './logic/automation'
 import { branchMergePrompt, buildAgentContextPrompt, buildQuotedPrompt, compactChatMessages, conversationBusy, conversationTitle, conversationToMarkdown, exportThreadMarkdown, forkConversation, historyFromThread, looseBlocks, newAskBranchMeta, parseBlocks, systemFor, upsertAnswerAnalysis } from './logic/chat'
 import { ADVANCE_PROMPTS, analysisMethodById, answerMethodById, answerMethodInstruction } from './logic/methodologies'
 import { applyThemeAny, makeCustomTheme, normalizeThemeTokens, THEMES, type ThemeDef } from './logic/themes'
@@ -2380,21 +2380,31 @@ export function App(): React.JSX.Element {
   const fireByTriggerRef = useRef(fireByTrigger)
   fireByTriggerRef.current = fireByTrigger
 
-  // 每日定时：30s 轮询 + 启动宽限补跑
+  // 每日定时 + 会议事件：同一个 30s 节拍推进（会议窗口最小 1 分钟，30s 粒度必然命中）
   useEffect(() => {
     const tick = (): void => {
       const now = new Date()
+      const nowMs = now.getTime()
       for (const rule of automationsRef.current) {
+        // 会议触发：命中即记去重键（持久化，重启不重复），再执行动作
+        const hit = meetingTriggerDue(rule.trigger, meetingsRef.current, nowMs, rule.firedKeys)
+        if (hit) {
+          setAutomations((list) => list.map((r) => (r.id === rule.id ? { ...r, firedKeys: withFiredKey(r.firedKeys, hit.key) } : r)))
+          fireAutomationRef.current(rule, false, `${hit.label} · ${hit.title}`)
+          continue
+        }
         const due = automationDue(rule, now)
         if (!due.fire) continue
         setAutomations((list) => list.map((r) => (r.id === rule.id ? { ...r, lastRunDay: automationDayKey(now) } : r)))
         fireAutomationRef.current(rule, due.missed)
       }
     }
-    tick() // 启动即检查：宽限期内的错过任务补跑
+    tick() // 启动即检查：宽限期内的错过任务补跑 + 会前窗口补触发
     const t = setInterval(tick, 30_000)
     return () => clearInterval(t)
   }, [])
+  const meetingsRef = useRef(meetings)
+  meetingsRef.current = meetings
 
   // 事件触发之一：Agent 会话结束（快照中消失）。用 ref 记录上一轮会话 id，天然一次事件只触发一次
   const knownAgentIdsRef = useRef<string[]>([])

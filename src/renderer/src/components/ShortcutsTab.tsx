@@ -578,14 +578,14 @@ function AutomationsEditor({ automations, onChange, shortcuts }: { automations: 
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
         <Ico.shortcuts size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />
         <span style={{ ...text.subtitle(), fontSize: FS.small }}>定时自动化</span>
-        <span style={text.faint()}>每日定时到点执行（启动时补跑 30 分钟内错过的任务），或由「Agent 会话结束 / 番茄钟专注结束」事件触发</span>
+        <span style={text.faint()}>每日定时到点执行（启动补跑错过的任务），或由「Agent 会话结束 / 番茄钟专注结束 / 会议开始前 / 会议结束后」事件触发</span>
         <span style={{ flex: 1 }} />
         <Button sm variant="ghost" onClick={add}>新建</Button>
         <IconButton icon={open ? ChevronUp : ChevronDown} title={open ? '收起' : '展开'} onClick={() => setOpen((v) => !v)} />
       </div>
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', marginTop: 8 }}>
-          {automations.length === 0 && <span style={{ ...text.faint(), fontSize: FS.tiny }}>还没有自动化任务——例如每天 9:30 自动跑「项目全量体检」，或 Agent 会话结束自动建一条复盘待办。</span>}
+          {automations.length === 0 && <span style={{ ...text.faint(), fontSize: FS.tiny }}>还没有自动化任务——例如每天 9:30 自动跑「项目全量体检」、Agent 会话结束自动建一条复盘待办，或会议结束自动把纪要草稿存成便签。</span>}
           {automations.map((rule) => {
             const target = rule.action.kind === 'shortcut' ? rule.action.shortcutId : ''
             return (
@@ -593,14 +593,23 @@ function AutomationsEditor({ automations, onChange, shortcuts }: { automations: 
                 <Switch on={rule.enabled} onChange={(on) => patch(rule.id, { enabled: on })} />
                 <select value={rule.trigger.kind} onChange={(e) => {
                   const kind = e.target.value as AutomationRule['trigger']['kind']
-                  patch(rule.id, { trigger: kind === 'daily' ? { kind: 'daily', time: '09:30' } : { kind } } as Partial<AutomationRule>)
+                  const next: AutomationRule['trigger'] =
+                    kind === 'daily' ? { kind: 'daily', time: '09:30' }
+                      : kind === 'meeting-start' ? { kind: 'meeting-start', leadMin: 5 }
+                        : { kind } as AutomationRule['trigger']
+                  patch(rule.id, { trigger: next } as Partial<AutomationRule>)
                 }} style={selectStyle} title="触发时机">
                   <option value="daily">每日定时</option>
                   <option value="agent-end">Agent 会话结束</option>
                   <option value="pomo-end">番茄钟专注结束</option>
+                  <option value="meeting-start">会议开始前</option>
+                  <option value="meeting-end">会议结束后</option>
                 </select>
                 {rule.trigger.kind === 'daily' && (
                   <input type="time" value={rule.trigger.time} onChange={(e) => patch(rule.id, { trigger: { kind: 'daily', time: e.target.value } })} style={selectStyle} title="每日触发时间" />
+                )}
+                {rule.trigger.kind === 'meeting-start' && (
+                  <input type="number" min={1} max={120} value={rule.trigger.leadMin} onChange={(e) => patch(rule.id, { trigger: { kind: 'meeting-start', leadMin: Number(e.target.value) || 5 } })} style={{ ...selectStyle, width: 62 }} title="提前分钟数（1-120）" />
                 )}
                 <span style={{ ...text.faint(), fontSize: 9, flex: 'none' }} title="当前触发时机">{automationTriggerLabel(rule.trigger)}</span>
                 <input value={rule.name} onChange={(e) => patch(rule.id, { name: e.target.value })} placeholder="任务名" style={{ ...selectStyle, width: 110 }} />

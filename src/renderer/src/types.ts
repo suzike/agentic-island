@@ -205,6 +205,10 @@ export type AutomationTrigger =
   | { kind: 'daily'; /** HH:mm 本地时间 */ time: string }
   | { kind: 'agent-end' }
   | { kind: 'pomo-end' }
+  /** 会议开始前 leadMin 分钟（按日历事件） */
+  | { kind: 'meeting-start'; leadMin: number }
+  /** 会议结束后（10 分钟宽限内补触发） */
+  | { kind: 'meeting-end' }
 
 export interface AutomationRule {
   id: string
@@ -214,6 +218,11 @@ export interface AutomationRule {
   action: AutomationAction
   /** 最近触发日期（YYYY-MM-DD），仅每日定时用于防同日重复触发 */
   lastRunDay?: string
+  /**
+   * 事件触发的去重键（如会议实例 `${id}@${start}`）。
+   * 相比内存去重，持久化后应用重启不会对同一场会议重复触发（保留最近 100 个）。
+   */
+  firedKeys?: string[]
 }
 
 export interface WorkflowRun {
