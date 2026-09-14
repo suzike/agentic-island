@@ -95,7 +95,12 @@ export function buildRecordingFfmpegArgs(inputPath: string, outputPath: string, 
   const segments = normalizedSegments(request)
   const speed = Math.max(0.5, Math.min(2, Number(edit.speed) || 1))
   const editedDurationMs = recordingExportDurationMs(request)
-  const hasSegmentFilter = segments.length > 0
+  const includeAudio = request.hasAudio === true && edit.muteAudio !== true && request.format !== 'gif'
+  // 工坊每份录制都会自动生成一个覆盖全长的片段；那等于"没剪"，不该走分段裁剪——
+  // 走进去就会把视频按帧序号重排时间轴（源多为 VFR，见下方 fps 归一化注释）。
+  const trimming = segments.length > 0
+    && !(segments.length === 1 && segments[0].startMs <= 1 && segments[0].endMs >= request.durationMs - 1)
+  const hasSegmentFilter = trimming
   const common = [
     '-y', '-hide_banner', '-nostats', '-progress', 'pipe:1', '-i', inputPath,
     ...(request.subtitleFilePath && request.format !== 'gif' && request.format !== 'mp3' ? ['-i', request.subtitleFilePath] : []),
@@ -103,13 +108,40 @@ export function buildRecordingFfmpegArgs(inputPath: string, outputPath: string, 
     ...(!hasSegmentFilter && (trimStart > 0 || trimEnd < request.durationMs) ? ['-t', ((trimEnd - trimStart) / 1000).toFixed(3)] : []),
     '-map_metadata', '-1'
   ]
-  const videoFilters: string[] = []
+  // 分段裁剪：按时间 trim 出每段再 concat，段内原始时间轴（含 VFR 的不均匀间隔）完整保留。
+  // 旧实现是 select + setpts=N/(FRAME_RATE*TB)：按"第 N 帧 → N/帧率"重排，正确性取决于
+  // FRAME_RATE 解析出的标称值，一旦与实际帧密度不符整段视频就会加速或缩短。
+  const graph: string[] = []
+  let videoSource = '0:v'
+  let audioSource = '0:a'
+  // mp3 只要音频；给不需要的轨道建图没有意义（未映射的 pad 是白费功夫，也容易触发校验噪音）
+  const needVideo = request.format !== 'mp3'
   if (hasSegmentFilter) {
-    const selection = segments.map((segment) => `between(t\\,${(segment.startMs / 1000).toFixed(3)}\\,${(segment.endMs / 1000).toFixed(3)})`).join('+')
-    videoFilters.push(`select='${selection}'`, `setpts=N/(FRAME_RATE*${speed.toFixed(3)}*TB)`)
-  } else if (speed !== 1) {
-    videoFilters.push(`setpts=PTS/${speed.toFixed(3)}`)
+    const videoParts: string[] = []
+    const audioParts: string[] = []
+    segments.forEach((segment, index) => {
+      const start = (segment.startMs / 1000).toFixed(3)
+      const end = (segment.endMs / 1000).toFixed(3)
+      if (needVideo) {
+        graph.push(`[0:v]trim=start=${start}:end=${end},setpts=PTS-STARTPTS[v${index}]`)
+        videoParts.push(`[v${index}]`)
+      }
+      if (includeAudio) {
+        graph.push(`[0:a]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS[a${index}]`)
+        audioParts.push(`[a${index}]`)
+      }
+    })
+    if (needVideo) {
+      graph.push(`${videoParts.join('')}concat=n=${segments.length}:v=1:a=0[vcut]`)
+      videoSource = 'vcut'
+    }
+    if (includeAudio) {
+      graph.push(`${audioParts.join('')}concat=n=${segments.length}:v=0:a=1[acut]`)
+      audioSource = 'acut'
+    }
   }
+  const videoFilters: string[] = []
+  if (speed !== 1) videoFilters.push(`setpts=PTS/${speed.toFixed(3)}`)
   const crop = edit.crop
   if (crop) {
     const left = Math.max(0, Math.min(0.45, Number(crop.left) || 0))
@@ -139,19 +171,20 @@ export function buildRecordingFfmpegArgs(inputPath: string, outputPath: string, 
     const outputHeight = Math.max(2, Math.min(4320, Math.round(Number(request.outputHeight) || request.height)))
     if (outputWidth < request.width || outputHeight < request.height) videoFilters.push(`scale=w=${outputWidth}:h=${outputHeight}:force_original_aspect_ratio=decrease:force_divisible_by=2`)
     const outputFps = Math.max(1, Math.min(120, Math.round(Number(request.outputFps) || request.fps)))
-    if (outputFps !== request.fps) videoFilters.push(`fps=${outputFps}`)
+    // 输出帧率必须显式归一化，不能"与源一致就不管"：
+    // 录制源是 MediaRecorder 产的 WebM（VFR），容器里的标称帧率并不代表真实帧密度
+    //（实测 tbr 1k，即 1000fps）。打包成 MP4 时封装器需要一个恒定帧率，会拿这个标称值
+    // 铺帧 —— 实测 60 秒输入被写成 60002 帧（1000fps，41 倍重复帧），文件暴涨且播放器行为
+    // 完全不可预期（画面飞快跑完、声音照常播完）。fps 滤镜按目标帧率重新排帧但保持时间轴不变。
+    const fpsFilterNeeded = request.format === 'mp4' || outputFps !== request.fps
+    if (fpsFilterNeeded) videoFilters.push(`fps=${outputFps}`)
   }
   const fadeIn = Math.min(editedDurationMs / 2, Math.max(0, Number(edit.fadeInMs) || 0)) / 1000
   const fadeOut = Math.min(editedDurationMs / 2, Math.max(0, Number(edit.fadeOutMs) || 0)) / 1000
   if (fadeIn > 0) videoFilters.push(`fade=t=in:st=0:d=${fadeIn.toFixed(3)}`)
   if (fadeOut > 0) videoFilters.push(`fade=t=out:st=${Math.max(0, editedDurationMs / 1000 - fadeOut).toFixed(3)}:d=${fadeOut.toFixed(3)}`)
 
-  const includeAudio = request.hasAudio === true && edit.muteAudio !== true && request.format !== 'gif'
   const audioFilters: string[] = []
-  if (includeAudio && hasSegmentFilter) {
-    const selection = segments.map((segment) => `between(t\\,${(segment.startMs / 1000).toFixed(3)}\\,${(segment.endMs / 1000).toFixed(3)})`).join('+')
-    audioFilters.push(`aselect='${selection}'`, 'asetpts=N/SR/TB')
-  }
   if (includeAudio && speed !== 1) audioFilters.push(`atempo=${speed.toFixed(3)}`)
   const volume = Math.max(0, Math.min(3, Number(edit.audioVolume) || 1))
   if (includeAudio && volume !== 1) audioFilters.push(`volume=${volume.toFixed(3)}`)
@@ -159,11 +192,23 @@ export function buildRecordingFfmpegArgs(inputPath: string, outputPath: string, 
   if (includeAudio && fadeOut > 0) audioFilters.push(`afade=t=out:st=${Math.max(0, editedDurationMs / 1000 - fadeOut).toFixed(3)}:d=${fadeOut.toFixed(3)}`)
   if (request.format === 'mp3') {
     const bitrate = request.quality === 'compact' ? '96k' : request.quality === 'near-lossless' || request.quality === 'lossless' ? '320k' : '192k'
+    if (graph.length || audioFilters.length) {
+      const parts = [...graph, `[${audioSource}]${audioFilters.length ? audioFilters.join(',') : 'anull'}[aout]`]
+      return [...common, '-vn', '-filter_complex', parts.join(';'), '-map', '[aout]', '-c:a', 'libmp3lame', '-b:a', bitrate, outputPath]
+    }
     return [...common, '-vn', '-map', '0:a:0', ...(audioFilters.length ? ['-af', audioFilters.join(',')] : []), '-c:a', 'libmp3lame', '-b:a', bitrate, outputPath]
   }
-  const complex = hasSegmentFilter || audioFilters.length > 0
+  const graphParts = [...graph]
+  if (videoFilters.length || includeAudio) {
+    if (graph.length || audioFilters.length) {
+      graphParts.push(`[${videoSource}]${videoFilters.length ? videoFilters.join(',') : 'null'}[vout]`)
+      if (includeAudio) graphParts.push(`[${audioSource}]${audioFilters.length ? audioFilters.join(',') : 'anull'}[aout]`)
+    }
+  }
+  // 没有分段裁剪/音轨滤镜时仍走简洁的 -vf 路径（保持既有行为，滤镜图只在需要时出现）
+  const complex = graph.length > 0 || audioFilters.length > 0
   const filterArgs = complex
-    ? ['-filter_complex', `[0:v]${videoFilters.length ? videoFilters.join(',') : 'null'}[vout]${includeAudio ? `;[0:a]${audioFilters.length ? audioFilters.join(',') : 'anull'}[aout]` : ''}`, '-map', '[vout]', ...(includeAudio ? ['-map', '[aout]'] : ['-an'])]
+    ? ['-filter_complex', graphParts.join(';'), '-map', '[vout]', ...(includeAudio ? ['-map', '[aout]'] : ['-an'])]
     : [...(videoFilters.length ? ['-vf', videoFilters.join(',')] : []), ...(includeAudio ? ['-map', '0:v:0', '-map', '0:a:0?'] : ['-an'])]
   const subtitleArgs = request.subtitleFilePath
     ? ['-map', '1:0', '-c:s', request.format === 'mp4' ? 'mov_text' : 'webvtt', '-metadata:s:s:0', `language=${request.subtitle?.language === 'en' ? 'eng' : request.subtitle?.language === 'zh' ? 'zho' : 'und'}`]
@@ -174,7 +219,8 @@ export function buildRecordingFfmpegArgs(inputPath: string, outputPath: string, 
     const maxWidth = Math.min(requestedWidth, request.quality === 'compact' ? 960 : request.quality === 'near-lossless' || request.quality === 'lossless' ? 1600 : 1280)
     const colors = request.quality === 'compact' ? 128 : 256
     const pre = videoFilters.length ? `${videoFilters.join(',')},` : ''
-    const filter = `[0:v]${pre}fps=${fps},scale=min(${maxWidth}\\,iw):-2:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=${colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle[gif]`
+    const gifChain = `[${videoSource}]${pre}fps=${fps},scale=min(${maxWidth}\\,iw):-2:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=${colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle[gif]`
+    const filter = [...graph, gifChain].join(';')
     return [...common, '-filter_complex', filter, '-map', '[gif]', '-loop', '0', outputPath]
   }
 

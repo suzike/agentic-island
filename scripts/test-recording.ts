@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildRecordingFfmpegArgs, recordingExportDurationMs, recordingExportSubtitleSegments, recordingHasEdits } from '../src/main/recording-export.ts'
-import { formatRecordingTime, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
+import { clampRecordingBarPosition, formatRecordingTime, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
 } from '../src/renderer/src/logic/recording.ts'
 import { recordingSourceLabel, recordingWindowHandle, sameRecordingWindowSource } from '../src/shared/recording-source.ts'
 import type { RecordingExportRequest } from '../src/shared/protocol.ts'
@@ -126,8 +126,13 @@ const editedRequest: RecordingExportRequest = {
 }
 const edited = buildRecordingFfmpegArgs('in.webm', 'out.mp4', editedRequest)
 const editedFilter = edited[edited.indexOf('-filter_complex') + 1]
-assert.match(editedFilter, /select=.*between/, '多片段视频使用时间选择滤镜')
-assert.match(editedFilter, /aselect=.*between/, '多片段音轨与视频保持同一选择范围')
+// 分段裁剪用 trim+concat（段内原始时间轴保留），不再用 select + setpts=N/帧率 重排：
+// 后者按"第 N 帧 = N/帧率"铺时间轴，一旦标称帧率与实际帧密度不符，整段视频会加速/缩短。
+assert.match(editedFilter, /\[0:v\]trim=start=.*?end=.*?setpts=PTS-STARTPTS\[v0\]/, '多片段视频按时间 trim 并归零时间轴')
+assert.match(editedFilter, /\[0:a\]atrim=start=.*?end=.*?asetpts=PTS-STARTPTS\[a0\]/, '多片段音轨与视频使用同一时间范围')
+assert.match(editedFilter, /concat=n=2:v=1:a=0\[vcut\]/, '多片段视频拼接成连续时间轴')
+assert.match(editedFilter, /concat=n=2:v=0:a=1\[acut\]/, '多片段音轨拼接成连续时间轴')
+assert.ok(!/setpts=N\//.test(editedFilter), '不得再按帧序号重排时间轴（VFR 源会被压缩）')
 assert.ok(editedFilter.includes('atempo=1.250') && editedFilter.includes('crop=') && editedFilter.includes('transpose=1'), '导出应用调速、裁切和旋转')
 assert.ok(editedFilter.includes('eq=') && editedFilter.includes('hqdn3d=') && editedFilter.includes('unsharp='), '导出应用调色、降噪和锐化')
 assert.ok(editedFilter.includes('afade=') && editedFilter.includes('volume=0.800'), '导出应用音量和音频淡入淡出')
@@ -135,6 +140,14 @@ assert.equal(recordingExportDurationMs(editedRequest), 4_000, '多片段成片�
 assert.equal(recordingExportDurationMs({ ...editedRequest, edit: { ...editedRequest.edit, speed: 1, segments: [{ id: 'a', startMs: 0, endMs: 5_000 }, { id: 'b', startMs: 4_000, endMs: 8_000 }] } }), 8_000, '重叠片段按时间并集计算成片时长')
 assert.equal(recordingHasEdits(editedRequest), true, '编辑后的录制不能走原始文件直写旁路')
 assert.equal(recordingHasEdits({ ...base, edit: { segments: [{ id: 'full', startMs: 0, endMs: 10_000 }], speed: 1, contrast: 1, saturation: 1, gamma: 1, audioVolume: 1 } }), false, '完整单片段和默认参数仍可原始直写')
+// 全长单片段等于"没剪"：不得走分段裁剪，且 MP4 必须显式归一化帧率 ——
+// 录制源是 MediaRecorder 的 VFR WebM（实测容器标称 1000fps），不归一化时封装器会按
+// 该标称值铺帧，60 秒输入被写成 60002 帧（1000fps、41 倍重复帧、文件暴涨、播放异常）。
+const fullClip = buildRecordingFfmpegArgs('in.webm', 'out.mp4', { ...base, durationMs: 10_000, edit: { segments: [{ id: 'full', startMs: 0, endMs: 10_000, enabled: true, label: '片段 1' }] } }).join(' ')
+assert.ok(!/trim=/.test(fullClip), '全长单片段不应触发分段裁剪')
+assert.match(fullClip, /fps=30/, 'MP4 输出显式归一化帧率（否则 VFR 源会被按容器标称帧率铺帧）')
+const webmFull = buildRecordingFfmpegArgs('in.webm', 'out.webm', { ...base, format: 'webm', durationMs: 10_000, fps: 30, outputFps: 30, edit: { segments: [{ id: 'full', startMs: 0, endMs: 10_000, enabled: true }] } }).join(' ')
+assert.ok(!/fps=30/.test(webmFull), 'WebM 原生支持 VFR，帧率与源一致时不加帧率滤镜')
 const muted = buildRecordingFfmpegArgs('in.webm', 'out.webm', { ...editedRequest, format: 'webm', edit: { ...editedRequest.edit, muteAudio: true } })
 assert.ok(muted.includes('-an') && !muted.includes('[aout]'), '静音导出移除音轨')
 
@@ -148,7 +161,8 @@ assert.equal(recordingHasEdits({ ...base, format: 'webm', outputWidth: 1280, out
 
 const audio = buildRecordingFfmpegArgs('in.webm', 'out.mp3', { ...editedRequest, format: 'mp3', quality: 'near-lossless' })
 assert.ok(audio.includes('-vn') && audio.includes('libmp3lame') && audio.includes('320k'), 'MP3 单独导出使用高质量音频编码')
-assert.ok(audio.some((item) => item.includes('aselect=')) && audio.some((item) => item.includes('atempo=1.250')), 'MP3 沿用片段选择和速度设置')
+assert.ok(audio.some((item) => item.includes('atrim=')) && audio.some((item) => item.includes('atempo=1.250')), 'MP3 沿用片段裁剪和速度设置')
+assert.ok(!audio.some((item) => item.includes('[0:v]')), 'MP3 不应为音轨之外的画面建滤镜图')
 
 const subtitleSegments = recordingExportSubtitleSegments({
   ...editedRequest,
@@ -183,5 +197,14 @@ assert.deepEqual(subtitleSegments.map((item) => [item.startMs, item.endMs, item.
   assert.ok(/applyPreviewMs\(current\)/.test(timeUpdate) && !/set[A-Z]/.test(timeUpdate), '播放头：timeupdate 走 DOM 直写而非 setState')
   assert.ok((src.match(/previewEls\.current/g) || []).length >= 4, '播放头：三条消费点（主/片段/标签）均挂 ref')
 }
+
+// 悬浮控制条的夹取：录制时控制条悬在被录屏幕上方，拖到边界外会抓不回来
+const bar = { width: 560, height: 64 }
+const viewport = { width: 2560, height: 1440 }
+assert.deepEqual(clampRecordingBarPosition(-500, -300, bar, viewport), { x: 8, y: 8 }, '拖出左上角时夹回可视区')
+assert.deepEqual(clampRecordingBarPosition(9999, 9999, bar, viewport), { x: 2560 - 560 - 8, y: 1440 - 64 - 8 }, '拖出右下角时夹回可视区')
+assert.deepEqual(clampRecordingBarPosition(600, 400, bar, viewport), { x: 600, y: 400 }, '可视区内的位置原样保留')
+assert.deepEqual(clampRecordingBarPosition(Number.NaN, 0, bar, viewport), { x: 8, y: 8 }, '非法坐标退回边距内')
+assert.deepEqual(clampRecordingBarPosition(0, 0, { width: 3000, height: 2000 }, viewport), { x: 8, y: 8 }, '控制条比视口还大时仍保持在左上角边距')
 
 console.log('recording tests passed')

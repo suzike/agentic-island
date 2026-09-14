@@ -14,8 +14,10 @@ const port = 9337
 const now = Date.now()
 const day = 86_400_000
 const demoState = {
-  theme: 'custom-1783443856012',
-  // 用户自定义主题「林南橘」（夜幕紫玻璃 × 蜜橘暖光），截图统一以此主题采集
+  // 截图统一用浅色预设「冰川控制中心」（冷蓝浅色玻璃）采集：
+  // README 是项目门面，浅色更接近日常桌面/文档阅读环境；深色主题仍在应用内可选。
+  // 自定义主题一并放进演示数据，让“设置 › 主题”那张截图能看到自定义项。
+  theme: 'control-center',
   customThemes: [{ key: 'custom-1783443856012', label: '林南橘', desc: '自定义主题', dot: 'oklch(0.78 0.14 75)', th: '75', th2: '265', ths: '262', cs: '1.06', css: '1.5', pl: '0.68' }],
   islandWidth: 760,
   settings: {
@@ -278,18 +280,18 @@ try {
   }
 
   if (captureOnly === 'terminal') {
-    await capture('终端', 'terminal-v0612.png')
+    await capture('终端', 'terminal-v0613.png')
   } else {
-    await capture('问答', 'ask-v0612.png')
+    await capture('问答', 'ask-v0613.png')
   }
   if (!captureOnly) {
-    await capture('快捷', 'shortcuts-v0612.png')
-    await capture('待办', 'todos-v0612.png')
-    await capture('灵感便签', 'notes-v0612.png')
-    await capture('资讯', 'news-v0612.png')
-    await capture('复盘', 'review-v0612.png')
-    await capture('设置', 'settings-v0612.png')
-    await capture('终端', 'terminal-v0612.png')
+    await capture('快捷', 'shortcuts-v0613.png')
+    await capture('待办', 'todos-v0613.png')
+    await capture('灵感便签', 'notes-v0613.png')
+    await capture('资讯', 'news-v0613.png')
+    await capture('复盘', 'review-v0613.png')
+    await capture('设置', 'settings-v0613.png')
+    await capture('终端', 'terminal-v0613.png')
 
     await evaluate(`(() => {
       const button = [...document.querySelectorAll('[title]')].find((item) => item.title?.includes('录屏工坊'))
@@ -308,8 +310,8 @@ try {
       format: 'png', fromSurface: true, captureBeyondViewport: false,
       clip: { ...recordingRect, scale: 1 }
     })
-    await writeFile(join(outputDir, 'recording-v0612.png'), Buffer.from(recordingShot.data, 'base64'))
-    process.stdout.write('captured recording-v0612.png\n')
+    await writeFile(join(outputDir, 'recording-v0613.png'), Buffer.from(recordingShot.data, 'base64'))
+    process.stdout.write('captured recording-v0613.png\n')
   }
 } finally {
   try {

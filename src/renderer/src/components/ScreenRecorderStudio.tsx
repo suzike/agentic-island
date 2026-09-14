@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
-import { Aperture, AppWindow, Bot, Camera, Check, CircleStop, Clock3, Copy, Crop, Download, Eye, EyeOff, FileText, Film, FlipHorizontal2, FlipVertical2, FolderKanban, Gauge, Image as ImageIcon, Layers, LayoutGrid, List, ListChecks, Lock, Magnet, Maximize2, Mic, MicOff, Minimize2, Monitor, MousePointer2, Network, Pause, Play, Plus, Redo2, RefreshCw, RotateCw, Save, Scissors, Search, Shield, SlidersHorizontal, Sparkles, Split, Square, Star, Tag, Timer, Trash2, Type, Undo2, Unlock, Upload, UserRound, Video, Volume2, VolumeX, WandSparkles, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
+import { Aperture, AppWindow, Bot, Camera, Check, CircleStop, Clock3, Copy, Crop, Download, Eye, EyeOff, FileText, Film, FlipHorizontal2, FlipVertical2, FolderKanban, Gauge, GripVertical, Image as ImageIcon, Layers, LayoutGrid, List, ListChecks, Lock, Magnet, Maximize2, Mic, MicOff, Minimize2, Monitor, MousePointer2, Network, Pause, Play, Plus, Redo2, RefreshCw, RotateCw, Save, Scissors, Search, Shield, SlidersHorizontal, Sparkles, Split, Square, Star, Tag, Timer, Trash2, Type, Undo2, Unlock, Upload, UserRound, Video, Volume2, VolumeX, WandSparkles, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
 import type { LlmRequestConfig, RecordingAnimeModel, RecordingEditSegment, RecordingEditSettings, RecordingExportFormat, RecordingExportProgress, RecordingExportQuality, RecordingProjectDocument, RecordingProjectSaveInput, RecordingProjectSummary, RecordingSessionManifest, RecordingSource, RecordingTranscriptSegment } from '../../../shared/protocol'
 import { recordingSourceLabel } from '../../../shared/recording-source'
 import { island } from '../bridge'
@@ -10,7 +10,7 @@ import { RecordingNeuralStyle } from '../logic/recording-neural-style'
 import type { NeuralStyleStatus } from '../logic/recording-neural-style'
 import { deleteRecordingAvatar, loadRecordingAvatar, saveRecordingAvatar } from '../logic/recording-avatar'
 import { formatBytes } from '../logic/screenshot'
-import { formatRecordingTime, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
+import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
 import type { RecordingAnimePalette, RecordingAspect, RecordingMotion, RecordingResolution } from '../logic/recording'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
@@ -174,6 +174,12 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [loadingSources, setLoadingSources] = useState(false)
   const [status, setStatus] = useState<RecorderStatus>('idle')
   const [compact, setCompact] = useState(false)
+  // 悬浮录制控制条的位置：null = 默认（底部居中）。录制时它悬在被录屏幕上方，
+  // 不给拖动就只能一直挡画面 —— 因此允许拖到任意角落，并夹在可视区内。
+  const [controlBarPosition, setControlBarPosition] = useState<{ x: number; y: number } | null>(null)
+  const controlBarRef = useRef<HTMLDivElement | null>(null)
+  const controlBarDragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null)
+  const [controlBarDragging, setControlBarDragging] = useState(false)
   const [startupMessage, setStartupMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [panel, setPanel] = useState<PanelTab>('capture')
@@ -1698,6 +1704,35 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
         ? `${cameraEffect === 'anime' ? '实时动漫渲染' : cameraEffect === 'cartoon' ? '实时卡通渲染' : '摄像头画中画'}已就绪`
         : '启动时检查摄像头权限'
   const paused = status === 'paused'
+  /** 拖动控制条：从非交互区域按下即开始，松手前持续跟随指针，四边夹在可视区内。 */
+  const onControlBarPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const target = event.target as HTMLElement
+    if (target.closest('button, [role="switch"], input, a, [data-no-drag]')) return
+    const node = controlBarRef.current
+    if (!node) return
+    const rect = node.getBoundingClientRect()
+    controlBarDragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top }
+    setControlBarDragging(true)
+    try { node.setPointerCapture(event.pointerId) } catch { /* 捕获失败时仍可跟随指针移动 */ }
+  }
+  const onControlBarPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const drag = controlBarDragRef.current
+    const node = controlBarRef.current
+    if (!drag || !node || drag.pointerId !== event.pointerId) return
+    const rect = node.getBoundingClientRect()
+    setControlBarPosition(clampRecordingBarPosition(
+      event.clientX - drag.offsetX,
+      event.clientY - drag.offsetY,
+      { width: rect.width, height: rect.height },
+      { width: window.innerWidth, height: window.innerHeight }
+    ))
+  }
+  const onControlBarPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!controlBarDragRef.current) return
+    controlBarDragRef.current = null
+    setControlBarDragging(false)
+    try { controlBarRef.current?.releasePointerCapture(event.pointerId) } catch { /* 已释放 */ }
+  }
   const compactOverlay = compact && (status === 'recording' || status === 'paused') ? createPortal(
       <div data-recording-compact style={{ position: 'fixed', inset: 0, zIndex: 216, pointerEvents: 'none' }}>
         <motion.div
@@ -1718,19 +1753,30 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
         <motion.div
           data-solid
           data-recording-control
+          ref={controlBarRef}
           variants={overlayPop}
           initial="initial"
           animate="animate"
           onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={onControlBarPointerDown}
+          onPointerMove={onControlBarPointerMove}
+          onPointerUp={onControlBarPointerUp}
+          onPointerCancel={onControlBarPointerUp}
           onDoubleClick={() => { setCompact(false); island.setIgnoreMouse(false) }}
+          title="拖动可移动控制条 · 双击展开录屏工坊"
           style={{
-            position: 'absolute', left: '50%', bottom: 26, transform: 'translateX(-50%)',
+            position: 'absolute',
+            ...(controlBarPosition
+              ? { left: controlBarPosition.x, top: controlBarPosition.y }
+              : { left: '50%', bottom: 26, transform: 'translateX(-50%)' }),
             width: 'min(560px, calc(100vw - 32px))', minHeight: 64, pointerEvents: 'auto',
-            display: 'flex', alignItems: 'center', gap: 11, padding: '9px 11px 9px 14px',
+            display: 'flex', alignItems: 'center', gap: 11, padding: '9px 11px 9px 10px',
+            cursor: controlBarDragging ? 'grabbing' : 'grab',
             ...surface.overlay(), borderRadius: R.overlay, border: `0.5px solid ${semBg(paused ? sem.warn : sem.danger, 0.52)}`,
             boxShadow: `0 18px 55px rgba(0,0,0,.46), 0 0 28px ${semBg(paused ? sem.warn : sem.danger, 0.12)}`
           }}
         >
+          <span style={{ flex: 'none', display: 'inline-flex', color: ink(3), marginLeft: 2 }} title="按住拖动"><GripVertical size={13} strokeWidth={2} /></span>
           <motion.span
             animate={paused ? { opacity: 1, scale: 1 } : { opacity: [1, 0.45, 1], scale: [1, 1.18, 1] }}
             transition={{ duration: 1.25, repeat: Infinity, ease: 'easeInOut' }}
@@ -2078,7 +2124,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                     <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...text.faint(), width: 52 }}>镜像人物</span><Switch on={cameraMirror} onChange={setCameraMirror} /></div>
                     <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...text.faint(), width: 52 }}>人物边框</span><Segmented value={cameraBorder} onChange={setCameraBorder} style={{ flex: 1 }} options={[{ key: 'light', label: '亮边' }, { key: 'accent', label: '主题色' }, { key: 'none', label: '无' }]} /></div>
                     <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...text.faint(), width: 52 }}>人物阴影</span><Switch on={cameraShadow} onChange={setCameraShadow} /></div>
-                    <div style={controlRow}><span style={{ ...text.faint(), width: 48 }}>画面大小</span><Slider min={0.12} max={0.34} step={0.02} value={cameraSize} onChange={setCameraSize} style={{ flex: 1 }} /><span style={text.num(9.5)}>{Math.round(cameraSize * 100)}%</span></div>
+                    <div style={controlRow}><span style={{ ...text.faint(), width: 48 }}>画面大小</span><Slider min={0.04} max={0.34} step={0.01} value={cameraSize} onChange={setCameraSize} style={{ flex: 1 }} /><span style={text.num(9.5)}>{Math.round(cameraSize * 100)}%</span></div>
                     <div style={controlRow}><span style={{ ...text.faint(), width: 48 }}>人物透明</span><Slider min={0.35} max={1} step={0.05} value={cameraOpacity} onChange={setCameraOpacity} style={{ flex: 1 }} /><span style={text.num(9.5)}>{Math.round(cameraOpacity * 100)}%</span></div>
                     <div style={controlRow}><span style={{ ...text.faint(), width: 48 }}>边缘距离</span><Slider min={0.006} max={0.08} step={0.004} value={cameraMargin} onChange={setCameraMargin} style={{ flex: 1 }} /><span style={text.num(9.5)}>{Math.round(cameraMargin * 100)}%</span></div>
                   </>}

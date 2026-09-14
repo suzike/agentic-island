@@ -520,3 +520,23 @@ export function writePreviewPosition(targets: PreviewPositionTargets, ms: number
   if (targets.label) targets.label.textContent = formatRecordingTime(ms)
   return pct
 }
+
+/**
+ * 把悬浮录制控制条夹在可视区内（四边各留 margin）。
+ * 控制条悬在被录屏幕上方，不能拖动就只能一直挡着画面；夹取保证拖出边界时仍抓得住，
+ * 也保证窗口尺寸/显示器变化后它不会留在可视区之外。
+ */
+export function clampRecordingBarPosition(
+  x: number,
+  y: number,
+  bar: { width: number; height: number },
+  viewport: { width: number; height: number },
+  margin = 8
+): { x: number; y: number } {
+  const maxX = Math.max(margin, viewport.width - bar.width - margin)
+  const maxY = Math.max(margin, viewport.height - bar.height - margin)
+  return {
+    x: Math.min(Math.max(margin, Number.isFinite(x) ? x : margin), maxX),
+    y: Math.min(Math.max(margin, Number.isFinite(y) ? y : margin), maxY)
+  }
+}

@@ -107,5 +107,6 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 
 - 回复用简体中文；每轮改动跑 `typecheck + build` + 相关 test 脚本；安全分类器不可用导致无法编译时，人工核对并**如实告知未编译**。
 - 用户显式要求才做 git 操作。改动追求最小 diff，匹配现有内联样式/OKLCH 写法。
+- **`npm run verify:package` 与真实安装**：安装器走的是 NSIS「先卸载既有版本」的升级流程，且会沿用上次记录的安装目录，因此**隔离验证会把本机真实安装一起删掉**（2026-09-14 实测踩过）。脚本现在检测到真实安装时**跳过 NSIS 安装/卸载**，只验证 unpacked 构建（安装/卸载由 CI 干净 runner 覆盖）；另外验证实例必须用 `taskkill /T /F` 结束整棵进程树，残留的 Electron 子进程会让后续 NSIS 安装静默中止。
 - **每次发版必须同步更新 README 与 CHANGELOG**：版本徽章、更新概览节、功能矩阵、离线测试数量、安装包文件名，并用 `npm run docs:capture` 重建真实截图（输出名随版本演进，如 `*-v067.png`，README 引用同步切换）。发布前跑一遍 capture 确认截图非空、版本号正确。
 - 长期记忆（进度流水、根因复盘）在 auto-memory 的 `m1-status.md`，比本文件更细。
