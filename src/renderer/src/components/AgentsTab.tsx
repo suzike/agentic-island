@@ -126,7 +126,7 @@ function AgentCard({
   const highlight = showApproval || isWaiting
   // 状态胶囊配色
   const chipBg = highlight ? semBg(sem.warn, 0.2) : isDone ? fill(1) : semBg(accent(), 0.16)
-  const chipFg = highlight ? 'oklch(0.88 0.11 75)' : isDone ? ink(3) : accent(0.85)
+  const chipFg = highlight ? 'oklch(0.88 0.11 75)' : isDone ? ink(3) : accentText(0.85)
   const elapsed = fmtElapsed(a.startedAt)
 
   return (
@@ -219,7 +219,7 @@ function AgentCard({
                 padding: '2px 7px',
                 borderRadius: R.sm,
                 background: risk.level === 'danger' ? semBg(sem.danger, 0.2) : risk.level === 'safe' ? semBg(accent(), 0.18) : fill(3),
-                color: risk.level === 'danger' ? 'oklch(0.82 0.16 25)' : risk.level === 'safe' ? accent(0.85) : ink(2),
+                color: risk.level === 'danger' ? 'oklch(0.82 0.16 25)' : risk.level === 'safe' ? accentText(0.85) : ink(2),
                 fontSize: 10,
                 fontWeight: 700
               }}

@@ -10,7 +10,7 @@ import { Check, SkipForward, Undo2 } from 'lucide-react'
 import type { TodoItem, WorkbenchProject } from '../types'
 import type { CalendarEvent } from '../../../shared/protocol'
 import { Markdown } from './Markdown'
-import { WEEK, PRIO, pad, fmtHM, dayStart, dueLabel, dailyDoneSeries, groupTodos, buildExecutionPlan, projectRollups } from '../logic/todo'
+import { WEEK, PRIO, prioOf, pad, fmtHM, dayStart, dueLabel, dailyDoneSeries, groupTodos, buildExecutionPlan, projectRollups } from '../logic/todo'
 import { stripFence, parseJsonArray, normPrio, parseDue } from '../logic/todoAi'
 import { ProjectContextBar } from './ProjectContextBar'
 import { Button, Chip, EmptyState, Group, IconButton, Segmented } from '../ui/components'
@@ -341,7 +341,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
     if (tool && tool !== 'plan' && tool !== 'clarify') void runAi(tool, '')
   }
   const briefTasks = (list: TodoItem[]): string =>
-    list.slice(0, 30).map((t) => `- ${t.text}${t.due ? `（截止 ${dueLabel(t.due, now).text}）` : ''}${(t.priority || 3) < 3 ? `【${PRIO[t.priority as 1 | 2].label}】` : ''}`).join('\n') || '（无）'
+    list.slice(0, 30).map((t) => `- ${t.text}${t.due ? `（截止 ${dueLabel(t.due, now).text}）` : ''}${t.priority === 1 || t.priority === 2 ? `【${prioOf(t.priority).label}】` : ''}`).join('\n') || '（无）'
 
   const runAi = async (tool: NonNullable<typeof aiTool>, input: string): Promise<void> => {
     if (needLLM()) return
@@ -378,7 +378,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
         if (!noDue.length) { setAiPanel({ title: '智能排期', body: '当前没有"未安排时间"的任务。' }); return }
         const r = await p.onAI(
           '你是日程规划师。为下列无期限任务安排到今天/明天/后天的合理时段（工作时间 9-18 点，高优先在前）。只回 JSON 数组 [{"i":序号从0开始,"due":"明天14:00"}]。',
-          noDue.map((t, i) => `${i}. ${t.text}${(t.priority || 3) < 3 ? `【${PRIO[t.priority as 1 | 2].label}】` : ''}`).join('\n')
+          noDue.map((t, i) => `${i}. ${t.text}${t.priority === 1 || t.priority === 2 ? `【${prioOf(t.priority).label}】` : ''}`).join('\n')
         )
         if (!r.ok) throw new Error(r.error)
         const arr = parseJsonArray(r.text || '')
@@ -463,10 +463,10 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {overdue > 0 && <span style={statPill(sem.warn)}><Ico.alarm size={10} strokeWidth={2} />到时 {overdue}</span>}
             <span style={statPill()}>今日 {todayCnt + overdue}</span>
-            <span style={statPill(accent())}><Check size={10} strokeWidth={2.5} />{doneToday}</span>
+            <span style={statPill(accentText())}><Check size={10} strokeWidth={2.5} />{doneToday}</span>
             {todayEstimate > 0 && <span title="今日任务预估工时合计" style={statPill(sem.run)}><Ico.timer size={10} strokeWidth={2} />{todayEstimate >= 60 ? `${(todayEstimate / 60).toFixed(1)}h` : `${todayEstimate}m`}</span>}
             {totalSpent > 0 && <span title="累计专注投入" style={statPill(sem.focus)}><Ico.focus size={10} strokeWidth={2} />{totalSpent >= 60 ? `${(totalSpent / 60).toFixed(1)}h` : `${totalSpent}m`}</span>}
-            <span style={{ ...statPill(), color: ink(3) }}>全部 {active.length}</span>
+            <span style={{ ...statPill(), color: ink(2) }}>全部 {active.length}</span>
           </div>
         </div>
         {/* 近 7 天完成趋势迷你柱状 */}
@@ -544,7 +544,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                     </div>
                     {item.acceptance && <div style={{ marginTop: 5, ...txt.faint(), lineHeight: 1.45 }}>验收：{item.acceptance}</div>}
                   </div>
-                  <span style={{ color: PRIO[(item.priority || 3) as 1 | 2 | 3].color, fontSize: 9.5, fontWeight: 700 }}>P{item.priority || 3}</span>
+                  <span style={{ color: prioOf(item.priority).color, fontSize: 9.5, fontWeight: 700 }}>P{item.priority === 1 || item.priority === 2 ? item.priority : 3}</span>
                 </div>
               ))}
               <Button variant="primary" onClick={adoptPlan} style={{ alignSelf: 'flex-end', marginTop: 2 }}>采纳 {aiPlanItems.length} 项</Button>
@@ -567,7 +567,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
             return (
               <div key={m.id} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: R.md, background: ongoing ? semBg(sem.warn, 0.14) : fill(1), border: `0.5px solid ${ongoing ? semBg(sem.warn, 0.45) : hairline(0.06)}` }}>
                 <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 44 }}>
-                  <span style={{ color: ongoing ? sem.warn : accent(), fontSize: 9.5, fontWeight: 700 }}>{meetDay(m.start)}</span>
+                  <span style={{ color: ongoing ? sem.warn : accentText(), fontSize: 9.5, fontWeight: 700 }}>{meetDay(m.start)}</span>
                   <span style={{ color: ink(1), fontSize: FS.small, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{m.allDay ? '全天' : fmtHM(m.start)}</span>
                 </div>
                 <div style={{ width: 2.5, alignSelf: 'stretch', borderRadius: R.pill, background: ongoing ? sem.warn : accent(0.6, 0.5), flex: 'none' }} />
@@ -620,7 +620,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
             ))}
           </div>
         )}
-        {msg && <div style={{ marginTop: 7, color: msg.startsWith('✓') ? accent() : ink(2), fontSize: 10.5 }}>{msg}</div>}
+        {msg && <div style={{ marginTop: 7, color: msg.startsWith('✓') ? accentText() : ink(2), fontSize: 10.5 }}>{msg}</div>}
       </div>
 
       {/* 视图切换 + 搜索 */}
@@ -706,7 +706,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
             {executionPlan.overflow.length > 0 && <span style={txt.faint()}>容量外 {executionPlan.overflow.length}</span>}
           </div>
           {executionPlan.planned.map((t, i) => {
-            const pr = PRIO[(t.priority || 3) as 1 | 2 | 3]
+            const pr = prioOf(t.priority)
             const isDoing = (t.status || 'todo') === 'doing'
             return (
               <div key={t.id} className="ai-card" style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr) auto', gap: 8, alignItems: 'center', padding: '9px 10px', borderRadius: R.md, background: isDoing ? semBg(sem.warn, 0.13) : fill(1), border: `0.5px solid ${isDoing ? semBg(sem.warn, 0.45) : hairline(0.06)}`, borderLeft: `3px solid ${pr.ring}` }}>
@@ -839,7 +839,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                   {!colCollapse[key] && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
                     {items.map((t) => {
-                      const pr = PRIO[(t.priority || 3) as 1 | 2 | 3]
+                      const pr = prioOf(t.priority)
                       const subs = t.subs || []
                       const sd = subs.filter((s) => s.done).length
                       const dl = t.due ? dueLabel(t.due, now) : null
@@ -907,7 +907,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
         <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div className="hv" onClick={() => setCollapsed((c) => ({ ...c, [g.key]: !c[g.key] }))} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', padding: '0 3px' }}>
             <span style={{ ...txt.overline(), color: g.key === 'over' ? sem.warn : ink(3) }}>
-              {g.label} <span style={{ opacity: 0.65 }}>{g.items.length}</span>
+              {g.label} <span>{g.items.length}</span>
             </span>
             {g.key === 'over' && <span style={{ width: 5, height: 5, borderRadius: R.pill, background: sem.warn, animation: 'ai-dotpulse 1.6s ease-in-out infinite' }} />}
             <span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} />
@@ -916,7 +916,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
           {!collapsed[g.key] && (
           <Group>
           {g.items.map((t) => {
-            const pr = PRIO[(t.priority || 3) as 1 | 2 | 3]
+            const pr = prioOf(t.priority)
             const isOpen = openId === t.id
             const subs = t.subs || []
             const subsDone = subs.filter((s) => s.done).length
@@ -987,7 +987,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                     {!t.done && <span className="hv" title="编辑（文字/时间）" onClick={() => startEdit(t)} style={{ cursor: 'pointer', color: ink(2), display: 'flex' }}><Ico.edit size={12} strokeWidth={1.75} /></span>}
                     {!t.done && <span className="hv" title="优先级" onClick={() => p.onCyclePriority(t.id)} style={{ cursor: 'pointer', color: pr.color, display: 'flex' }}><Ico.flag size={12} strokeWidth={1.75} /></span>}
                     {!t.done && <span className="hv" title="顺延到明天" onClick={() => p.onTomorrow(t.id)} style={{ cursor: 'pointer', color: ink(2), display: 'flex' }}><SkipForward size={12} strokeWidth={1.75} /></span>}
-                    {!t.done && <span className="hv" title="置顶" onClick={() => p.onPin(t.id)} style={{ cursor: 'pointer', color: t.pinned ? accent() : ink(3), display: 'flex' }}><Ico.pin size={12} strokeWidth={1.75} /></span>}
+                    {!t.done && <span className="hv" title="置顶" onClick={() => p.onPin(t.id)} style={{ cursor: 'pointer', color: t.pinned ? accentText() : ink(3), display: 'flex' }}><Ico.pin size={12} strokeWidth={1.75} /></span>}
                     <span className="hv" title="删除" onClick={() => p.onDelete(t.id)} style={{ cursor: 'pointer', color: sem.danger, display: 'flex' }}><Ico.del size={12} strokeWidth={1.75} /></span>
                   </div>
                   <span className="hv" onClick={() => { setOpenId(isOpen ? null : t.id); setSubDraft('') }} title="详情（子任务/备注/专注）" style={{ flex: 'none', cursor: 'pointer', color: ink(3), display: 'flex', marginTop: 4, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}><Ico.expand size={11} strokeWidth={2} /></span>

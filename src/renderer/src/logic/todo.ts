@@ -15,6 +15,13 @@ export const PRIO: Record<1 | 2 | 3, { label: string; color: string; ring: strin
   3: { label: '普通', color: 'oklch(0.7 0.02 var(--th) / .5)', ring: 'oklch(0.6 calc(0.1 * var(--cs, 1)) var(--th) / .6)' }
 }
 
+/** 安全取优先级视觉令牌：任何越界/历史/被手改的值都退回"普通"。
+    直接 PRIO[t.priority] 在未知值（如字符串 "high"、4）上得到 undefined，读 .ring 立即抛错；
+    渲染期异常会让 React 卸载整棵树（整个岛空白），不只是坏掉那一条待办。 */
+export function prioOf(priority: unknown): (typeof PRIO)[1 | 2 | 3] {
+  return priority === 1 || priority === 2 || priority === 3 ? PRIO[priority] : PRIO[3]
+}
+
 /** 相对时间标签 + 是否"热"（临期/逾期高亮） */
 export function dueLabel(due: number, now: number): { text: string; hot: boolean } {
   if (due <= now) return { text: '已到时', hot: true }

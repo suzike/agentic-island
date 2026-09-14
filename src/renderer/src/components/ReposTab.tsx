@@ -191,7 +191,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {langDist.map((l) => (
               <span key={l.lang} className="hv" onClick={() => view === 'trending' && setLangFilter(langFilter === l.lang ? '' : l.lang)}
-                style={{ display: 'flex', alignItems: 'center', gap: 3.5, color: langFilter === l.lang ? accent(0.88) : ink(3), fontSize: 9.5, cursor: view === 'trending' ? 'pointer' : 'default', fontWeight: langFilter === l.lang ? 700 : 400 }}>
+                style={{ display: 'flex', alignItems: 'center', gap: 3.5, color: langFilter === l.lang ? accentText(0.88) : ink(3), fontSize: 9.5, cursor: view === 'trending' ? 'pointer' : 'default', fontWeight: langFilter === l.lang ? 700 : 400 }}>
                 <span style={{ width: 7, height: 7, borderRadius: R.pill, background: langColor(l.lang) }} />{l.lang}
               </span>
             ))}

@@ -3,7 +3,7 @@
 //  卡片=填充制无描边；分组列表=inset grouped + hairline 分隔行；按压=透明度下沉。
 import React from 'react'
 import { motion } from 'framer-motion'
-import { accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from './tokens'
+import { accent, accentText, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from './tokens'
 import { pressable, pressableGentle, springSoft } from './motion'
 import type { LucideIcon } from './icons'
 
@@ -32,7 +32,8 @@ export function Button(props: {
   }
   const fg: Record<ButtonVariant, string> = {
     primary: gradient.onPrimary(),
-    tinted: accent(0.9),
+    // 浅底上的浅色强调文字读不清（浅色主题实测 1.8:1），走钳制版
+    tinted: accentText(0.9),
     ghost: ink(1),
     danger: sem.danger,
     warn: sem.warn,
@@ -157,6 +158,10 @@ export function Chip(props: {
 }) {
   const { children, icon: Icon, active, color, onClick, title, style } = props
   const c = color || accent()
+  // 活动态文字用钳制版强调色：浅色主题下 accent() 的明度高于面板，
+  // 叠在 20% 浅底上实测只有 2.0–2.7:1（"全部 1"、"AI 解读" 这类标签读不清）。
+  // 调用方显式传 color 时沿用其值——语义色已在 sem 内部统一钳制，字面色由调用方负责。
+  const labelColor = color || accentText()
   return (
     <motion.button
       {...(onClick ? pressable : {})}
@@ -170,7 +175,7 @@ export function Chip(props: {
         borderRadius: R.pill,
         border: 'none',
         background: active ? semBg(c, 0.2) : fill(2),
-        color: active ? c : ink(2),
+        color: active ? labelColor : ink(2),
         fontSize: FS.small,
         fontWeight: active ? 600 : 500,
         letterSpacing: '-0.004em',
@@ -356,7 +361,7 @@ export function SectionHeader(props: {
         ...style,
       }}
     >
-      {Icon && <Icon size={13} strokeWidth={2} style={{ color: accent(), flex: 'none' }} />}
+      {Icon && <Icon size={13} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />}
       <div style={{ ...text.subtitle(), flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {title}
       </div>
@@ -399,7 +404,7 @@ export function EmptyState(props: {
             display: 'grid',
             placeItems: 'center',
             background: semBg(accent(), 0.12),
-            color: accent(0.85, 0.8),
+            color: accentText(0.85, 0.8),
             marginBottom: 2,
           }}
         >

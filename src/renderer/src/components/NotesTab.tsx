@@ -1130,7 +1130,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
                     <Act icon={Pencil} title={n.locked ? '已锁定：点击解锁' : '编辑'} onClick={() => { if (n.locked) { flash('🔒 便签已锁定，先点 🔒 解锁'); return } startEdit(n) }} color={n.locked ? ink(4) : undefined} />
                     <Act icon={Expand} title="在 Markdown 工作台里打开" onClick={() => p.onOpenStudio(n)} />
                     <Act icon={PictureInPicture2} title="钉到桌面（浮贴）" onClick={() => p.onPinDesktop(n)} />
-                    <Act icon={ClipboardType} title="复制富文本" onClick={() => copyRich(n)} color={accent(0.8, 0.85)} />
+                    <Act icon={ClipboardType} title="复制富文本" onClick={() => copyRich(n)} color={accentText(0.8, 0.85)} />
                     <Act icon={FileCode} title="复制 Markdown 源码" onClick={() => copyMd(n)} />
                     <Act icon={Download} title="导出为 .md 文件" onClick={() => void exportOne(n)} />
                     <Act icon={Copy} title="创建副本" onClick={() => duplicate(n)} />
@@ -1232,7 +1232,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         if (!pool.length) return null
         const n = pool[showIdx % pool.length]; const h = colorOf(n.color)
         return (
-          <motion.div data-solid initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} style={{ position: 'fixed', inset: 0, zIndex: 231, display: 'flex', flexDirection: 'column', background: `radial-gradient(120% 90% at 50% 0%, oklch(0.28 0.06 ${h} / .5), oklch(0.06 0.02 var(--ths)) 70%)`, ...({ '--ink-l': '.96', '--line-l': '.96', '--fill-l': '.96', '--inset-l': '.1', '--accent-text-max-l': '1' } as React.CSSProperties) }}>
+          <motion.div data-solid initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} style={{ position: 'fixed', inset: 0, zIndex: 231, display: 'flex', flexDirection: 'column', background: `radial-gradient(120% 90% at 50% 0%, oklch(0.28 0.06 ${h} / .5), oklch(0.06 0.02 var(--ths)) 70%)`, ...({ '--ink-l': '.96', '--line-l': '.96', '--fill-l': '.96', '--inset-l': '.1', '--accent-text-max-l': '1', '--sem-text-max-l': '1' } as React.CSSProperties) }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px' }}>
               <span style={{ ...text.num(FS.small), color: solidInk(.72) }}>{(showIdx % pool.length) + 1} / {pool.length}</span>
               <Button sm icon={showAuto ? Pause : Play} onClick={() => setShowAuto((v) => !v)} style={showAuto ? { color: sem.calm } : undefined}>{showAuto ? '暂停' : '自动'}</Button>

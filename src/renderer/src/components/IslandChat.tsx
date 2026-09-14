@@ -14,7 +14,7 @@ import { readAttachment, downscaleDataUrl, selectLocalFiles } from '../logic/fil
 import { island } from '../bridge'
 import { Button, Chip, IconButton } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
-import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
+import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, solidInk, SP, surface, text, transition } from '../ui/tokens'
 
 /** 附件类型图标（文件/图像） */
 const AttIcon = ({ t, size = 12 }: { t: string; size?: number }): React.JSX.Element =>
@@ -670,7 +670,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                 {!!m.text && (
                   <div
                     onContextMenu={p.enableQuote ? onAiSelect : undefined}
-                    style={{ padding: '8px 12px', borderRadius: '14px 14px 4px 14px', background: `linear-gradient(180deg, ${accent(0.52)}, ${accent(0.44)})`, color: ink(1), fontSize: FS.small, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', boxShadow: `0 3px 12px -4px ${accent(0.5, 0.35)}, inset 0 1px 0 rgba(255,255,255,0.12)`, userSelect: p.enableQuote ? 'text' : undefined, cursor: p.enableQuote ? 'text' : undefined }}
+                    style={{ padding: '8px 12px', borderRadius: '14px 14px 4px 14px', background: `linear-gradient(180deg, ${accent(0.52)}, ${accent(0.44)})`, color: solidInk(), fontSize: FS.small, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', boxShadow: `0 3px 12px -4px ${accent(0.5, 0.35)}, inset 0 1px 0 rgba(255,255,255,0.12)`, userSelect: p.enableQuote ? 'text' : undefined, cursor: p.enableQuote ? 'text' : undefined }}
                   >
                     {m.text}
                   </div>

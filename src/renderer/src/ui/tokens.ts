@@ -82,18 +82,26 @@ export const ink = (level: 1 | 2 | 3 | 4 = 1): string => {
   return `oklch(var(--ink-l, 0.96) 0.008 var(--th) / ${alpha})`
 }
 
-/** 语义色（跨主题固定色相，与 AGENTS.md 约定一致） */
+/** 语义色（跨主题固定色相）明度经 --sem-text-max-l 钳制。
+    这组明度（l≈0.7–0.8）是按深色面板选的：浅色主题下拿它当文字，实测只有 1.1–1.2:1
+    （"今日 +3 XP"、"88"、"展开" 这类全都糊在浅底上），比任何可读底线都低。
+    钳到 0.40 后与 accentText() 同档（实测 ≈4.5:1）。深色主题该变量为 1，
+    取值与历史完全一致，零回归；浅色主题里描边/浅底填充也一起受益。
+    始终为深底的局部表面（终端预览、放映遮罩、拖拽遮罩）需局部把该变量重置为 1。 */
+const semColor = (lightness: number, chroma: number, hue: number): string =>
+  `oklch(min(${lightness}, var(--sem-text-max-l, 1)) ${chroma} ${hue})`
+
 export const sem = {
   /** 琥珀：警示/待处理 */
-  warn: 'oklch(0.8 0.13 75)',
+  warn: semColor(0.8, 0.13, 75),
   /** 红：危险/删除 */
-  danger: 'oklch(0.7 0.18 25)',
+  danger: semColor(0.7, 0.18, 25),
   /** 紫：专注 */
-  focus: 'oklch(0.78 0.12 275)',
+  focus: semColor(0.78, 0.12, 275),
   /** 绿：安静/完成 */
-  calm: 'oklch(0.78 0.11 150)',
+  calm: semColor(0.78, 0.11, 150),
   /** 蓝：运行中 */
-  run: 'oklch(0.78 0.13 220)',
+  run: semColor(0.78, 0.13, 220),
 } as const
 
 /** 语义色的浅底填充 */

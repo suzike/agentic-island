@@ -380,7 +380,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                 {p.approvalAudit.slice(0, 30).map((entry, i) => (
                   <div key={entry.ts + '-' + i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, minWidth: 0 }}>
                     <span style={{ ...text.mono(10), color: ink(3), flex: 'none' }}>{new Date(entry.ts).toLocaleTimeString('zh-CN', { hour12: false })}</span>
-                    <span style={{ color: entry.scope === 'rule' ? accent(0.85) : ink(2), flex: 'none', fontWeight: 650 }}>{entry.scope === 'rule' ? '规则' : '会话'}</span>
+                    <span style={{ color: entry.scope === 'rule' ? accentText(0.85) : ink(2), flex: 'none', fontWeight: 650 }}>{entry.scope === 'rule' ? '规则' : '会话'}</span>
                     <span title={entry.command} style={{ ...text.mono(10), color: ink(2), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{entry.command}</span>
                   </div>
                 ))}

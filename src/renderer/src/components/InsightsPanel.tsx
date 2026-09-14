@@ -140,10 +140,10 @@ export function InsightsPanel({ todos, activities, pomoDone }: { todos: TodoItem
             })}
             {/* 刻度：0/6/12/18 */}
             {[['0', 60, 14], ['12', 60, 112], ['6', 112, 63], ['18', 12, 63]].map(([t, x, y]) => (
-              <text key={t as string} x={x as number} y={y as number} textAnchor="middle" style={{ fill: ink(3), fontSize: 7 }}>{t}</text>
+              <text key={t as string} x={x as number} y={y as number} textAnchor="middle" style={{ fill: ink(1), fontSize: 7 }}>{t}</text>
             ))}
             <text x="60" y="57" textAnchor="middle" style={{ fill: ink(1), fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{ins.peakHour >= 0 ? `${ins.peakHour}:00` : '—'}</text>
-            <text x="60" y="69" textAnchor="middle" style={{ fill: ink(3), fontSize: 7.5 }}>高效时段</text>
+            <text x="60" y="69" textAnchor="middle" style={{ fill: ink(2), fontSize: 7.5 }}>高效时段</text>
           </svg>
           <span style={{ ...text.faint(), color: ink(2) }}>你在 <b style={{ color: accentText(0.86), fontWeight: 700 }}>{hourBand(ins.peakHour)}</b> 最活跃</span>
         </div>
@@ -157,7 +157,7 @@ export function InsightsPanel({ todos, activities, pomoDone }: { todos: TodoItem
                   <path key={i} d={annular(60, 60, 34, 54, s.a0, s.a1)} style={{ fill: `oklch(0.7 calc(0.14 * var(--cs, 1)) calc(var(--th) + ${s.hue}))` }} />
                 ))}
                 <text x="60" y="57" textAnchor="middle" style={{ fill: ink(1), fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{ins.projects.length}</text>
-                <text x="60" y="69" textAnchor="middle" style={{ fill: ink(3), fontSize: 7.5 }}>个项目</text>
+                <text x="60" y="69" textAnchor="middle" style={{ fill: ink(2), fontSize: 7.5 }}>个项目</text>
               </svg>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', justifyContent: 'center' }}>
                 {donut.slice(0, 4).map((s, i) => (
@@ -178,8 +178,8 @@ export function InsightsPanel({ todos, activities, pomoDone }: { todos: TodoItem
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: ink(2), fontSize: FS.tiny }}>
           <span style={{ fontWeight: 600 }}>7 天趋势</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><LegendDot color={accent(0.78)} />待办</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><LegendDot color={accent(0.5, 0.6)} />会话</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><LegendDot color={accentText(0.78)} />待办</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><LegendDot color={accentText(0.5, 0.6)} />会话</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 46 }}>
           {ins.daily.map((d) => {
@@ -188,14 +188,14 @@ export function InsightsPanel({ todos, activities, pomoDone }: { todos: TodoItem
             const isToday = d.key === ins.daily[ins.daily.length - 1].key
             return (
               <div key={d.key} title={`${d.key} · 待办 ${d.todos} · 会话 ${d.acts}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, height: '100%', justifyContent: 'flex-end' }}>
-                {total > 0 && <span style={{ fontSize: 8, color: ink(3), fontVariantNumeric: 'tabular-nums' }}>{total}</span>}
+                {total > 0 && <span style={{ fontSize: 8, color: ink(1), fontVariantNumeric: 'tabular-nums' }}>{total}</span>}
                 <div style={{ width: '100%', maxWidth: 20, height: `${Math.max(total ? 10 : 3, hPct)}%`, borderRadius: 4, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: total ? undefined : fill(2), opacity: isToday ? 1 : 0.82 }}>
                   {total > 0 && <>
                     <div style={{ height: `${(d.acts / total) * 100}%`, background: accent(0.5, 0.55) }} />
                     <div style={{ height: `${(d.todos / total) * 100}%`, background: gradient.primary() }} />
                   </>}
                 </div>
-                <span style={{ color: isToday ? accent(0.85) : ink(4), fontSize: 8, fontWeight: isToday ? 700 : 400, fontVariantNumeric: 'tabular-nums' }}>{d.key.slice(8)}</span>
+                <span style={{ color: isToday ? accentText(0.85) : ink(1), fontSize: 8, fontWeight: isToday ? 700 : 400, fontVariantNumeric: 'tabular-nums' }}>{d.key.slice(8)}</span>
               </div>
             )
           })}

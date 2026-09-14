@@ -1857,7 +1857,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                 )}
                 {status === 'starting' && (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: ink(2) }}>
-                    <RefreshCw size={28} color={accent()} style={{ animation: 'spin 1s linear infinite' }} />
+                    <RefreshCw size={28} color={accentText()} style={{ animation: 'spin 1s linear infinite' }} />
                     <div style={{ ...text.subtitle(), color: ink(1) }}>{startupMessage || '正在启动录屏…'}</div>
                     <div style={{ ...text.faint(), fontSize: 10.5 }}>连接成功后会自动收起为悬浮控制条</div>
                   </div>
@@ -1913,7 +1913,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                 <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
                   <div style={{ width: 92, flex: 'none', borderRight: `0.5px solid rgba(255,255,255,.08)`, background: '#10141a' }}>
                     <div style={{ height: 25, display: 'flex', alignItems: 'center', padding: '0 8px', color: 'rgba(255,255,255,.38)', fontSize: 8.5 }}>轨道</div>
-                    <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Layers size={12} color={accent()} /><span style={{ flex: 1, color: ink(2), fontSize: 9.5 }}>V1 画面</span><IconButton icon={videoTrackLocked ? Lock : Unlock} title={videoTrackLocked ? '解锁视频轨' : '锁定视频轨'} size={23} onClick={() => setVideoTrackLocked((value) => !value)} /></div>
+                    <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Layers size={12} color={accentText()} /><span style={{ flex: 1, color: ink(2), fontSize: 9.5 }}>V1 画面</span><IconButton icon={videoTrackLocked ? Lock : Unlock} title={videoTrackLocked ? '解锁视频轨' : '锁定视频轨'} size={23} onClick={() => setVideoTrackLocked((value) => !value)} /></div>
                     <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Volume2 size={12} color={sem.calm} /><span style={{ flex: 1, color: ink(2), fontSize: 9.5 }}>A1 音频</span><IconButton icon={editSettings.muteAudio ? VolumeX : Volume2} title={editSettings.muteAudio ? '恢复音频轨' : '静音音频轨'} size={23} disabled={!recordingHasAudio} onClick={() => { rememberEdit(); setEditSettings((current) => ({ ...current, muteAudio: !current.muteAudio })) }} /></div>
                     <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Tag size={12} color={sem.warn} /><span style={{ flex: 1, color: ink(2), fontSize: 9.5 }}>M1 章节</span><IconButton icon={markerTrackLocked ? Lock : Unlock} title={markerTrackLocked ? '解锁章节轨' : '锁定章节轨'} size={23} onClick={() => setMarkerTrackLocked((value) => !value)} /></div>
                   </div>
@@ -2190,7 +2190,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
               <>
                 {!llmReady && <div style={{ padding: '9px 11px', borderRadius: R.md, color: sem.warn, background: semBg(sem.warn, 0.13), fontSize: 10.5, lineHeight: 1.55 }}>请先在设置中配置支持图片输入的模型。</div>}
                 <div style={{ ...surface.card(), padding: '10px 11px', display: 'flex', flexDirection: 'column', gap: 9 }}>
-                  <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(1), fontSize: 11.5, fontWeight: 700 }}><Sparkles size={13} color={accent()} />AI 智能粗剪</span><span style={{ ...text.num(9), color: keyframes.length ? sem.calm : sem.warn }}>{keyframes.length} 帧证据</span></div>
+                  <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(1), fontSize: 11.5, fontWeight: 700 }}><Sparkles size={13} color={accentText()} />AI 智能粗剪</span><span style={{ ...text.num(9), color: keyframes.length ? sem.calm : sem.warn }}>{keyframes.length} 帧证据</span></div>
                   <Segmented value={aiEditMode} onChange={setAiEditMode} options={[{ key: 'conservative', label: '保守整理' }, { key: 'tutorial', label: '教程精简' }, { key: 'dynamic', label: '节奏增强' }]} />
                   <Button variant="primary" icon={WandSparkles} disabled={!llmReady || !!aiBusy || !recordingAvailable || !keyframes.length} onClick={() => void runAIAutoEdit()}>{aiBusy === 'AI 智能粗剪' ? '正在分析并生成时间线' : '生成并应用粗剪方案'}</Button>
                   <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.55 }}>根据关键帧与现有章节生成真实片段、章节、速度和基础画面校正。操作非破坏，可在剪辑页一步撤销；不会把画面推断冒充语音转写。</div>
@@ -2220,7 +2220,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
             {panel === 'project' && (
               <>
                 <div style={{ ...surface.card(), padding: '10px 11px', display: 'flex', flexDirection: 'column', gap: 9 }}>
-                  <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(1), fontSize: 11.5, fontWeight: 700 }}><FolderKanban size={13} color={accent()} />当前工程</span><span style={{ ...text.num(9), color: projectSaveState === 'error' ? sem.danger : projectSaveState === 'saved' ? sem.calm : projectSaveState === 'saving' ? sem.warn : ink(3) }}>{projectSaveState === 'saved' ? '已自动保存' : projectSaveState === 'saving' ? '保存中' : projectSaveState === 'error' ? '保存失败' : '等待素材'}</span></div>
+                  <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(1), fontSize: 11.5, fontWeight: 700 }}><FolderKanban size={13} color={accentText()} />当前工程</span><span style={{ ...text.num(9), color: projectSaveState === 'error' ? sem.danger : projectSaveState === 'saved' ? sem.calm : projectSaveState === 'saving' ? sem.warn : ink(3) }}>{projectSaveState === 'saved' ? '已自动保存' : projectSaveState === 'saving' ? '保存中' : projectSaveState === 'error' ? '保存失败' : '等待素材'}</span></div>
                   {recordingAvailable ? <>
                     <div style={controlRow}><span style={{ ...text.faint(), width: 44 }}>名称</span><Input value={recordingName} onChange={setRecordingName} style={{ flex: 1 }} /></div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
@@ -2265,7 +2265,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                     <div style={{ ...surface.inset(), padding: '8px 10px' }}><div style={labelStyle}>导出片段</div><div style={{ ...text.num(11), marginTop: 4 }}>{formatRecordingTime(trimDuration)}</div></div>
                     <div style={{ ...surface.inset(), padding: '8px 10px' }}><div style={labelStyle}>编码</div><div style={{ ...text.num(11), marginTop: 4 }}>{format === 'gif' ? 'Palette GIF' : format === 'mp4' ? 'H.264 / AAC' : format === 'mp3' ? 'MP3 Audio' : 'VP9 / Opus'}</div></div>
                   </div>
-                  {exporting && <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}><div style={{ ...controlRow }}><Gauge size={13} color={accent()} /><span style={{ color: ink(2), fontSize: 10.5 }}>{exportProgress?.message || '正在本地转码'}</span><span style={{ marginLeft: 'auto', ...text.num(10) }}>{Math.round(progress * 100)}%</span></div><div style={{ height: 5, borderRadius: R.pill, background: surface.inset().background, overflow: 'hidden' }}><div style={{ width: `${progress * 100}%`, height: '100%', background: accent(), transition: 'width .2s ease' }} /></div></div>}
+                  {exporting && <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}><div style={{ ...controlRow }}><Gauge size={13} color={accentText()} /><span style={{ color: ink(2), fontSize: 10.5 }}>{exportProgress?.message || '正在本地转码'}</span><span style={{ marginLeft: 'auto', ...text.num(10) }}>{Math.round(progress * 100)}%</span></div><div style={{ height: 5, borderRadius: R.pill, background: surface.inset().background, overflow: 'hidden' }}><div style={{ width: `${progress * 100}%`, height: '100%', background: accent(), transition: 'width .2s ease' }} /></div></div>}
                   <Button variant="primary" icon={Save} onClick={() => void exportRecording()} disabled={exporting || (format === 'mp3' && !recordingHasAudio) || (exportSubtitleMode === 'embedded' && !transcriptSegments.length)}>{exporting ? '正在导出' : `导出 ${format.toUpperCase()}`}</Button>
                   {exporting && <Button variant="ghost" icon={X} onClick={() => exportProgress && island.cancelRecordingExport(exportProgress.jobId)}>取消转码</Button>}
                   <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.6 }}>{trimDuration < elapsed ? `将按启用片段输出 ${formatRecordingTime(trimDuration)} 成片。` : ''}{format === 'gif' ? 'GIF 使用两阶段调色板与差分抖动，适合短演示。' : format === 'mp3' ? 'MP3 会沿用片段、速度、音量和淡入淡出设置。' : exportQuality === 'lossless' ? '无损归档保留每个视频像素，文件可能大于视觉无损版本。' : '可独立控制分辨率、帧率与可开关字幕轨；小体积适合聊天和文档附件。'}</div>

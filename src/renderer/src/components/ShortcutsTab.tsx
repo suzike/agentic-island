@@ -15,7 +15,7 @@ import { ProjectContextBar } from './ProjectContextBar'
 import { Ico, type LucideIcon } from '../ui/icons'
 import { Button, Chip, EmptyState, IconButton, Input, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop, staggerContainer, staggerItem } from '../ui/motion'
-import { accentText, accent, accent2, fill, FS, hairline, hueAccent, ink, R, sem, semBg, SP, surface, text, tintSurface } from '../ui/tokens'
+import { accent, accent2, accentText, fill, FS, hairline, hueAccent, ink, R, sem, semBg, solidInk, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface Props {
   projects: WorkbenchProject[]
@@ -280,7 +280,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
           onClick={() => setGenOpen((v) => !v)}
           title="用大白话描述，AI 帮你搭一条指令"
           variant={genOpen ? 'primary' : 'ghost'}
-          style={genOpen ? undefined : { background: `linear-gradient(180deg, ${accent(0.7, 0.45)}, ${accent2(0.55, 0.35)})`, color: ink(1), border: `0.5px solid ${accent(0.7, 0.3)}` }}
+          style={genOpen ? undefined : { background: `linear-gradient(180deg, ${accent(0.7, 0.45)}, ${accent2(0.55, 0.35)})`, color: solidInk(), border: `0.5px solid ${accent(0.7, 0.3)}` }}
         >AI 造</Button>
         <Button icon={Ico.add} onClick={newShortcut}>新建</Button>
       </div>

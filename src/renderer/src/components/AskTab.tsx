@@ -318,7 +318,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: ink(1), fontSize: 11, fontWeight: 700 }}><ClipboardList size={11} strokeWidth={2} style={{ color: accentText() }} />剪贴板</span>
             <span style={{ ...text.faint(), fontSize: 9.5 }}>★ 收藏才落盘</span>
             <span style={{ flex: 1 }} />
-            <span className="hv" onClick={p.onClusterClips} title="AI 把片段按主题聚成集" style={{ color: p.clipClustering ? ink(4) : accent(0.85), fontSize: 10, cursor: 'pointer' }}>{p.clipClustering ? '聚类中…' : '🧩 归类'}</span>
+            <span className="hv" onClick={p.onClusterClips} title="AI 把片段按主题聚成集" style={{ color: p.clipClustering ? ink(4) : accentText(0.85), fontSize: 10, cursor: 'pointer' }}>{p.clipClustering ? '聚类中…' : '🧩 归类'}</span>
             <span className="hv" onClick={p.onClearClips} title="清空未收藏项" style={{ color: ink(3), fontSize: 10, cursor: 'pointer' }}>清空</span>
           </div>
           <input

@@ -43,7 +43,8 @@ export async function complete(
 ): Promise<{ ok: boolean; text?: string; reasoning?: string; error?: string }> {
   cfg = normalizeLlmConfig(cfg)
   if (!cfg.baseUrl || !/^https?:\/\//.test(cfg.baseUrl)) return { ok: false, error: 'Base URL 无效' }
-  if (!cfg.apiKey) return { ok: false, error: 'API Key 未配置' }
+  // 不再硬性要求 Key：本地免密钥端点（Ollama / LM Studio）由渲染层按供应商判定；
+  // 云端缺 Key 时上游会返回 401，requestError 已给出可读提示。
   if (!cfg.model) return { ok: false, error: '未选择型号' }
   try {
     const anthropic = isAnthropicRequest(cfg)
@@ -86,7 +87,8 @@ export async function complete(
 export async function listModels(cfg: LlmRequestConfig): Promise<{ ok: boolean; models?: string[]; error?: string }> {
   cfg = normalizeLlmConfig(cfg)
   if (!cfg.baseUrl || !/^https?:\/\//.test(cfg.baseUrl)) return { ok: false, error: 'Base URL 无效' }
-  if (!cfg.apiKey) return { ok: false, error: 'API Key 未配置' }
+  // 不再硬性要求 Key：本地免密钥端点（Ollama / LM Studio）由渲染层按供应商判定；
+  // 云端缺 Key 时上游会返回 401，requestError 已给出可读提示。
   try {
     const anthropic = isAnthropicRequest(cfg)
     const res = await netFetch(cfg.baseUrl + '/models', {
@@ -110,7 +112,8 @@ export async function listModels(cfg: LlmRequestConfig): Promise<{ ok: boolean; 
 export async function embed(cfg: LlmRequestConfig, texts: string[]): Promise<{ ok: boolean; vectors?: number[][]; error?: string }> {
   cfg = normalizeLlmConfig(cfg)
   if (!cfg.baseUrl || !/^https?:\/\//.test(cfg.baseUrl)) return { ok: false, error: 'Base URL 无效' }
-  if (!cfg.apiKey) return { ok: false, error: 'API Key 未配置' }
+  // 不再硬性要求 Key：本地免密钥端点（Ollama / LM Studio）由渲染层按供应商判定；
+  // 云端缺 Key 时上游会返回 401，requestError 已给出可读提示。
   if (!cfg.model) return { ok: false, error: '未设置向量模型' }
   if (isAnthropicRequest(cfg)) return { ok: false, error: 'Anthropic 官方 API 不提供 Embeddings，请为知识库配置支持 /embeddings 的供应商' }
   try {

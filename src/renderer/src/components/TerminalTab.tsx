@@ -802,7 +802,7 @@ export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { t
             className="ai-scroll"
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-              {workspacePanel === 'tools' ? <TerminalIcon size={13} color={accent()} /> : <Bot size={13} color={sem.run} />}
+              {workspacePanel === 'tools' ? <TerminalIcon size={13} color={accentText()} /> : <Bot size={13} color={sem.run} />}
               <span style={text.subtitle()}>{workspacePanel === 'tools' ? 'PowerShell 工具' : '活跃 Agent 会话'}</span>
               {workspacePanel === 'tools' && <span style={{ ...text.faint(), fontSize: 9 }}>{tabs.length} 会话 · {history.length} 命令 · {favorites.length} 收藏</span>}
               {workspacePanel === 'agents' && <Badge color={sem.run}>{liveAgents.length}</Badge>}
@@ -944,7 +944,7 @@ export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { t
           </div>
         )}
         <div ref={hostRef} data-terminal-host data-terminal-session-id={active} style={{ height: terminalHeight, minHeight: 250, padding: '8px 4px 8px 10px', boxSizing: 'border-box', overflow: 'hidden' }} />
-        {dragActive && <div style={{ position: 'absolute', inset: 0, zIndex: 25, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,.72)', color: accentText(), pointerEvents: 'none', ...({ '--accent-text-max-l': 1 } as React.CSSProperties) }}><div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: R.md, background: semBg(accent(), 0.18), fontWeight: 700 }}><FolderOpen size={17} />松开后把本地路径安全粘贴到终端</div></div>}
+        {dragActive && <div style={{ position: 'absolute', inset: 0, zIndex: 25, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,.72)', color: accentText(), pointerEvents: 'none', ...({ '--accent-text-max-l': 1, '--sem-text-max-l': 1 } as React.CSSProperties) }}><div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: R.md, background: semBg(accent(), 0.18), fontWeight: 700 }}><FolderOpen size={17} />松开后把本地路径安全粘贴到终端</div></div>}
         {/* 底部状态栏 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 11px', borderTop: `0.5px solid ${hairline(0.06)}`, background: `linear-gradient(180deg, ${semBg(sem.run, 0.1)}, rgba(0,0,0,.3))`, fontFamily: MONO, fontSize: 9, color: ink(3) }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: ptyOk ? sem.run : sem.danger }}><span style={{ width: 5, height: 5, borderRadius: 999, background: ptyOk ? sem.run : sem.danger, boxShadow: ptyOk ? `0 0 5px ${sem.run}` : undefined }} />{ptyOk ? 'ConPTY 已连接' : 'PTY 未就绪'}</span>

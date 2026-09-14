@@ -129,6 +129,18 @@ export function App(): React.JSX.Element {
   // 面板实际矩形（keepOpen 热区按它算，而非硬编码 260px）+ 最近一次面板内点击时间（点击后 1.2s 防误收起——
   // 点按钮导致内容收缩、光标瞬间落到面板外时，岛不再"回缩又弹回"地抖）
   const panelRef = useRef<HTMLDivElement>(null)
+  // 面板高度：轮廓用 clip-path 描述，底部圆角需要真实高度（各分区内容长短不一，切分区就会变）。
+  // ResizeObserver 比在每个可能改变内容的地方埋依赖更可靠。
+  const [panelHeight, setPanelHeight] = useState(0)
+  useEffect(() => {
+    const node = panelRef.current
+    if (!node) return
+    const sync = (): void => setPanelHeight(Math.round(node.getBoundingClientRect().height))
+    sync()
+    const observer = new ResizeObserver(sync)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
   const lastClickRef = useRef(0)
   const keyboardFocusRef = useRef(false)
   const releasePanelKeyboardFocus = useCallback((): void => {
@@ -1191,6 +1203,12 @@ export function App(): React.JSX.Element {
     return () => document.removeEventListener('keydown', onKey)
   })
 
+  // 云模型是否可用：本地免密钥端点（Ollama / LM Studio）只要有模型即可，其余供应商仍需 Key。
+  // 主对话之外的 AI 功能（分析回答、复盘、待办拆解、资讯综合…）必须共用这一判定，
+  // 否则切到本地模型后会出现"聊天正常、其它 AI 功能集体不可用"。
+  const llmUsable = (cfg: { apiKey?: string; model?: string }, provider?: string): boolean =>
+    !!cfg.model && (providerIsKeyless(provider || llmRef.current.provider) || !!cfg.apiKey)
+
   const showToast = useCallback((text: string): void => {
     setToast(text)
     clearTimeout(toastTimer.current)
@@ -1513,7 +1531,7 @@ export function App(): React.JSX.Element {
   const genReview = useCallback((storeKey: string, system: string, user: string, deep: boolean): void => {
     if (reviewsRef.current[storeKey]) return
     const L = llmRef.current
-    if (!L.apiKey || !L.model) return
+    if (!llmUsable(L, L.provider)) return
     island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, user, deep).then((res) => {
       if (res.ok && res.text) setReviews((r) => ({ ...r, [storeKey]: res.text!.trim() }))
     })
@@ -1560,7 +1578,7 @@ export function App(): React.JSX.Element {
       void runAgentStream(eng, prompt, false, false, patchLive, (blocks) => patchLive({ role: 'agent', blocks }))
       return
     }
-    if (!cfg.apiKey || !cfg.model) {
+    if (!llmUsable(cfg)) {
       settle([{ t: 'note', text: '请先在 Settings › 问答助手模型 里配置端点、型号与 API Key。' }])
       return
     }
@@ -1594,7 +1612,7 @@ export function App(): React.JSX.Element {
     const msgs = (threadsRef.current.ask || []).filter((message) => !message.typing && !message.live)
     if (msgs.length < 4) { showToast('当前会话还不需要压缩上下文'); return }
     const L = llmRef.current
-    if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+    if (!llmUsable(L, L.provider)) { showToast('请先配置可用的问答模型（本地端点无需 Key，选好模型即可）'); return }
     const branchId = activeAskBranchRef.current.id
     showToast('正在压缩为长期会话记忆…')
     const system = '你是会话记忆压缩器。输出简体中文 Markdown，只保留后续对话必须记住的事实、偏好、约束、已确认结论、分歧和未解决问题；不要复述过程，不要添加新信息。'
@@ -1609,7 +1627,7 @@ export function App(): React.JSX.Element {
     const source = askSessions.find((session) => session.id === id)
     if (!source) return
     const L = llmRef.current
-    if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+    if (!llmUsable(L, L.provider)) { showToast('请先配置可用的问答模型（本地端点无需 Key，选好模型即可）'); return }
     const targetBranchId = activeAskBranchRef.current.id
     showToast(`正在合并分支「${source.title}」…`)
     const system = '你是会话分支合并器。只输出可直接放进长期会话记忆的简体中文 Markdown，不要寒暄，不要编造。'
@@ -1666,9 +1684,31 @@ export function App(): React.JSX.Element {
         id: `${action}:${createdAt}`, action, label: analysisMethod.label, blocks, createdAt
       }))
     }
+    // 失败也留下痕迹：面板点击后立即关闭且原实现只有 4.2s toast，用户会以为"什么都没发生"
+    const fail = (message: string): void => {
+      attachAnalysis([{ t: 'note', text: `⚠ ${analysisMethod.label}失败：${message}` }])
+      showToast(`${analysisMethod.label}失败：${message}`)
+    }
+    // 本机 Agent 引擎（Claude Code / Codex）不依赖云端 Key：分析同样交给它执行
+    if (askEngineRef.current !== 'llm') {
+      const eng = askEngineRef.current as 'claude' | 'codex'
+      const label = eng === 'claude' ? 'Claude Code' : 'Codex'
+      showToast(`正在用本机 ${label} 执行${analysisMethod.label}…`)
+      await runAgentStream(eng, prompt, false, false, () => {}, (blocks) => {
+        const text = blocks.filter((b) => b.t === 'p' || b.t === 'code' || b.t === 'ul').map((b) => b.text || (b.items || []).join('\n')).join('\n').trim()
+        if (!text) { fail(`本机 ${label} 未返回内容`); return }
+        if (action === 'suggest') {
+          const list = text.split(/\r?\n/).map((line) => line.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean).slice(0, 4)
+          patchAskBranchMessages(branchId, (messages) => messages.map((message, index) => index === msgIndex ? { ...message, suggestions: list } : message))
+          return
+        }
+        attachAnalysis([{ t: 'p', text }])
+      })
+      return
+    }
     if (action === 'suggest') {
       const L = llmRef.current
-      if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+      if (!llmUsable(L, L.provider)) { showToast('请先配置可用的问答模型（本地端点无需 Key，选好模型即可）'); return }
       const history = historyFromThread(msgs.slice(0, msgIndex + 1), 16, activeAskBranchRef.current.memory || '')
       const res = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, '只输出一个 JSON 字符串数组，不要解释。', prompt, false, history)
       if (!res.ok || !res.text) { showToast(res.error || '下一问生成失败'); return }
@@ -1688,14 +1728,14 @@ export function App(): React.JSX.Element {
         await new Promise<void>((resolve, reject) => {
           void runKbReply(prompt, deep, history, branchInstruction, (blocks) => { attachAnalysis(blocks || []); resolve() }).catch(reject)
         })
-      } catch (error) { showToast('知识库核验失败：' + String(error)) }
+      } catch (error) { fail(String(error)) }
       return
     }
     const L = llmRef.current
-    if (!L.apiKey || !L.model) { showToast('请先配置可用的问答模型'); return }
+    if (!llmUsable(L, L.provider)) { showToast('请先配置可用的问答模型（本地端点无需 Key，选好模型即可）'); return }
     const system = '你是回答分析助手。只处理用户指定的目标回答，输出简体中文 Markdown；不要假装这是一次新的用户提问。' + (branchInstruction.trim() ? `\n\n本会话规则：\n${branchInstruction.trim()}` : '')
     const res = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, system, prompt, deep, history)
-    if (!res.ok || !res.text) { showToast(res.error || `${analysisMethod.label}失败`); return }
+    if (!res.ok || !res.text) { fail(res.error || '模型未返回内容'); return }
     let blocks = parseBlocks(res.text) || looseBlocks(res.text)
     if (res.reasoning) blocks = [{ t: 'think' as const, text: res.reasoning }, ...blocks]
     attachAnalysis(blocks)
@@ -1939,7 +1979,7 @@ export function App(): React.JSX.Element {
   // AI 生成：文本直接整理；URL 先抓正文再整理
   const aiCreateNote = useCallback(async (input: string): Promise<string> => {
     const L = llmRef.current
-    if (!L.apiKey || !L.model) return '请先在 Settings › 问答助手模型 配置端点与 Key'
+    if (!llmUsable(L, L.provider)) return '请先在 设置 › 问答助手模型 里配置模型（本地端点无需 Key）'
     let content = input
     let source: string | undefined
     if (/^https?:\/\/\S+$/i.test(input)) {
@@ -1960,7 +2000,7 @@ export function App(): React.JSX.Element {
   const aiSearchNotes = useCallback(async (q: string): Promise<number[] | null> => {
     const L = llmRef.current
     const list = notesRef.current
-    if (!L.apiKey || !L.model || list.length === 0) return null
+    if (!llmUsable(L, L.provider) || list.length === 0) return null
     const res = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, '你是精准的检索助手，只输出 JSON 数组，不输出任何其它文字。', noteSearchPrompt(list, q), false)
     if (!res.ok) return null
     return parseSearchIds(res.text)
@@ -1972,7 +2012,7 @@ export function App(): React.JSX.Element {
   const procBusyRef = useRef(false)
   const processPipeline = useCallback(async (): Promise<void> => {
     const L = llmRef.current
-    if (procBusyRef.current || !feedAiRef.current || !L.apiKey || !L.model) return
+    if (procBusyRef.current || !feedAiRef.current || !llmUsable(L, L.provider)) return
     procBusyRef.current = true
     try {
       const d0 = new Date(); const today = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate()).getTime()
@@ -2069,7 +2109,7 @@ export function App(): React.JSX.Element {
   // AI 日报：今天的精选（过阈值）→ Markdown，按天缓存持久化
   const feedDaily = useCallback(async (): Promise<string> => {
     const L = llmRef.current
-    if (!L.apiKey || !L.model) return '✗ 请先在 设置 › 问答助手模型 配置端点与 Key'
+    if (!llmUsable(L, L.provider)) return '✗ 请先在 设置 › 问答助手模型 配置模型'
     const d0 = new Date(); const today = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate()).getTime()
     const pool = feedItemsRef.current.filter((i) => i.pubDate >= today && (i.score ?? 0) >= feedMinRef.current)
     const picked = (pool.length >= 3 ? pool : feedItemsRef.current.filter((i) => i.pubDate >= Date.now() - 24 * 3600000))
@@ -2091,7 +2131,7 @@ export function App(): React.JSX.Element {
 
   const synthesizeNews = useCallback(async (items: FeedItem[]): Promise<string> => {
     const L = llmRef.current
-    if (!L.apiKey || !L.model) return '✗ 请先配置模型'
+    if (!llmUsable(L, L.provider)) return '✗ 请先配置模型'
     if (items.length < 2) return '✗ 至少选择 2 条资讯'
     const result = await island.llmComplete(
       { baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model },
@@ -2120,7 +2160,7 @@ export function App(): React.JSX.Element {
   // ===== 待办：AI 拆解子任务 =====
   const aiBreakdown = useCallback(async (id: number): Promise<string> => {
     const L = llmRef.current
-    if (!L.apiKey || !L.model) return '请先在 设置 › 问答助手模型 配置端点与 Key'
+    if (!llmUsable(L, L.provider)) return '请先在 设置 › 问答助手模型 配置模型'
     const target = todosRef.current.find((t) => t.id === id)
     if (!target) return '任务不存在'
     const res = await island.llmComplete(
@@ -2145,7 +2185,7 @@ export function App(): React.JSX.Element {
   // ===== 常驻迷你条：AI 个性语录（基于你的问答/便签/待办提炼经验与格言） =====
   const aiGenBarQuotes = useCallback(async (): Promise<string> => {
     const L = llmRef.current
-    if (!L.apiKey || !L.model) return '请先在 Settings › 问答助手模型 配置端点与 Key'
+    if (!llmUsable(L, L.provider)) return '请先在 设置 › 问答助手模型 里配置模型（本地端点无需 Key）'
     const askText = (threadsRef.current['ask'] || []).filter((m) => m.role === 'user' && m.text).map((m) => m.text).slice(-20).join('\n')
     const noteText = notesRef.current.map((n) => `${n.title}：${n.tags.join(',')}`).slice(0, 30).join('\n')
     const ctx = `最近的提问：\n${askText || '（无）'}\n\n积累的便签：\n${noteText || '（无）'}`
@@ -2204,7 +2244,7 @@ export function App(): React.JSX.Element {
   // AI 智能添加：口语 → LLM 解析为结构化待办（可一次多条），返回反馈文案
   const aiAddTodo = useCallback(async (input: string): Promise<string> => {
     const L = llmRef.current
-    if (!L.apiKey || !L.model) return '请先在 Settings › 问答助手模型 配置端点、型号与 API Key'
+    if (!llmUsable(L, L.provider)) return '请先在 设置 › 问答助手模型 配置模型'
     const res = await island.llmComplete({ baseUrl: L.baseUrl, apiKey: L.apiKey, model: L.model }, todoSystemPrompt(), input, false)
     if (!res.ok) return '解析失败：' + (res.error || '未知错误')
     const items = parseAiTodos(res.text)
@@ -2471,9 +2511,8 @@ export function App(): React.JSX.Element {
             opacity: isShown || settings.ambientBar ? 0 : 1, transition: 'all .3s ease', pointerEvents: 'none'
           }}
         />
-        {/* 顶部两角的凹弧：把面板融进屏幕上边缘，形成「内角过渡」的灵动一体感 */}
-        <div style={{ ...flareBase(isShown), left: -21, background: 'radial-gradient(circle at 0% 100%, transparent 0 21px, oklch(var(--panel-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a)) 21.5px)' }} />
-        <div style={{ ...flareBase(isShown), right: -21, background: 'radial-gradient(circle at 100% 100%, transparent 0 21px, oklch(var(--panel-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a)) 21.5px)' }} />
+        {/* 顶部两角的凹弧已并入面板自身的轮廓（见下方 clipPath）：做成两个独立元素时，
+            它们拿不到面板的氛围渐变与背面模糊，凹角处会出现一块平色 → 割裂感。 */}
 
         {/* 岛面板：从屏幕上边缘「内弧」滑出，顶部与屏幕齐平、底部圆弧，营造灵动一体感 */}
         <div
@@ -2490,14 +2529,21 @@ export function App(): React.JSX.Element {
           onDragLeave={(e) => { if (e.currentTarget === e.target) setDropActive(false) }}
           onDrop={onDrop}
           style={{
-            position: 'relative', width: fullscreen ? '100vw' : settings.largeSize ? 880 : islandWidth,
+            position: 'relative',
+            // 轮廓一体化：盒子两侧各留 FLARE_R 作「贴顶外扩凹角」，内容用等量内衬，
+            // 因此视觉布局与"面板原宽"完全一致。曾经用两个独立的凹弧 div 拼在面板外侧，
+            // 它们拿不到面板的氛围渐变与背面模糊，只能填一块平色 → 凹角处必然有色差/割裂感；
+            // 做成单一元素后轮廓、背景、backdrop-filter 都只有一份，接缝在结构上不存在。
+            width: fullscreen ? '100vw' : (settings.largeSize ? 880 : islandWidth) + FLARE_R * 2,
+            padding: fullscreen ? undefined : `0 ${FLARE_R}px`,
             height: fullscreen ? '100vh' : undefined,
             transformOrigin: 'top center',
             transform: isShown ? 'translateY(0)' : 'translateY(-101%)',
             opacity: isShown ? 1 : 0,
             pointerEvents: isShown ? 'auto' : 'none',
             overflow: 'hidden',
-            borderRadius: fullscreen ? 0 : '0 0 28px 28px',
+            borderRadius: fullscreen ? 0 : undefined,
+            clipPath: !fullscreen && panelHeight > 0 ? `path("${panelOutline(settings.largeSize ? 880 : islandWidth, panelHeight)}")` : undefined,
             // 材质三层：顶部极光氛围光（主色相）+ 右上副色相补光 + 玻璃底
             background: `radial-gradient(125% 60% at 50% 0%, ${accent(0.62, 0.14)} 0%, transparent 64%), radial-gradient(90% 42% at 88% 0%, oklch(calc(0.62 + var(--accent2-l-shift, 0)) var(--accent2-c) var(--th2) / 0.1) 0%, transparent 62%), oklch(var(--panel-l) var(--surface-c) var(--ths) / var(--glass-a))`,
             backdropFilter: 'blur(var(--glass-blur)) saturate(180%)',
@@ -2997,13 +3043,31 @@ const islandWrap: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', alignItems: 'center',
   fontFamily: 'var(--font)'
 }
-const flareBase = (shown: boolean): React.CSSProperties => ({
-  position: 'absolute', top: 0, width: 22, height: 22, zIndex: 1,
-  transform: shown ? 'translateY(0)' : 'translateY(-101%)',
-  opacity: shown ? 1 : 0,
-  transition: 'transform .5s cubic-bezier(.22,.61,.36,1), opacity .4s ease',
-  pointerEvents: 'none'
-})
+/** 面板顶部外扩凹角的半径（盒宽 = 内容宽 + 2R） */
+const FLARE_R = 21
+/** 面板底部圆角 */
+const PANEL_BOTTOM_R = 28
+/**
+ * 岛面板的一体化轮廓：贴顶两侧外扩凹角 + 底部圆角。
+ * 凹弧圆心落在 (R, 0)，与主体侧边在 y=R 处相切——接合点是数学相切，天然平滑无台阶。
+ * 盒宽需为 bodyW + 2R（内容侧用等量内衬抵消），因此这里用绝对坐标直接描述整条外轮廓。
+ */
+const panelOutline = (bodyW: number, height: number): string => {
+  const right = bodyW + FLARE_R * 2
+  const bottom = Math.min(PANEL_BOTTOM_R, Math.max(0, height - FLARE_R))
+  return [
+    'M 0 0',
+    `H ${right}`,
+    `A ${FLARE_R} ${FLARE_R} 0 0 0 ${right - FLARE_R} ${FLARE_R}`, // 右上凹弧（凹向主体）
+    `V ${height - bottom}`,
+    `A ${bottom} ${bottom} 0 0 1 ${right - FLARE_R - bottom} ${height}`, // 右下圆角
+    `H ${FLARE_R + bottom}`,
+    `A ${bottom} ${bottom} 0 0 1 ${FLARE_R} ${height - bottom}`, // 左下圆角
+    `V ${FLARE_R}`,
+    `A ${FLARE_R} ${FLARE_R} 0 0 0 0 0`, // 左上凹弧
+    'Z'
+  ].join(' ')
+}
 const toastStyle: React.CSSProperties = {
   position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 10,
   padding: '11px 16px', borderRadius: 999, background: 'oklch(var(--panel-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a))', backdropFilter: 'blur(var(--glass-blur)) saturate(160%)',
@@ -3034,7 +3098,7 @@ function HeaderBtn(props: { title: string; active?: boolean; onClick?: () => voi
         width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
         background: active ? accent(0.78, .22) : fill(1),
         border: active ? `1px solid ${accent(0.7, 0.3)}` : '1px solid transparent',
-        color: active ? accent(0.85) : ink(3),
+        color: active ? accentText(0.85) : ink(3),
         transition: 'background .18s ease, color .18s ease'
       }}
     >
