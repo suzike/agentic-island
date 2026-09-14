@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.6.7](https://img.shields.io/badge/release-v0.6.10-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.10)
+[![Release v0.6.11](https://img.shields.io/badge/release-v0.6.11-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.11)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/terminal-v0610.png" alt="Agentic-Island v0.6.4 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
+<img src="screenshots/terminal-v0611.png" alt="Agentic-Island v0.6.4 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
 
 </div>
 
@@ -34,6 +34,20 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **成果没有沉淀** | 执行记录、情报简报、每日复盘与知识资料成为下一轮工作的上下文 |
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
+
+## v0.6.11 更新概览
+
+- **全岛像素级对比度审计**：新增 `npm run audit:contrast`，在隔离实例里逐分区、逐主题量真实渲染像素的 WCAG 对比度（背景取元素矩形内的众数色、文字取与背景亮度差最大的像素，因此渐变、半透明层与背面模糊都被如实计入）。首轮实测 1372 个带文字元素，**硬失败（<3.0）146 条**：
+  - 输入框占位提示在浅色主题只有 1.9–2.6（浏览器默认 `darkgray`，此前没有 `::placeholder` 规则）
+  - 语义色（琥珀/红/紫/绿/蓝）当文字在浅色面板上只有 **1.1–1.2**——这组明度是按深色面板选的
+  - 深色主题的 `text.faint()`（全应用用得最多的一档）只有 2.70–2.99
+  修复后**硬失败 0 条**，3.0–4.5 的 89 条为有意的弱化层级，逐条列出供复核。
+- **可读性修复**：墨色阶梯两主题整体上调一档（深色 ink3/ink4 0.32/0.24 → 0.50/0.40）；语义色新增 `--sem-text-max-l` 明度钳制（浅色 0.40，深色 1，深色零回归）；补齐约 20 处以强调色作前景的残留写法（三元表达式、`Chip` 活动态、`Button` 的 `tinted` 变体、叠在彩色环/彩色格上的文字）。
+- **发送出去的消息气泡在浅色主题下几乎不可见**：气泡是填充式强调色（浅色下实际落到 l≈0.24 的深绿），文字却用随主题翻转的 `ink(1)`（浅色下近黑）→ 1.2:1。改用恒为亮墨的 `solidInk()`，深色主题零变化、浅色升到约 11:1。
+- **展开态顶角割裂感**：与 v0.6.9 的迷你条同一套做法——面板顶部两个外扩凹弧原是独立元素，拿不到本体的氛围渐变与背面模糊，只能是平色。现改为单一元素，用 `clip-path` 一次画完外轮廓（凹弧与主体侧边相切），内容用等量内衬抵消，布局与原来完全一致。
+- **分析失败不再毫无痕迹**：选本机 Claude Code / Codex 作为问答引擎时，"回答分析中心"的方法论此前仍走云端 Key 守卫 → 全部执行失败；现在本机引擎可直接执行，且失败会写进气泡（`⚠ 方法名失败：原因`）而不是只弹 4.2 秒 toast。
+- **本地免密钥端点（Ollama / LM Studio）整链路可用**：主进程与渲染层两层 `!apiKey` 硬校验叠加，使免密钥端点实际不可用；现统一到 `llmUsable()` 判定。
+- **健壮性**：待办优先级改为安全取值（`prioOf()`）。原先任何越界/历史值（如 `"high"`）都会让读 `.ring` 抛错，**渲染期异常会卸载整棵树，整个岛变成空白**。
 
 ## v0.6.10 更新概览
 
@@ -94,7 +108,7 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 - **终端 AI**：基于当前目录、最近命令和有限输出执行现场诊断、交接摘要和下一步规划；建议命令不会自动执行。
 - **隐私控制**：输出快照默认关闭；开启后支持自动脱敏、保留期和容量限制。环境变量配置进入安全存储，工作区导出自动排除输出和变量值。
 - **输入稳定性**：终端获得键盘焦点后锁定灵动岛展开状态，旧的自动收起计时器不会再让输入中的终端框整体上移。
-- **验证**：35 个离线测试、生产构建与隔离 Electron 终端审计；`npm run audit:terminal` 覆盖输入几何、退出码、危险确认、工具分区和重启恢复。
+- **验证**：41 个离线测试、生产构建与隔离 Electron 终端审计；`npm run audit:terminal` 覆盖输入几何、退出码、危险确认、工具分区和重启恢复。
 
 ## v0.6.3 更新概览
 
@@ -102,7 +116,7 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 - **终端几何稳定**：连续 `ResizeObserver` 通知合并到浏览器绘制帧；渲染层不再重复发送 resize，主进程也会忽略相同 ConPTY 尺寸，消除输入行晃动和无意义重排。
 - **原生目录选择**：PowerShell 工具栏的文件夹按钮改为可确认的 Windows 目录选择器；选中后使用安全转义的 `Set-Location -LiteralPath` 立即切换当前会话。
 - **置顶窗口正确让位**：终端目录选择器接入统一 External Yield 原生对话框包装，选择期间暂时释放灵动岛最高层级，关闭后再恢复。
-- **回归覆盖**：新增相同目录保持引用稳定和目录选择器接入检查；33 组离线测试、两套 TypeScript 检查、生产构建、真实 Electron 连续输入与安装验证共同作为发布门禁。
+- **回归覆盖**：新增相同目录保持引用稳定和目录选择器接入检查；41 组离线测试、两套 TypeScript 检查、生产构建、真实 Electron 连续输入与安装验证共同作为发布门禁。
 
 此前的问答分支、气泡内追问、多模型协作、独立 Embedding、供应商/账号隔离、项目工作台、快捷编排、待办、便签、资讯、复盘、截图和专业录屏能力完整保留。
 
@@ -114,24 +128,24 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v0610.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v0610.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v0611.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v0611.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v0610.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v0610.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v0611.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v0611.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v0610.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v0610.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v0611.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v0611.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/recording-v0610.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>多源采集 · 实时运镜 · 三轨剪辑 · AI 后期</sub></td>
-<td width="50%" align="center"><img src="screenshots/settings-v0610.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v0611.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>多源采集 · 实时运镜 · 三轨剪辑 · AI 后期</sub></td>
+<td width="50%" align="center"><img src="screenshots/settings-v0611.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v0610.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v0611.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -231,7 +245,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.6.10.exe
+Agentic-Island-Setup-0.6.11.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。
@@ -304,6 +318,7 @@ npm run typecheck       # 主进程/preload/shared + renderer/shared 两套 TS �
 npm test                # 全部离线、可重复测试脚本
 npm run build           # electron-vite 三端生产构建
 npm run audit:ask       # 隔离 Electron 验证问答方法与气泡分析交互
+npm run audit:contrast  # 全岛像素级对比度审计（2 主题 × 11 分区）
 npm run audit:terminal  # 隔离 Electron 验证真实 ConPTY 交互与恢复
 npm run package         # 构建 NSIS 安装包到 dist/
 npm run verify:package  # 隔离验证 unpacked、静默安装启动与卸载

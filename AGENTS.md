@@ -13,7 +13,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ```bash
 npm run dev          # 开发运行（app ready 会自动安装全局 hooks；AIISLAND_SKIP_HOOKS=1 可跳过）
 npm run typecheck    # 两套 tsconfig（node=main/preload+shared, web=renderer+shared）
-npm test             # 顺序执行 36 个离线 test-*.ts（排除真实 Claude 登录探针）
+npm test             # 顺序执行 41 个离线 test-*.ts（排除真实 Claude 登录探针）
 npm run build        # electron-vite 三端构建
 npm run package      # NSIS 安装包（原生模块经 asarUnpack **/*.node）
 npm run verify:package # 隔离启动 unpacked、静默安装/启动/卸载 NSIS
@@ -42,6 +42,7 @@ node --experimental-strip-types scripts/test-terminal-workspace.ts # 终端现�
 node --experimental-strip-types scripts/test-terminal-project.ts # 项目任务发现与健康检查
 npm run audit:terminal # 隔离 Electron 验证输入、退出码、危险确认与恢复
 npm run audit:ask      # 隔离 Electron 验证回答方法、气泡分析与窄宽布局
+npm run audit:contrast # 全岛像素级对比度审计（2 主题 × 11 分区，硬失败线 3.0）
 ```
 
 ## 架构总览
