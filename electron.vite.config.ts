@@ -7,7 +7,7 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') },
-        external: ['ffmpeg-static', 'electron-updater']
+        external: ['ffmpeg-static', 'electron-updater', 'uiohook-napi']
       }
     }
   },

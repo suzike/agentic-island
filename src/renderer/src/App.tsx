@@ -50,6 +50,7 @@ import { PRESET_SHORTCUTS, type ShortcutDef } from './logic/shortcuts'
 import { migrateProjects, newProject } from './logic/workbench'
 import { synthesisPrompt } from './logic/newsIntel'
 import { island } from './bridge'
+import { captureScreenNative } from './logic/screenshot'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, BellOff, Camera, Check, ChevronDown, Download, Expand, Maximize2, Minimize2, Moon, Pin, Shrink, Timer, Video, Waves, X } from 'lucide-react'
 import { accentText, accent, fill, gradient, hairline, ink } from './ui/tokens'
@@ -925,6 +926,31 @@ export function App(): React.JSX.Element {
     if (target === 'studio') { setShotStudioMode('image'); setShotStudio(dataUrl) }
     else setShotImg(dataUrl)
   }), [])
+  /**
+   * 抓一张整屏原生截图（主进程藏岛+挑源，渲染层用媒体流取像素）。
+   * 失败返回 null：截图是辅助动作，失败不该把岛的状态搞乱。
+   */
+  const captureScreenNow = useCallback(async (): Promise<string | null> => {
+    const prepared = await island.prepareScreenCapture().catch(() => ({ ok: false, sourceId: undefined as string | undefined, error: '截图准备失败' }))
+    try {
+      if (!prepared.ok || !prepared.sourceId) return null
+      return await captureScreenNative(prepared.sourceId)
+    } catch {
+      return null
+    } finally {
+      void island.finishScreenCapture().catch(() => {})
+    }
+  }, [])
+
+  // 全局热键：主进程只转发请求，抓帧在渲染层（媒体流给原生尺寸，见 logic/screenshot 的说明）
+  useEffect(() => island.onScreenCaptureRequested(({ target }) => {
+    void captureScreenNow().then((dataUrl) => {
+      if (!dataUrl) return
+      setRevealed(true)
+      if (target === 'studio') { setShotStudioMode('image'); setShotStudio(dataUrl) }
+      else setShotImg(dataUrl)
+    })
+  }), [captureScreenNow])
   const shotAsk = useCallback((prompt: string, dataUrl: string): void => {
     setShotImg(null)
     island.capsuleClosed() // 还原点击穿透 + blur（复用同一还原逻辑）
@@ -2466,7 +2492,7 @@ export function App(): React.JSX.Element {
     { id: 'act:learn', title: '学习中心', hint: '间隔重复复习便签 + 技术雷达', icon: '🎓', group: '动作', keywords: 'learn srs radar fuxi leida', run: () => { setRevealed(true); setLearnOpen(true) } },
     { id: 'act:capsule', title: '闪念胶囊', hint: '唤出快速记录输入框', icon: '⚡', group: '动作', keywords: 'capsule shannian jilu', run: () => { setRevealed(true); setCapsuleOpen(true) } },
     { id: 'act:brain', title: '第二大脑检索', hint: '跨便签/问答/复盘/资讯/剪贴板搜索', icon: '🧠', group: '动作', keywords: 'brain dinao search sousuo', run: () => { setRevealed(true); setBrainOpen(true) } },
-    { id: 'act:screen', title: '分析当前屏幕', hint: '截整屏交给视觉模型（Ctrl+Alt+A）', icon: '🖥️', group: '动作', keywords: 'screen fenxi pingmu understand', run: () => { island.captureScreen().then((r) => { if (r.ok && r.dataUrl) void downscaleDataUrl(r.dataUrl, 1600).then((s) => { setRevealed(true); setShotImg(s) }) }) } },
+    { id: 'act:screen', title: '分析当前屏幕', hint: '截整屏交给视觉模型（Ctrl+Alt+A）', icon: '🖥️', group: '动作', keywords: 'screen fenxi pingmu understand', run: () => { void captureScreenNow().then((url) => { if (url) void downscaleDataUrl(url, 1600).then((s) => { setRevealed(true); setShotImg(s) }) }) } },
     { id: 'act:review', title: '今日复盘 / 周报', hint: '前往复盘分区', icon: '📝', group: '动作', keywords: 'review fupan zhoubao', run: () => goTab('review') },
     { id: 'act:daily', title: '今日 AI 日报', hint: '前往资讯分区', icon: '🗞️', group: '动作', keywords: 'daily ribao zixun', run: () => goTab('news') },
     { id: 'act:focus', title: (focusActive ? '退出' : '进入') + '专注模式', hint: '静默 25 分钟', icon: '🌙', group: '动作', keywords: 'focus zhuanzhu', run: () => toggleFocus() },

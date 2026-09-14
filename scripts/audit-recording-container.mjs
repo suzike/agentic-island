@@ -7,7 +7,7 @@
 //
 // 用法：node scripts/audit-recording-container.mjs   （或 npm run audit:recording）
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtemp, rm, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,20 +20,26 @@ const root = 'E:/Agentic_Engineering/Claude_Desktop/Vibe-Island'
 const ffmpeg = join(root, 'node_modules', 'ffmpeg-static', 'ffmpeg.exe')
 const electron = join(root, 'node_modules', 'electron', 'dist', 'electron.exe')
 const profile = await mkdtemp(join(tmpdir(), 'aiisland-recverify-'))
+await mkdir(join(profile, 'audit-exports'), { recursive: true })
 const port = 9441
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 class Cdp {
   constructor(u) { this.seq = 0; this.pending = new Map(); this.ws = new WebSocket(u) }
   async open() {
     await new Promise((res, rej) => { this.ws.addEventListener('open', res, { once: true }); this.ws.addEventListener('error', rej, { once: true }) })
-    this.ws.addEventListener('message', (e) => { const m = JSON.parse(String(e.data)); const w = this.pending.get(m.id); if (!w) return; this.pending.delete(m.id); m.error ? w.reject(new Error(m.error.message)) : w.resolve(m.result) })
+    this.ws.addEventListener('message', (e) => {
+      const m = JSON.parse(String(e.data))
+      if (m.method === 'Runtime.exceptionThrown') console.log('[渲染层异常]', m.params?.exceptionDetails?.exception?.description || m.params?.exceptionDetails?.text)
+      if (m.method === 'Runtime.consoleAPICalled' && ['error', 'warning'].includes(m.params?.type)) console.log('[' + m.params.type + ']', (m.params.args || []).map((a) => a.value ?? a.description).join(' ').slice(0, 240))
+      const w = this.pending.get(m.id); if (!w) return; this.pending.delete(m.id); m.error ? w.reject(new Error(m.error.message)) : w.resolve(m.result)
+    })
   }
   send(method, params = {}) { const id = ++this.seq; return new Promise((res, rej) => { this.pending.set(id, { resolve: res, reject: rej }); this.ws.send(JSON.stringify({ id, method, params })) }) }
   close() { this.ws.close() }
 }
 const child = spawn(electron, [root, `--remote-debugging-port=${port}`], {
   cwd: root,
-  env: { ...process.env, AIISLAND_ALLOW_AUDIT_INSTANCE: '1', AIISLAND_AUDIT_USER_DATA: profile, AIISLAND_SKIP_HOOKS: '1', AIISLAND_BRIDGE_FILE: join(profile, 'bridge.json') },
+  env: { ...process.env, AIISLAND_ALLOW_AUDIT_INSTANCE: '1', AIISLAND_AUDIT_USER_DATA: profile, AIISLAND_AUDIT_EXPORT_DIR: join(profile, 'audit-exports'), AIISLAND_SKIP_HOOKS: '1', AIISLAND_BRIDGE_FILE: join(profile, 'bridge.json') },
   stdio: 'ignore', windowsHide: true
 })
 let cdp
@@ -89,6 +95,21 @@ try {
     if (!barReady) console.log(`[${label}] 界面文案:`, String(await ev(`(document.body.innerText||'').replace(/\s+/g,' ').slice(0,300)`)))
     assert.ok(barReady, `[${label}] 录制未启动`)
     await sleep(seconds * 1000)
+    if (process.env.AIISLAND_AUDIT_NO_CLICK !== '1') {
+      // 用真实 OS 输入点一下：CDP 的合成事件只进渲染层，装在系统上的鼠标钩子看不到。
+      // 点完把光标放回原处（这毕竟是用户的桌面）。失败就跳过——这只是可选能力的验证。
+      const click = spawnSync('powershell.exe', ['-NoProfile', '-Command', [
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        'Add-Type -AssemblyName System.Windows.Forms',
+        '$p = [System.Windows.Forms.Cursor]::Position',
+        "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern void mouse_event(uint f, uint x, uint y, uint d, int e);' -Name M -Namespace A",
+        '[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(400, 300)',
+        '[A.M]::mouse_event(0x0002, 0, 0, 0, 0); [A.M]::mouse_event(0x0004, 0, 0, 0, 0)',
+        'Start-Sleep -Milliseconds 150',
+        '[System.Windows.Forms.Cursor]::Position = $p'
+      ].join('; ')], { encoding: 'utf8', windowsHide: true, timeout: 20_000 })
+      console.log(`[${label}] 真实点击注入:`, click.status === 0 ? 'ok' : `失败（${String(click.stderr || '').slice(0, 80)}）`)
+    }
     await ev(`(() => { const b=[...document.querySelectorAll('[data-recording-control] [title],[data-recording-control] button')].find((n)=>String(n.getAttribute('title')||'').includes('结束')); b?.click(); return Boolean(b) })()`)
     await sleep(5500)
     const after = (await readdir(recordingsDir)).filter((name) => !name.endsWith('.json') && !before.has(name))
@@ -156,6 +177,7 @@ try {
   // 工程是录制结束后**延迟 1 秒防抖落盘**的，读得太早会拿到还没有轨迹的版本——轮询到写出为止。
   const projectsDir = join(profile, 'recording-projects')
   let trackPoints = 0
+  let clickPoints = 0
   let motionReady = false
   let projectFiles = []
   for (let attempt = 0; attempt < 14; attempt += 1) {
@@ -165,6 +187,7 @@ try {
       const project = JSON.parse(await readFile(join(projectsDir, file), 'utf8'))
       const track = Array.isArray(project.cursorTrack) ? project.cursorTrack : []
       trackPoints = Math.max(trackPoints, track.length)
+      clickPoints = Math.max(clickPoints, Array.isArray(project.clickTrack) ? project.clickTrack.length : 0)
       motionReady = motionReady || project.exportMotionReady === true
       const last = track.at(-1)
       if (track.length && attempt === 0) console.log(`  光标轨迹: ${track.length} 点 | 末点 t=${last.t}ms (${last.x}, ${last.y}) 速度=${last.s}`)
@@ -176,6 +199,8 @@ try {
   else console.log(`  光标轨迹: 空（工程目录内容: ${projectFiles.join(', ') || '空'}）`)
   assert.ok(trackPoints >= 20, `8 秒录制应采到足够的光标轨迹点（实测 ${trackPoints} 个；0 表示采样或落盘链路断了）`)
   assert.equal(motionReady, true, '"固定画面"录制的素材应标注为可在导出期重建运镜')
+  console.log(`  鼠标点击: ${clickPoints} 次`)
+  assert.ok(clickPoints >= 1, `录制期间注入的真实点击应被采集到（实测 ${clickPoints} 次；0 说明系统钩子没装上或没生效）`)
 
   // 剪除空白的入口必须真的挂在剪辑页上，并且是**两段式**（先给方案，再落地）。
   // 这次录制用的是合成光标，正是"录播放中的视频"那类退化素材——绝不能一次点击就把成片剪到只剩几秒。
@@ -233,11 +258,8 @@ try {
   await sleep(1500)
   await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>n.textContent?.trim()==='采集'); b?.click(); return Boolean(b) })()`)
   await sleep(900)
-  // 原始采集按屏幕原始画幅录制：先把"画面比例"切到"跟随源"（这是它唯一的前置条件）
-  const aspectPick = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/跟随源/.test(n.textContent||'')); if (!b) return 'missing'; b.click(); return 'clicked' })()`)
-  console.log('画面比例切跟随源:', aspectPick)
-  assert.equal(aspectPick, 'clicked', '采集页应有"跟随源"比例档')
-  await sleep(400)
+  // 原始采集按屏幕原始画幅录制，输出画幅在导出期重组——所以"画面比例"不再是前置条件
+  //（默认 16:9 也能直接用，这正是本轮修的那条限制）。
   const rawPick = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/原始画面/.test(n.textContent||'')); if (!b) return 'missing'; if (/不可用/.test(b.textContent||'')) return 'blocked'; b.click(); return 'clicked' })()`)
   console.log('采集方式切原始画面:', rawPick)
   if (rawPick === 'blocked') console.log('  被挡住的原因:', String(await ev(`(() => { const n=[...document.querySelectorAll('div')].filter((x)=>x.children.length===0&&/切到"原始画面"需要先关掉/.test(x.textContent||'')); return n[0]?.textContent?.trim() || '（未找到说明）' })()`)))
@@ -253,6 +275,47 @@ try {
   assert.ok(rawInfo.fps >= compositeFps, `同样的活动画面下原始采集帧率不应低于合成模式（原始 ${rawInfo.fps}fps vs 合成 ${compositeFps}fps）`)
   // 桌面采集是变化驱动的：源静止时不会产出重复帧，这里只要求"动起来之后确实有帧"
   assert.ok(rawInfo.fps >= 20, `活动画面下原始采集应跑满目标帧率（实测 ${rawInfo.fps}fps，静止屏幕实测只有 1.11fps）`)
+  // 导出 + 成品自检：走**应用自己的导出链路**（审计实例下保存框被改成直接落盘），
+  // 断言成功提示里带自检结论，并读回真实产物核对元数据。
+  await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/导出设置/.test(n.textContent||'')); b?.click(); return Boolean(b) })()`)
+  await sleep(1200)
+  // 输出画布切成竖屏：素材是横屏，导出必须真的重组成 1080x1920（这正是"原始采集不必再被画幅挡住"的验证）
+  const aspectPick = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/竖屏/.test(n.textContent||'')); if (!b) return 'missing'; b.click(); return 'clicked' })()`)
+  console.log('输出画布切竖屏:', aspectPick)
+  assert.equal(aspectPick, 'clicked', '导出页应有"竖屏"画布档')
+  await sleep(400)
+  // 这里刻意**开着**导出期运镜去导出竖屏：跨画幅时应用会先按"铺满"把画面裁齐、再把轨迹重映射，
+  // 所以既该出 1080x1920，也不该有任何告警，摘要里要写明"画幅按铺满重组"。
+  const motionState = await ev(`(() => { const span=[...document.querySelectorAll('span')].find((n)=>(n.textContent||'').trim()==='导出期运镜'); const sw=span?.parentElement?.querySelector('button'); if (!sw) return 'missing'; return /accent/.test(sw.style.background || '') ? 'on' : 'off' })()`)
+  console.log('导出期运镜开关:', motionState)
+  assert.equal(motionState, 'on', '原始采集切过来时应默认打开导出期运镜')
+  await sleep(400)
+  console.log('导出页就绪:', String(await ev(`(() => { const t=(document.body.innerText||''); return /压缩策略/.test(t) ? '是' : '否' })()`)))
+  const exportClick = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/导出 MP4/.test(n.textContent||'')); if (!b) return 'missing'; if (b.disabled) return 'disabled'; b.click(); return 'clicked' })()`)
+  console.log('点导出 MP4:', exportClick)
+  assert.equal(exportClick, 'clicked', '导出页应有"导出 MP4"按钮')
+  let exportToast = ''
+  for (let i = 0; i < 86; i += 1) {
+    await sleep(700)
+    // toast 是工坊里唯一 maxWidth=340px 的 span（见 ScreenRecorderStudio 的 toast 渲染），按样式定位最稳
+    exportToast = String(await ev(`(() => { const n=[...document.querySelectorAll('span')].filter((x)=>x.style.maxWidth==='340px'); return n.map((x)=>x.textContent.trim()).join(' | ') })()`))
+    if (/已导出|导出失败/.test(exportToast)) break
+  }
+  console.log('导出结果提示:', exportToast)
+  const exportDir = join(profile, 'audit-exports')
+  const exported = (await readdir(exportDir).catch(() => [])).filter((name) => name.endsWith('.mp4'))
+  console.log('导出产物:', exported.join(', ') || '（无）')
+  assert.ok(exported.length >= 1, `应用导出应写出成品文件（实测 ${exported.length} 个）`)
+  const exportedPath = join(exportDir, exported[0])
+  const exportedProbe = probeFile(exportedPath)
+  console.log(`  导出成品元数据: 时长 ${exportedProbe.duration} · ${exportedProbe.fps}fps · ${exportedProbe.size}`)
+  assert.notEqual(exportedProbe.duration, 'N/A', '导出成品必须带可用时长')
+  assert.ok(Math.abs(exportedProbe.fps - 30) <= 1, `导出成品帧率应为请求的 30fps（实测 ${exportedProbe.fps}）`)
+  assert.equal(exportedProbe.size, '1080x1920', `横屏素材导出竖屏画布应真的重组尺寸（实测 ${exportedProbe.size}）`)
+  assert.match(exportToast, /已导出/, `导出成功应给出提示（实测"${exportToast}"）`)
+  assert.match(exportToast, /自检通过/, `成功提示应带成品自检结论（实测"${exportToast}"）`)
+  assert.match(exportToast, /画幅按铺满重组/, `跨画幅应在摘要里说明画幅被重组过（实测"${exportToast}"）`)
+  assert.doesNotMatch(exportToast, /自检有疑问/, `画幅重组是预期行为，不该报成"有疑问"（实测"${exportToast}"）`)
   process.stdout.write('recording container audit passed' + String.fromCharCode(10))
 } finally {
   try { await Promise.race([cdp?.send('Runtime.evaluate', { expression: 'window.island.quitApp(); true', returnByValue: true }), sleep(1500)]) } catch {}

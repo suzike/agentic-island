@@ -149,6 +149,59 @@ export function buildRecordingMotionFilter(
   return `zoompan=z='${zoom}':x='${x}':y='${y}':d=1:s=${size}:fps=${Math.max(1, Math.round(fps))}`
 }
 
+/**
+ * 素材画幅与目标画幅不一致时怎么"重组"画面（纯函数，便于离线测试）。
+ *
+ * 之前只有一句 `scale=…:force_original_aspect_ratio=decrease`——那在**同画幅**下没问题（等比缩小），
+ * 但画幅不同时它只是把画面缩小，既不补边也不裁切，成片尺寸根本不是请求的尺寸。
+ * 原始画面采集正是这种情况：录的是屏幕原始画幅（常见 16:10），用户要的却是 16:9。
+ *
+ * - `contain`：等比缩到能放进目标框，四周补黑（不裁内容）
+ * - `cover`：等比放大到铺满目标框，多出来的裁掉（不留黑边）
+ *
+ * 同画幅时返回空数组，保持既有导出路径一个字节都不变。
+ */
+export function buildRecordingAspectFilters(
+  sourceWidth: number,
+  sourceHeight: number,
+  outputWidth: number,
+  outputHeight: number,
+  fit: 'contain' | 'cover' = 'contain'
+): string[] {
+  const sw = Math.max(1, Math.round(sourceWidth))
+  const sh = Math.max(1, Math.round(sourceHeight))
+  const ow = Math.max(2, Math.round(outputWidth))
+  const oh = Math.max(2, Math.round(outputHeight))
+  if (Math.abs(sw / sh - ow / oh) < 0.002) return []
+  if (fit === 'cover') return [`scale=w=${ow}:h=${oh}:force_original_aspect_ratio=increase:force_divisible_by=2`, `crop=${ow}:${oh}`]
+  return [`scale=w=${ow}:h=${oh}:force_original_aspect_ratio=decrease:force_divisible_by=2`, `pad=${ow}:${oh}:(ow-iw)/2:(oh-ih)/2:color=black`]
+}
+
+/**
+ * 导出期运镜在当前请求下是否可用。
+ *
+ * 为什么单独抽出来：`zoompan` 按源像素算取景窗口、再输出目标尺寸，所以要求两者画幅一致
+ * （否则会拉伸）。画幅不一致时要**如实告知运镜没生效**，而不是静默丢掉这个能力。
+ */
+export function recordingMotionUsable(request: RecordingExportRequest): boolean {
+  if (!request.motion?.frames?.length) return false
+  const sourceAspect = Math.max(1, request.width) / Math.max(1, request.height)
+  const outputAspect = Math.max(2, Number(request.outputWidth) || request.width) / Math.max(2, Number(request.outputHeight) || request.height)
+  if (Math.abs(sourceAspect - outputAspect) < 0.01) return true
+  // 画幅不一致时，渲染层会给出"铺满"裁切窗口（先裁齐画幅再取景），有它就可用
+  const crop = request.motion.crop
+  return Boolean(crop && crop.width > 0 && crop.height > 0)
+}
+
+/** 运镜前的画幅裁齐：把源画面按归一化窗口裁成目标画幅（表达式里按像素算，保持偶数边长）。 */
+export function buildRecordingMotionCropFilter(crop: { x: number; y: number; width: number; height: number }): string {
+  const width = Math.max(0.01, Math.min(1, crop.width))
+  const height = Math.max(0.01, Math.min(1, crop.height))
+  const x = Math.max(0, Math.min(1 - width, crop.x))
+  const y = Math.max(0, Math.min(1 - height, crop.y))
+  return `crop=trunc(iw*${width.toFixed(4)}/2)*2:trunc(ih*${height.toFixed(4)}/2)*2:trunc(iw*${x.toFixed(4)}/2)*2:trunc(ih*${y.toFixed(4)}/2)*2`
+}
+
 /** 质量档 → CRF（导出侧与编码器选择都要用同一张表，避免两处漂移）。 */
 export const crfFor = (quality: RecordingExportRequest['quality']): number => {
   if (quality === 'compact') return 30
@@ -181,6 +234,103 @@ export function recordingExportDurationMs(request: RecordingExportRequest): numb
   const segments = normalizedSegments(request)
   const speed = Math.max(0.5, Math.min(2, Number(request.edit?.speed) || 1))
   return Math.max(1, (segments.length ? segments.reduce((sum, segment) => sum + segment.endMs - segment.startMs, 0) : trimEnd - trimStart) / speed)
+}
+
+/**
+ * 成品自检：导出完成后回头读一遍写出的文件，确认它**真的**是请求的那条片子。
+ *
+ * 为什么值得做：这个项目被"导出画面飞快跑完"这一类事故咬过两次（VFR 标称帧率被当帧率铺帧、
+ * zoompan 的 15360 时基被后置 fps 滤镜读成 15360fps），两次的共同点是**文件写成功了**、
+ * 只有内容不对。所以"导出完成"必须以读回来的元数据为准，而不是以 FFmpeg 正常退出为准。
+ */
+export interface RecordingOutputProbe {
+  durationMs: number
+  fps: number
+  frames: number
+  hasVideo: boolean
+  hasAudio: boolean
+  videoCodec: string
+}
+
+/** 解析 `ffmpeg -i <file>` 的流信息（纯函数，便于用固定文本做离线测试）。 */
+export function parseRecordingOutputProbe(text: string): RecordingOutputProbe {
+  const duration = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(text)
+  const durationMs = duration
+    ? Math.round((Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3])) * 1000)
+    : 0
+  const videoLine = /Stream #\d+:\d+.*: Video: ([a-z0-9_]+).*?(\d+(?:\.\d+)?) fps/.exec(text)
+  const hasVideo = Boolean(/Stream #\d+:\d+.*: Video:/.test(text))
+  const hasAudio = /Stream #\d+:\d+.*: Audio:/.test(text)
+  const frames = Number(/frame=\s*(\d+)/.exec(text)?.[1] || 0)
+  return {
+    durationMs,
+    fps: Number(videoLine?.[2] || 0),
+    frames,
+    hasVideo,
+    hasAudio,
+    videoCodec: videoLine?.[1] || ''
+  }
+}
+
+export interface RecordingExportCheck {
+  ok: boolean
+  /** 一行摘要，适合直接拼进"已导出 …"的提示 */
+  summary: string
+  warnings: string[]
+}
+
+/**
+ * 把探测结果与请求对照（纯函数）。容差是"人眼能察觉"的量级：
+ * 时长 8% 或 400ms（取大者），帧率 ±1，帧数与"时长×帧率"相差 12% 以内。
+ */
+export function recordingExportVerdict(request: RecordingExportRequest, probe: RecordingOutputProbe): RecordingExportCheck {
+  const warnings: string[] = []
+  const expectedMs = recordingExportDurationMs(request)
+  const seconds = probe.durationMs / 1000
+  const codecLabel = probe.videoCodec ? probe.videoCodec.toUpperCase() : '—'
+  if (request.format === 'mp3') {
+    if (!probe.hasAudio) warnings.push('导出的文件里读不到音轨')
+    const summary = probe.hasAudio ? `仅音轨 · ${seconds.toFixed(1)}s` : '音轨缺失'
+    return { ok: warnings.length === 0, summary, warnings }
+  }
+  if (!probe.hasVideo) warnings.push('导出的文件里读不到视频轨')
+  if (!probe.durationMs) warnings.push('容器没有可用的时长元数据（播放器可能无法拖动进度）')
+  else if (Math.abs(probe.durationMs - expectedMs) > Math.max(400, expectedMs * 0.08)) {
+    warnings.push(`时长对不上：请求 ${(expectedMs / 1000).toFixed(1)}s，成品 ${seconds.toFixed(1)}s`)
+  }
+  // GIF 没有音轨也没有可信帧率，只查时长与视频轨
+  if (request.format === 'gif') {
+    const summary = `GIF · ${seconds.toFixed(1)}s`
+    return { ok: warnings.length === 0, summary, warnings }
+  }
+  const expectedFps = Math.max(1, Math.round(Number(request.outputFps) || request.fps))
+  if (probe.fps && Math.abs(probe.fps - expectedFps) > 1) {
+    warnings.push(`帧率对不上：请求 ${expectedFps}fps，成品 ${probe.fps}fps`)
+  }
+  if (probe.frames && probe.durationMs) {
+    const density = probe.frames / seconds
+    if (Math.abs(density - expectedFps) > expectedFps * 0.12) {
+      warnings.push(`帧数与时长不一致：${probe.frames} 帧 / ${seconds.toFixed(1)}s ≈ ${density.toFixed(1)}fps`)
+    }
+  }
+  if (request.hasAudio && request.edit?.muteAudio !== true && !probe.hasAudio) warnings.push('请求里带音轨，但成品没有声音')
+  // 运镜要源画幅与目标画幅一致（zoompan 按源像素取景再输出目标尺寸，画幅不同会拉伸），
+  // 不一致时如实说"没生效"，不能静默丢掉
+  if (request.motion?.frames?.length && !recordingMotionUsable(request)) warnings.push('画幅与素材不一致，导出期运镜本次未生效（请把输出画幅设为与素材一致）')
+  // "按铺满裁齐"是预期行为而不是问题，放进摘要（人看得见），不能塞进 warnings 把自检判成"有疑问"
+  const summary = `${seconds.toFixed(1)}s · ${expectedFps}fps · ${codecLabel}${request.motion?.crop ? ' · 画幅按铺满重组' : ''}`
+  return { ok: warnings.length === 0, summary, warnings }
+}
+
+/** 导出完成后读一遍成品并给出自检结论（runner 注入，便于离线测试）。 */
+export async function probeRecordingOutput(
+  ffmpegPath: string,
+  filePath: string,
+  runner: EncoderRunner = spawnEncoderRunner(ffmpegPath)
+): Promise<RecordingOutputProbe> {
+  // `-i <file>` 不指定输出时 ffmpeg 以非零码退出，但流信息已经打到 stderr —— 只看文本，不看退出码
+  const result = await runner(['-hide_banner', '-i', filePath], 20_000)
+  return parseRecordingOutputProbe(result.output)
 }
 
 export function recordingExportSubtitleSegments(request: RecordingExportRequest): Array<{ startMs: number; endMs: number; text: string }> {
@@ -298,16 +448,16 @@ export function buildRecordingFfmpegArgs(
   // 只有宽高比一致时才开：zoompan 的缩放窗口保持输入的宽高比，比例不同会先把画面压变形。
   const outputWidthForMotion = Math.max(2, Math.min(7680, Math.round(Number(request.outputWidth) || request.width)))
   const outputHeightForMotion = Math.max(2, Math.min(4320, Math.round(Number(request.outputHeight) || request.height)))
-  const sourceAspect = request.width / Math.max(1, request.height)
-  const outputAspect = outputWidthForMotion / Math.max(1, outputHeightForMotion)
-  const motionFilter = request.motion && Math.abs(sourceAspect - outputAspect) < 0.01
-    ? buildRecordingMotionFilter(request.motion, outputWidthForMotion, outputHeightForMotion, Math.round(Number(request.outputFps) || request.fps))
+  const motionFilter = recordingMotionUsable(request)
+    ? buildRecordingMotionFilter(request.motion!, outputWidthForMotion, outputHeightForMotion, Math.round(Number(request.outputFps) || request.fps))
     : null
   if (motionFilter) {
     // 帧率归一化必须放在 zoompan **之前**：文件输入时 zoompan 的输出时间戳停在它的 15360 时基里
     // （PTS 步长 1/15360），后面再挂 fps 滤镜会被读成 15360fps 并复制帧去凑 30fps ——
     // 实测 3 秒素材导出成 25 分 36 秒（512 倍）。先归一化成真 CFR，zoompan 就只是逐帧改取景。
     videoFilters.push(`fps=${Math.max(1, Math.min(120, Math.round(Number(request.outputFps) || request.fps)))}`)
+    // 跨画幅：先把画面裁成目标画幅，zoompan 的取景窗口才有正确的宽高比（渲染层已把路径重映射）
+    if (request.motion?.crop) videoFilters.push(buildRecordingMotionCropFilter(request.motion.crop))
     videoFilters.push(motionFilter)
     videoFilters.push('setsar=1')
   }
@@ -338,7 +488,12 @@ export function buildRecordingFfmpegArgs(
   if (request.format !== 'gif' && request.format !== 'mp3') {
     const outputWidth = Math.max(2, Math.min(7680, Math.round(Number(request.outputWidth) || request.width)))
     const outputHeight = Math.max(2, Math.min(4320, Math.round(Number(request.outputHeight) || request.height)))
-    if (!motionFilter && (outputWidth < request.width || outputHeight < request.height)) videoFilters.push(`scale=w=${outputWidth}:h=${outputHeight}:force_original_aspect_ratio=decrease:force_divisible_by=2`)
+    if (!motionFilter) {
+      // 跨画幅（原始采集最常见）必须先重组再输出；同画幅返回空数组，行为与以前完全一致
+      const adaptation = buildRecordingAspectFilters(request.width, request.height, outputWidth, outputHeight, request.fit === 'cover' ? 'cover' : 'contain')
+      if (adaptation.length) videoFilters.push(...adaptation)
+      else if (outputWidth < request.width || outputHeight < request.height) videoFilters.push(`scale=w=${outputWidth}:h=${outputHeight}:force_original_aspect_ratio=decrease:force_divisible_by=2`)
+    }
     const outputFps = Math.max(1, Math.min(120, Math.round(Number(request.outputFps) || request.fps)))
     // 输出帧率必须显式归一化，不能"与源一致就不管"：
     // 录制源是 MediaRecorder 产的 WebM（VFR），容器里的标称帧率并不代表真实帧密度
@@ -626,7 +781,7 @@ export const spawnEncoderRunner = (ffmpegPath: string): EncoderRunner => (args: 
       resolve({ code, output, ms: Date.now() - started })
     }
     const timer = setTimeout(() => { try { child.kill() } catch { /* 已退出 */ } finish(null) }, timeoutMs)
-    child.stderr?.on('data', (chunk) => { output = (output + String(chunk)).slice(-2000) })
+    child.stderr?.on('data', (chunk) => { output = (output + String(chunk)).slice(-8000) })
     child.once('error', () => finish(null))
     child.once('close', (code) => finish(code))
   })

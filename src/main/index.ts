@@ -38,7 +38,8 @@ import { initUpdater } from './updater'
 import { setApprovalPolicy, approvalSessionAllow, setApprovalAuditSink, policyAutoDecision, clearSessionAllows } from './approval-policy'
 import { createExternalYieldController, type ExternalYieldController } from './external-yield'
 import { createScreenshotPoller } from './screenshot-poller'
-import { buildRecordingRemuxArgs, createEncoderPicker, crfFor, recordingExportStrategy, type VideoEncoder, recordingExportSubtitleSegments, recordingHasEdits, startRecordingFfmpeg, startRecordingFfmpegWithArgs } from './recording-export'
+import { drainMouseClicks, startMouseClickLog, stopMouseClickLog } from './mouse-hook'
+import { buildRecordingRemuxArgs, createEncoderPicker, crfFor, probeRecordingOutput, recordingExportStrategy, recordingExportVerdict, type VideoEncoder, recordingExportSubtitleSegments, recordingHasEdits, startRecordingFfmpeg, startRecordingFfmpegWithArgs } from './recording-export'
 import { sniffRecordingContainer } from '../shared/recording-format'
 import { RecordingSessionStore } from './recording-session-store'
 import { RecordingProjectStore } from './recording-project-store'
@@ -108,7 +109,21 @@ function showOwnedOpenDialog(options: Electron.OpenDialogOptions): Promise<Elect
     : dialog.showOpenDialog(options))
 }
 
+/**
+ * 审计实例（隔离 userData + 显式放行 + 指定导出目录）里免弹窗直接落盘。
+ *
+ * 原生保存框没法用 CDP 关掉，否则"导出"这条端到端链路在自动化里永远测不到——而这条链路恰好
+ * 被"文件写成功但内容不对"坑过两次。三个环境变量缺一不可，正常运行时一个都不会有。
+ */
+const auditExportDir = (): string => {
+  if (process.env['AIISLAND_ALLOW_AUDIT_INSTANCE'] !== '1') return ''
+  if (!process.env['AIISLAND_AUDIT_USER_DATA']?.trim()) return ''
+  return process.env['AIISLAND_AUDIT_EXPORT_DIR']?.trim() || ''
+}
+
 function showOwnedSaveDialog(options: Electron.SaveDialogOptions): Promise<Electron.SaveDialogReturnValue> {
+  const auditDir = auditExportDir()
+  if (auditDir && options.defaultPath) return Promise.resolve({ canceled: false, filePath: join(auditDir, basename(options.defaultPath)) })
   return withNativeDialog(() => win && !win.isDestroyed()
     ? dialog.showSaveDialog(win, options)
     : dialog.showSaveDialog(options))
@@ -411,38 +426,48 @@ async function openScreenshot(target: ScreenshotTarget = 'ask'): Promise<void> {
   }
 }
 
-// 屏幕理解：截取主屏（先藏岛避免拍到自己），返回 dataURL 交给视觉模型
-async function captureScreenDataUrl(): Promise<string | null> {
+/**
+ * 截图的"取像素"交给渲染层，主进程只负责藏岛与挑源。
+ *
+ * 为什么不在这里出图（实测结论）：缩略图路径只能"按你请求的尺寸缩放"——逻辑尺寸
+ * 1707x1067 乘 scaleFactor 1.5 得 2560.5，取整成 2561 去请求，必须重采样一次，
+ * 同一张静态图锐度从 84.9 掉到 64.1（真物理尺寸是 2560x1600）。而**媒体流**给的是真原生帧：
+ * 实测 Chromium 抓 2560x1600 的锐度与 DPI-aware .NET 直接抓物理像素**完全一致**（35.2983）。
+ * 顺带让截图与录制走同一条采集链路。
+ */
+async function prepareScreenCapture(): Promise<{ ok: boolean; sourceId?: string; error?: string }> {
   try {
     const target = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     win?.hide()
+    // 藏窗要等一拍，否则会把自己拍进去
     await new Promise((r) => setTimeout(r, 160))
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: {
-        width: Math.round(target.size.width * target.scaleFactor),
-        height: Math.round(target.size.height * target.scaleFactor)
-      }
-    })
-    const source = sources.find((item) => item.display_id === String(target.id)) || sources[0]
-    return source && !source.thumbnail.isEmpty() ? source.thumbnail.toDataURL() : null
-  } catch {
-    return null
-  } finally {
-    win?.show()
+    // 首屏的 getSources 偶尔拿不到全部 display_id（实测连拍 5 张有 1 张错屏），重试一次；
+    // 仍不匹配就明确失败——**绝不退到 sources[0]**，那会静默拍到另一块屏。
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
+      const match = sources.find((item) => item.display_id && item.display_id === String(target.id))
+      if (match) return { ok: true, sourceId: match.id }
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 240))
+    }
+    return { ok: false, error: '没有找到光标所在显示器的采集源，请重试' }
+  } catch (error) {
+    return { ok: false, error: String(error instanceof Error ? error.message : error) }
   }
+}
+
+/** 截图完成（成功或失败都要调）：还原岛的显示状态。 */
+function finishScreenCapture(): void {
+  win?.show()
 }
 
 // 屏幕理解：全局热键截整屏 → 交给渲染层（复用截图问 AI 卡）
 async function openScreenAnalyze(): Promise<void> {
   if (!win) return
-  const url = await captureScreenDataUrl()
-  if (!url) return
+  // 抓帧在渲染层（媒体流拿原生像素），这里只负责藏岛与转发
+  win.hide()
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setIgnoreMouseEvents(false)
-  win.show()
-  win.focus()
-  safeSend('screenshot-captured', { dataUrl: url, target: 'ask' })
+  safeSend('screen-capture-requested', { target: 'ask' })
 }
 
 // 闪念胶囊：全局热键唤出居中输入框（临时让常驻窗口可聚焦，输完/取消后还原点击穿透）
@@ -804,10 +829,8 @@ function wireIpc(): void {
     }
   })
 
-  ipcMain.handle('capture-screen', async () => {
-    const url = await captureScreenDataUrl()
-    return url ? { ok: true, dataUrl: url } : { ok: false }
-  })
+  ipcMain.handle('capture-screen-prepare', () => prepareScreenCapture())
+  ipcMain.handle('capture-screen-finish', () => { finishScreenCapture(); return { ok: true } })
 
   // Markdown 本地文件：打开 / 另存为
   // 直写白名单：existingPath 只允许回写本次会话内经对话框打开/保存过的路径，渲染层不可任意指定写入位置
@@ -1137,8 +1160,16 @@ function wireIpc(): void {
       y: point.y,
       displayId: String(display.id),
       bounds: { ...display.bounds },
-      scaleFactor: display.scaleFactor
+      scaleFactor: display.scaleFactor,
+      // 顺带取走累积的点击：渲染层本来就在 80ms 轮询光标，不为点击再加一条 IPC
+      clicks: drainMouseClicks()
     }
+  })
+  // 点击采集只跟随录制生命周期：开始录制时装钩子，停止时卸载（平时完全不监听）
+  ipcMain.handle('recording-click-log', async (_e, active: boolean) => {
+    if (active) return { ok: await startMouseClickLog() }
+    stopMouseClickLog()
+    return { ok: true }
   })
   ipcMain.on('recording-protection', (_e, active: boolean) => {
     for (const window of BrowserWindow.getAllWindows()) window.setContentProtection(Boolean(active))
@@ -1221,7 +1252,21 @@ const encoderPickerFor = (ffmpegPath: string): ReturnType<typeof createEncoderPi
   return created
 }
 
-const exportRecordingPath = async (event: IpcMainInvokeEvent, inputPath: string, rawRequest: RecordingExportRequest) => {
+/**
+ * 导出后读一遍成品并与请求对照。自检失败**不影响导出结果**——文件已经写好了，
+ * 让人看到"导出成功但帧率对不上"比让人以为失败要好；探测本身出错则只报"未自检"。
+ */
+const verifyRecordingOutput = async (ffmpegPath: string, outputPath: string, request: RecordingExportRequest) => {
+    try {
+      const probe = await probeRecordingOutput(ffmpegPath, outputPath)
+      const check = recordingExportVerdict(request, probe)
+      if (!check.ok) console.warn('[recording-export] 成品自检未通过', check.warnings.join('；'), outputPath)
+      return check
+    } catch (error) {
+      return { ok: true, summary: '未自检', warnings: [`自检未能执行：${String(error instanceof Error ? error.message : error)}`] }
+    }
+  }
+  const exportRecordingPath = async (event: IpcMainInvokeEvent, inputPath: string, rawRequest: RecordingExportRequest) => {
     const jobId = String(rawRequest?.jobId || `recording-${Date.now()}`)
     const sendProgress = (phase: RecordingExportProgress['phase'], progress: number, message?: string): void => {
       event.sender.send('recording-export-progress', { jobId, phase, progress, message } satisfies RecordingExportProgress)
@@ -1293,8 +1338,9 @@ const exportRecordingPath = async (event: IpcMainInvokeEvent, inputPath: string,
         }, request.durationMs)
         recordingExportJobs.set(jobId, remux.child)
         await remux.done
-        sendProgress('done', 1, '无剪辑 · 已直接封装')
-        return { ok: true, path: outputPath }
+        const remuxCheck = await verifyRecordingOutput(executable, outputPath, request)
+        sendProgress('done', 1, remuxCheck.ok ? `无剪辑 · 已直接封装 · ${remuxCheck.summary}` : `无剪辑 · 已直接封装（${remuxCheck.warnings[0]}）`)
+        return { ok: true, path: outputPath, check: remuxCheck }
       }
 
       const configured = String(ffmpegStatic || '')
@@ -1311,8 +1357,9 @@ const exportRecordingPath = async (event: IpcMainInvokeEvent, inputPath: string,
       }, encoder)
       recordingExportJobs.set(jobId, running.child)
       await running.done
-      sendProgress('done', 1, '导出完成')
-      return { ok: true, path: outputPath }
+      const check = await verifyRecordingOutput(executable, outputPath, request)
+      sendProgress('done', 1, check.ok ? `导出完成 · ${check.summary}` : `导出完成，但自检有疑问（${check.warnings[0]}）`)
+      return { ok: true, path: outputPath, check }
     } catch (e) {
       const canceled = String(e instanceof Error ? e.message : e).includes('取消')
       if (outputPath && canceled) await rm(outputPath, { force: true }).catch(() => {})

@@ -1,6 +1,6 @@
 {
   "name": "agentic-island",
-  "version": "0.6.15",
+  "version": "0.6.16",
   "description": "常驻 Windows 屏幕顶部的 AI 编码 Agent 状态监控、审批与协作面板",
   "main": "./out/main/index.js",
   "author": "Agentic-Island",
@@ -25,7 +25,8 @@
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",
     "electron-updater": "^6.8.9",
-    "ffmpeg-static": "^5.2.0"
+    "ffmpeg-static": "^5.2.0",
+    "uiohook-napi": "^1.5.5"
   },
   "build": {
     "appId": "com.agentic.island",
@@ -41,6 +42,7 @@
     "files": [
       "out/**/*"
     ],
+    "npmRebuild": false,
     "asarUnpack": [
       "**/*.node",
       "node_modules/ffmpeg-static/**"

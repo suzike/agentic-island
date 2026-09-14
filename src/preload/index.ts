@@ -83,6 +83,11 @@ const api: IslandBridgeApi = {
     ipcRenderer.on('sticky-data', handler)
     return () => ipcRenderer.removeListener('sticky-data', handler)
   },
+  onScreenCaptureRequested: (cb: (capture: { target: ScreenshotTarget }) => void): (() => void) => {
+    const handler = (_e: unknown, capture: { target: ScreenshotTarget }): void => cb(capture)
+    ipcRenderer.on('screen-capture-requested', handler)
+    return () => ipcRenderer.removeListener('screen-capture-requested', handler)
+  },
   onScreenshot: (cb: (capture: ScreenshotCapture) => void): (() => void) => {
     const handler = (_e: unknown, capture: ScreenshotCapture): void => cb(capture)
     ipcRenderer.on('screenshot-captured', handler)
@@ -122,6 +127,7 @@ const api: IslandBridgeApi = {
   triggerScreenshot: (target: ScreenshotTarget = 'ask'): void => ipcRenderer.send('trigger-screenshot', target),
   recordingSources: () => ipcRenderer.invoke('recording-sources'),
   recordingCursor: () => ipcRenderer.invoke('recording-cursor'),
+  setRecordingClickLog: (active: boolean) => ipcRenderer.invoke('recording-click-log', active),
   setRecordingProtection: (active: boolean): void => ipcRenderer.send('recording-protection', active),
   recordingAnimeModel: (model) => ipcRenderer.invoke('recording-anime-model', model),
   prepareRecordingPreview: (data: ArrayBuffer) => ipcRenderer.invoke('recording-preview', data),
@@ -153,7 +159,8 @@ const api: IslandBridgeApi = {
   fetchCalendar: (url: string) => ipcRenderer.invoke('calendar-fetch', url),
   fetchUrlText: (url: string) => ipcRenderer.invoke('fetch-url-text', url),
   fetchCaldav: (cfg: { server: string; username: string; password: string }) => ipcRenderer.invoke('caldav-fetch', cfg),
-  captureScreen: () => ipcRenderer.invoke('capture-screen'),
+  prepareScreenCapture: () => ipcRenderer.invoke('capture-screen-prepare'),
+  finishScreenCapture: () => ipcRenderer.invoke('capture-screen-finish'),
   openMdFile: () => ipcRenderer.invoke('open-md-file'),
   saveMdFile: (content: string, suggestName: string, existingPath?: string) => ipcRenderer.invoke('save-md-file', content, suggestName, existingPath),
   exportPdf: (html: string, name: string) => ipcRenderer.invoke('export-pdf', html, name),

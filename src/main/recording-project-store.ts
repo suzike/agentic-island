@@ -60,6 +60,7 @@ export class RecordingProjectStore {
         if (project.schema !== 'agentic-island-recording-project/v2' || !project.id || !project.sessionId) continue
         // v0.6.14 之前的工程没有光标轨迹字段，补成空数组，避免下游到处判 undefined
         if (!Array.isArray(project.cursorTrack)) project.cursorTrack = []
+        if (!Array.isArray(project.clickTrack)) project.clickTrack = []
         if (typeof project.exportMotionReady !== 'boolean') project.exportMotionReady = false
         this.projects.set(project.id, project)
       } catch { /* ignore damaged project files without blocking app startup */ }
@@ -100,6 +101,7 @@ export class RecordingProjectStore {
         segments: (input.transcript?.segments || []).slice(0, 20_000).map((item) => ({ startMs: clamp(item.startMs, 0, durationMs), endMs: clamp(item.endMs, 0, durationMs), text: safeText(item.text, 2000) })).filter((item) => item.text && item.endMs >= item.startMs)
       },
       cursorTrack: normalizeCursorTrack(input.cursorTrack, durationMs),
+      clickTrack: normalizeCursorTrack(input.clickTrack, durationMs),
       exportMotionReady: Boolean(input.exportMotionReady),
       workspace: {
         timelineZoom: clamp(input.workspace?.timelineZoom, 0.5, 8, 1),

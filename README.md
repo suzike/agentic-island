@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.6.15](https://img.shields.io/badge/release-v0.6.15-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.15)
+[![Release v0.6.16](https://img.shields.io/badge/release-v0.6.16-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.16)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/terminal-v0615.png" alt="Agentic-Island v0.6.15 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
+<img src="screenshots/terminal-v0616.png" alt="Agentic-Island v0.6.16 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
 
 </div>
 
@@ -34,6 +34,22 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **成果没有沉淀** | 执行记录、情报简报、每日复盘与知识资料成为下一轮工作的上下文 |
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
+
+## v0.6.16 更新概览
+
+这一版先修掉"录屏与截图不够清晰"，再把点击纳入事件日志，并补齐导出期运镜的跨画幅与成品自检。
+
+- **录屏模糊的根因是默认设置，不是采集能力**。2560×1600 的屏，采集默认 `1080p` + `16:9` + `完整显示`：16:10 的画面按高度缩进 1920×1080 画布还要补左右黑边，**实际内容只有 1728×1080（约原生的 67%）**，全屏回放再放大 1.48 倍 —— 小字必糊。现在默认**跟随屏幕原生 + 跟随源画幅**，三个场景预设也不再偷偷降级。实测同样操作：成片从 1920×1080 变成 **2560×1600**。
+
+  采集链路本身是好的：实测 Chromium 抓 2560×1600 与 DPI-aware 的 .NET 直接抓物理像素**逐像素一致**。
+
+- **整屏截图每次都被多一次重采样**：逻辑尺寸 1707×1067 × scaleFactor 1.5 = 2560.5，取整成 2561×1601 去请求，而面板是 2560×1600 —— 同一张静态图锐度实测 84.9 → 64.1。现在改走**媒体流**（与录制同链路）取原生帧，实测抓回 2560×1600。另外截图**不再静默抓到另一块屏**（此前匹配不上会退到 `sources[0]`，连拍 5 张实测 1 张错屏），现在明确报错。
+
+- **鼠标点击事件采集**（只鼠标、只在录制期间）：录制时采集左/右/中键点击落进工程。最直接的收益是**剪除空白不再误剪"盯着看并且点了"的片段**（翻页、逐条点开时每秒都点一下，纯看轨迹会整段判成发呆）；同时为后续的点击涟漪、按点击自动推近留好数据。刻意**不碰键盘**，且停止录制即卸载钩子。
+
+- **导出后自检**：导出完成不再只报"已导出"，而是**读回写出的文件**与请求对照 —— `已导出 … · 自检通过（8.8s · 30fps · H264）`，对不上就明说哪里对不上。这个项目被"导出画面飞快跑完"咬过两次，两次都是文件写成功、只有内容不对，所以"导出完成"必须以读回来的元数据为准。同时修掉导出链路的静默失败（此前任何异常都被吞掉，表现为"点了导出没反应"）。
+
+- **导出期运镜补齐两块**：① **跨画幅**——先按目标画幅"铺满"裁齐、再把光标轨迹重映射进裁切后的画框，所以竖屏 + 运镜可以同时用（实测 2560×1600 素材 + 竖屏画布 → 成片 1080×1920）；② **原始采集不再被画面比例挡住** —— 导出页有了自己的「画布」档（跟随素材 / 横屏 / 竖屏 / 方形），补黑边或裁切由导出期完成。
 
 ## v0.6.15 更新概览
 
@@ -172,24 +188,24 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v0615.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v0615.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v0616.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v0616.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v0615.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v0615.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v0616.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v0616.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v0615.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v0615.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v0616.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v0616.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/recording-v0615.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原始采集 30fps · 导出期运镜 · 自动剪空白 · AI 后期</sub></td>
-<td width="50%" align="center"><img src="screenshots/settings-v0615.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v0616.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜 · 自动剪空白</sub></td>
+<td width="50%" align="center"><img src="screenshots/settings-v0616.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v0615.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v0616.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -219,7 +235,7 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **本地知识库** | 独立 Embedding 地址/模型/密钥；接入文件夹、文件、网页和问答会话；支持常见源码/文本、PDF、DOCX；回答、完整分支或框选片段可直接沉淀；分块、向量索引、引用问答、Wiki 概览与重建索引 |
 | **Markdown 工作台** | 本地打开/保存；编辑、分栏、阅读模式；查找替换；目录；快照；Zen；PDF/HTML/文本导出；AI 写作工具 |
 | **截图工坊** | 区域截图、无损保存、边框/背景/留白/圆角/阴影、标注、OCR/视觉分析、发送问答 |
-| **专业录屏工坊** | 显示器/窗口/区域录制；画布合成或**原始画面采集**（跳过合成、实测 30fps 原生画质）；鼠标聚焦运镜（录制时实时，或**留到导出期按光标轨迹重建**）；**按轨迹自动剪除发呆/等加载空白**；音频混合；画中画与人物替换；分块落盘与恢复；三轨时间线；真实转写与 AI 粗剪；工程库；MP4/WebM/GIF/MP3、多档压缩、分辨率/帧率和可开关字幕轨 |
+| **专业录屏工坊** | 显示器/窗口/区域录制；**默认跟随屏幕原生画幅**；画布合成或**原始画面采集**（跳过合成、实测 30fps 原生画质）；鼠标聚焦运镜（录制时实时，或**留到导出期按光标轨迹重建**）；**按轨迹自动剪除发呆/等加载空白**；音频混合；画中画与人物替换；分块落盘与恢复；三轨时间线；真实转写与 AI 粗剪；工程库；MP4/WebM/GIF/MP3、多档压缩、分辨率/帧率和可开关字幕轨 |
 | **屏幕分析** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> 捕获当前屏幕并交给视觉模型分析 |
 | **工程计算** | 多行表达式、变量跨行引用、数学函数、统计与温度换算 |
 | **学习中心** | 便签间隔重复复习、技术雷达和学习状态管理 |
@@ -289,7 +305,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.6.15.exe
+Agentic-Island-Setup-0.6.16.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。

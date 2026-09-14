@@ -10,7 +10,7 @@ import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../u
 import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accentText, accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 import { island } from '../bridge'
-import { clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, sanitizeScreenshotName } from '../logic/screenshot'
+import { captureScreenNative, clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, sanitizeScreenshotName } from '../logic/screenshot'
 import type { Point as Pt, Rect, ScreenshotFormat } from '../logic/screenshot'
 import { ScreenRecorderStudio } from './ScreenRecorderStudio'
 import type { LlmRequestConfig } from '../../../shared/protocol'
@@ -635,10 +635,23 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
     })
   }
 
+  /** 两次 IPC 夹一次媒体流抓帧：prepare 藏岛并挑源，finish 无条件还原显示状态。 */
+  const captureDisplayShot = async (): Promise<{ dataUrl?: string; error?: string }> => {
+    const prepared = await island.prepareScreenCapture().catch(() => ({ ok: false, sourceId: undefined as string | undefined, error: '截图准备失败' }))
+    try {
+      if (!prepared.ok || !prepared.sourceId) return { error: prepared.error || '截图准备失败' }
+      return { dataUrl: await captureScreenNative(prepared.sourceId) }
+    } catch (error) {
+      return { error: String(error instanceof Error ? error.message : error) }
+    } finally {
+      void island.finishScreenCapture().catch(() => {})
+    }
+  }
+
   const captureDisplay = (): void => {
-    void island.captureScreen().then((r) => {
-      if (r.ok && r.dataUrl) useSource(r.dataUrl, '整屏截图')
-      else flash('✗ 整屏截图失败')
+    void captureDisplayShot().then((result) => {
+      if (result.dataUrl) useSource(result.dataUrl, '整屏截图')
+      else flash('✗ ' + (result.error || '整屏截图失败'))
     })
   }
 

@@ -354,6 +354,14 @@ export interface RecordingIdleRange {
   endMs: number
 }
 
+/** 录制期采到的鼠标点击（归一化坐标，与光标轨迹同一坐标系）。 */
+export interface RecordingClickSample {
+  t: number
+  x: number
+  y: number
+  button?: 'left' | 'right' | 'middle'
+}
+
 export interface RecordingIdleOptions {
   /** 连续静止多久算空闲（毫秒） */
   idleMs?: number
@@ -361,6 +369,8 @@ export interface RecordingIdleOptions {
   moveEpsilonPx?: number
   /** 头部/尾部静止区保留的时长，避免把开场和收尾整段剪掉 */
   edgeKeepMs?: number
+  /** 点击事件：点一下也算"人在操作"，不能因为光标没动就把这段当发呆剪掉 */
+  clicks?: RecordingClickSample[]
 }
 
 /**
@@ -404,7 +414,30 @@ export function recordingIdleRanges(
   // 采样结束时仍在静止：到录制结束都算空闲
   const lastStill = Math.hypot(sorted[sorted.length - 1].x - anchorX, sorted[sorted.length - 1].y - anchorY) <= epsilon
   if (lastStill) push(stillSince, total)
-  return mergeIdleRanges(ranges, idleMs)
+  // 点击打断静止：光标停着但在点（翻页、逐条点开）不是发呆，把空闲区间在点击处切开，
+  // 切开后仍够长的片段才保留——这件事只有点击信号能判断，光靠轨迹会误剪。
+  const clickTimes = [...new Set((options.clicks || []).map((click) => Math.round(click.t)).filter((at) => at > 0 && at < total))].sort((a, b) => a - b)
+  // 顺序很重要：**先合并再按点击切**。反过来的话点击切出来的两半是紧挨着的（间隔 0），
+  // 会被合并步骤重新粘成一段，"点击打断静止"就白做了。
+  const merged = mergeIdleRanges(ranges, idleMs)
+  return clickTimes.length ? merged.flatMap((range) => splitRangeAtClicks(range, clickTimes, idleMs)) : merged
+}
+
+/**
+ * 把一段候选空闲区间在点击处切开，只保留仍然 ≥ idleMs 的片段。
+ * 点击本身就意味着"人在操作"，它两侧的静止各自重新计时。
+ */
+function splitRangeAtClicks(range: RecordingIdleRange, clickTimes: number[], idleMs: number): RecordingIdleRange[] {
+  const hits = clickTimes.filter((at) => at > range.startMs && at < range.endMs)
+  if (!hits.length) return [range]
+  const pieces: RecordingIdleRange[] = []
+  let cursor = range.startMs
+  for (const at of hits) {
+    if (at - cursor >= idleMs) pieces.push({ startMs: cursor, endMs: at })
+    cursor = at
+  }
+  if (range.endMs - cursor >= idleMs) pieces.push({ startMs: cursor, endMs: range.endMs })
+  return pieces
 }
 
 /** 合并相邻/重叠的空闲区间（中间隔得很短的静止段合成一段，避免剪出碎片）。 */
@@ -504,6 +537,53 @@ export function recordingMotionFrames(
   return frames
 }
 
+/**
+ * 运镜跨画幅时的"铺满"裁切窗口（归一化到源画面）。
+ *
+ * `zoompan` 的取景窗口永远保持输入的宽高比，所以源画幅 ≠ 目标画幅时它会把画面拉变形。
+ * 解法是**先**把源画面裁成目标画幅（铺满语义），再让 zoompan 在已对齐的画幅里取景。
+ * 同画幅时返回 null（不做任何裁切，路径也不用动）。
+ *
+ * 为什么用铺满而不是补黑边：带着黑边缩放会把放大的面积浪费在边上，观感也怪。
+ * 所以跨画幅 + 运镜一律按铺满重组，并在自检摘要里说清楚。
+ */
+export function recordingMotionCoverCrop(
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number
+): { x: number; y: number; width: number; height: number } | null {
+  const sw = Math.max(1, sourceWidth)
+  const sh = Math.max(1, sourceHeight)
+  const tw = Math.max(1, targetWidth)
+  const th = Math.max(1, targetHeight)
+  const sourceAspect = sw / sh
+  const targetAspect = tw / th
+  if (Math.abs(sourceAspect - targetAspect) < 0.005) return null
+  if (targetAspect < sourceAspect) {
+    // 目标更"窄"（如 16:10 → 9:16）：裁掉左右，保留满高
+    const width = targetAspect / sourceAspect
+    return { x: (1 - width) / 2, y: 0, width, height: 1 }
+  }
+  // 目标更"宽"（如 16:10 → 16:9）：裁掉上下，保留满宽
+  const height = sourceAspect / targetAspect
+  return { x: 0, y: (1 - height) / 2, width: 1, height }
+}
+
+/** 把按源画面归一化的相机路径重映射到裁切后的画框（裁切窗口外的点钳到边缘）。 */
+export function remapRecordingMotionFrames(
+  frames: RecordingMotionFrame[],
+  crop: { x: number; y: number; width: number; height: number } | null
+): RecordingMotionFrame[] {
+  if (!crop || crop.width <= 0 || crop.height <= 0) return frames
+  const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
+  return frames.map((frame) => ({
+    ...frame,
+    x: Number(clamp01((frame.x - crop.x) / crop.width).toFixed(4)),
+    y: Number(clamp01((frame.y - crop.y) / crop.height).toFixed(4))
+  }))
+}
+
 /** 导出期运镜的系数与录音期保持一致的默认值，供工坊与测试共用。 */
 export const RECORDING_MOTION_MAX_ZOOM = 1.6
 
@@ -516,8 +596,6 @@ export const RECORDING_MOTION_MAX_ZOOM = 1.6
 export type RecordingCaptureMode = 'composite' | 'raw'
 
 export interface RecordingRawModeOptions {
-  aspect: RecordingAspect
-  fitMode: 'contain' | 'cover'
   regionEnabled: boolean
   webcam: boolean
   watermarkEnabled: boolean
@@ -528,17 +606,18 @@ export interface RecordingRawModeOptions {
 /**
  * 原始采集当前**不能**表达的东西（空数组表示可用）。
  *
- * 这里不是偷懒的禁用清单，而是逐项说明"这个功能为什么必须画布"：画幅比例与自定义区域要重采样、
+ * 这里不是偷懒的禁用清单，而是逐项说明"这个功能为什么必须画布"：自定义区域要重采样、
  * 画中画与水印要叠图、隐私条要遮挡——它们都需要逐帧合成，且都是用户明确选过的意图，
  * 静默改掉比拒绝更糟。原始采集只把屏幕原样送进编码器，这些能力要么留到导出期，要么如实说不支持。
+ *
+ * 画幅**不在**清单里：它已经能在导出期落地了（`buildRecordingAspectFilters` 按画幅重组画面，
+ * 补黑边或裁切），所以"录屏幕原样 + 导出 16:9"是可用的，不必再挡用户。
  *
  * 刻意**不**把鼠标光晕/轨迹列进来：它们纯粹是画布效果，原始采集本来就不画，
  * 属于"切过去就没有"而不是"切过去不生效"，由调用方顺手关掉即可（见 studio 的切换处理）。
  */
 export function recordingRawModeBlockers(options: RecordingRawModeOptions): string[] {
   const blockers: string[] = []
-  if (options.aspect !== 'source') blockers.push('画幅比例（请切到“跟随源”：原始采集就是屏幕原始画幅，导出期只能等比缩放，不能凭空补出别的画幅）')
-  if (options.fitMode !== 'contain') blockers.push('适配方式（请切到“完整显示”：原始采集不做铺满裁切）')
   if (options.regionEnabled) blockers.push('自定义录制区域（请改用剪辑页的成片裁切）')
   if (options.webcam) blockers.push('摄像头画中画（需要逐帧叠图）')
   if (options.watermarkEnabled) blockers.push('文字水印（需要逐帧绘制）')

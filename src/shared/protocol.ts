@@ -11,6 +11,13 @@ export interface ScreenshotCapture {
   target: ScreenshotTarget
 }
 
+/** 截图前的准备结果：主进程已藏岛并挑好采集源，取像素由渲染层用媒体流完成（原生尺寸）。 */
+export interface ScreenCapturePrepare {
+  ok: boolean
+  sourceId?: string
+  error?: string
+}
+
 export type RecordingSourceKind = 'screen' | 'window'
 export type RecordingAnimeModel = 'handdrawn' | 'portrait' | 'comic'
 export interface RecordingSource {
@@ -41,6 +48,8 @@ export interface RecordingCursorPoint {
   displayId: string
   bounds: { x: number; y: number; width: number; height: number }
   scaleFactor: number
+  /** 自上次轮询以来累积的鼠标点击（只采集左/右/中键，不监听键盘） */
+  clicks?: Array<{ at: number; x: number; y: number; button: 'left' | 'right' | 'middle' }>
 }
 
 export type RecordingExportFormat = 'webm' | 'mp4' | 'gif' | 'mp3'
@@ -90,6 +99,11 @@ export interface RecordingExportRequest {
   subtitleFilePath?: string
   edit?: RecordingEditSettings
   /**
+   * 素材画幅与输出画幅不一致时的重组方式：`contain` 补黑边、`cover` 裁切。
+   * 原始画面采集按屏幕原始画幅录制，这个字段决定它怎么落到用户选的画幅上。
+   */
+  fit?: 'contain' | 'cover'
+  /**
    * 导出期运镜：按**成片帧序**给出的相机路径，由渲染层从工程的光标轨迹重建。
    *
    * 之所以在渲染层建：只有渲染层知道剪辑段（保留哪些区间、什么速度），而主进程只需要把
@@ -110,6 +124,26 @@ export interface RecordingMotionFrame {
 export interface RecordingMotionTrack {
   frames: RecordingMotionFrame[]
   fps: number
+  /**
+   * 源画面需要先做的"铺满"裁切窗口（归一化）。源画幅 ≠ 目标画幅时由渲染层算好放进来：
+   * `zoompan` 的取景窗口保持输入宽高比，画幅不一致会拉伸，所以先裁齐再取景。
+   * 同画幅时为 undefined（主进程不做任何裁切）。
+   */
+  crop?: { x: number; y: number; width: number; height: number }
+}
+
+/**
+ * 导出结果 + **成品自检**结论。
+ *
+ * `check` 来自"读回写出的文件再与请求对照"，而不是"FFmpeg 正常退出"——本项目被
+ * "导出画面飞快跑完"这类事故咬过两次，两次都是文件写成功、只有内容不对。
+ */
+export interface RecordingExportResult {
+  ok: boolean
+  path?: string
+  canceled?: boolean
+  error?: string
+  check?: { ok: boolean; summary: string; warnings: string[] }
 }
 
 export interface RecordingExportProgress {
@@ -193,6 +227,8 @@ export interface RecordingProjectDocument {
   timeline: RecordingProjectTimelineEvent[]
   transcript: { model: string; language: 'auto' | 'zh' | 'en'; segments: RecordingTranscriptSegment[] }
   cursorTrack: RecordingCursorSample[]
+  /** 录制期采到的鼠标点击（只左/右/中键，不监听键盘）。事后无法补录，供剪除空白与导出期效果使用。 */
+  clickTrack: RecordingCursorSample[]
   /**
    * 这段素材能不能在导出期重建运镜。
    *
@@ -210,7 +246,7 @@ export interface RecordingProjectDocument {
   }
   aiResults: RecordingProjectAiResult[]
 }
-export type RecordingProjectSaveInput = Omit<RecordingProjectDocument, 'id' | 'createdAt' | 'updatedAt' | 'cursorTrack' | 'exportMotionReady'> & { id?: string; cursorTrack?: RecordingCursorSample[]; exportMotionReady?: boolean }
+export type RecordingProjectSaveInput = Omit<RecordingProjectDocument, 'id' | 'createdAt' | 'updatedAt' | 'cursorTrack' | 'clickTrack' | 'exportMotionReady'> & { id?: string; cursorTrack?: RecordingCursorSample[]; clickTrack?: RecordingCursorSample[]; exportMotionReady?: boolean }
 export interface RecordingProjectSummary {
   id: string
   sessionId: string
@@ -667,6 +703,8 @@ export interface IslandBridgeApi {
   recordingSources: () => Promise<{ ok: boolean; sources?: RecordingSource[]; error?: string }>
   /** 录屏智能运镜：读取当前鼠标与所在显示器坐标。 */
   recordingCursor: () => Promise<RecordingCursorPoint>
+  /** 录制期间开关鼠标点击采集（只跟随录制生命周期，平时不监听输入）。 */
+  setRecordingClickLog: (active: boolean) => Promise<{ ok: boolean }>
   /** 录屏期间禁止灵动岛被桌面采集器录入。 */
   setRecordingProtection: (active: boolean) => void
   /** 读取随安装包分发的本地人物动漫化 ONNX 模型。 */
@@ -682,8 +720,8 @@ export interface IslandBridgeApi {
   recoverRecordingSession: (id: string) => Promise<{ ok: boolean; session?: RecordingSessionManifest; url?: string; error?: string }>
   discardRecordingSession: (id: string) => Promise<{ ok: boolean; error?: string }>
   /** 保存或用内置 FFmpeg 转码录制结果。 */
-  exportRecording: (data: ArrayBuffer, request: RecordingExportRequest) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
-  exportRecordingSession: (id: string, request: RecordingExportRequest) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
+  exportRecording: (data: ArrayBuffer, request: RecordingExportRequest) => Promise<RecordingExportResult>
+  exportRecordingSession: (id: string, request: RecordingExportRequest) => Promise<RecordingExportResult>
   transcribeRecordingSession: (id: string, cfg: LlmRequestConfig, model: string, language: 'auto' | 'zh' | 'en') => Promise<{ ok: boolean; text?: string; segments?: RecordingTranscriptSegment[]; error?: string }>
   saveRecordingProject: (input: RecordingProjectSaveInput) => Promise<{ ok: boolean; project?: RecordingProjectDocument; error?: string }>
   listRecordingProjects: () => Promise<{ ok: boolean; projects?: RecordingProjectSummary[]; error?: string }>
@@ -707,7 +745,12 @@ export interface IslandBridgeApi {
   /** 飞书日历 CalDAV 同步（官方支持：设置→日历→CalDAV 同步生成账号） */
   fetchCaldav: (cfg: { server: string; username: string; password: string }) => Promise<{ ok: boolean; events?: CalendarEvent[]; error?: string }>
   /** 屏幕理解：截取主屏返回 dataURL（先自动藏岛） */
-  captureScreen: () => Promise<{ ok: boolean; dataUrl?: string }>
+  /** 截图第一步：藏岛 + 严格匹配"光标所在显示器"的采集源（不匹配就报错，不静默换屏）。 */
+  prepareScreenCapture: () => Promise<ScreenCapturePrepare>
+  /** 截图第二步：还原岛的显示状态（成功失败都要调）。 */
+  finishScreenCapture: () => Promise<{ ok: boolean }>
+  /** 全局热键请求截图：主进程只转发，抓帧在渲染层。 */
+  onScreenCaptureRequested: (cb: (capture: { target: ScreenshotTarget }) => void) => () => void
   /** 打开本地 Markdown 文件 */
   openMdFile: () => Promise<{ ok: boolean; path?: string; name?: string; content?: string; error?: string }>
   /** 保存 Markdown 到本地（existingPath 为空则弹另存为） */

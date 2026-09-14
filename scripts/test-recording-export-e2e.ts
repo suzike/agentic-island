@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startRecordingFfmpeg } from '../src/main/recording-export.ts'
+import { probeRecordingOutput, recordingExportVerdict, startRecordingFfmpeg } from '../src/main/recording-export.ts'
 import type { RecordingExportRequest } from '../src/shared/protocol.ts'
 
 const ffmpeg = join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg.exe')
@@ -123,6 +123,83 @@ try {
   const regressions = motionLuma.filter((value, index) => index > 0 && value < motionLuma[index - 1] - 3).length
   assert.equal(regressions, 0, `取景扫过不应出现回退（实测 ${regressions} 帧回退）`)
   console.log(`  导出期运镜: 平均亮度 ${motionLuma[0]} → ${motionLuma.at(-1)}（跨幅 ${spread(motionLuma)}），耗时 ${Date.now() - motionStart}ms`)
+  // 成品自检：用真实 FFmpeg 读回写出的文件，确认"元数据与请求一致"这件事本身可用。
+  // 这一条补的是"导出成功"的可信度——本项目两次事故都是文件写成功但内容不对。
+  const motionProbe = await probeRecordingOutput(ffmpeg, motionFile)
+  console.log(`  成品自检读取: ${motionProbe.durationMs}ms / ${motionProbe.fps}fps / ${motionProbe.videoCodec}`)
+  assert.ok(Math.abs(motionProbe.durationMs - 3_000) < 120, `探测应读到真实时长（实测 ${motionProbe.durationMs}ms）`)
+  assert.equal(motionProbe.fps, 30, '探测应读到 30fps（运镜导出后仍是恒定帧率）')
+  assert.equal(motionProbe.videoCodec, 'h264', '探测应读到 H.264')
+  assert.equal(motionProbe.hasAudio, false, '这条请求没有音轨，探测不得凭空报有声音')
+  const motionVerdict = recordingExportVerdict(motionBase, motionProbe)
+  assert.equal(motionVerdict.ok, true, `真实成品的自检应通过（实测 ${motionVerdict.warnings.join('；')}）`)
+  // 反向：把同一份成品拿一个"请求 60fps"的请求去自检，必须被判为不一致（否则自检等于没接）
+  assert.equal(recordingExportVerdict({ ...motionBase, outputFps: 60 }, motionProbe).ok, false, '帧率不符时自检必须报出来')
+  const controlProbe = await probeRecordingOutput(ffmpeg, controlFile)
+  assert.match(recordingExportVerdict({ ...motionBase, hasAudio: true }, controlProbe).warnings.join(''), /音轨|没有声音/, '请求带音轨而成品无声音时要报出来')
+  // 画幅重组：原始采集录的是屏幕原始画幅（这里用 640x400 的 16:10 素材代表），
+  // 导出到 16:9 必须真的变成 640x360，而不是"缩成小一圈"。
+  const wideSource = join(root, 'wide.mp4')
+  const wideGenerated = spawnSync(ffmpeg, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=640x400:r=30:d=2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', wideSource], { windowsHide: true, encoding: 'utf8' })
+  assert.equal(wideGenerated.status, 0, wideGenerated.stderr || '生成 16:10 素材失败')
+  const aspectBase: RecordingExportRequest = {
+    ...motionBase,
+    jobId: 'e2e-aspect',
+    width: 640,
+    height: 400,
+    hasAudio: false,
+    subtitle: undefined,
+    subtitleFilePath: undefined
+  }
+  const containedFile = join(root, 'aspect-contain.mp4')
+  await startRecordingFfmpeg(ffmpeg, wideSource, containedFile, { ...aspectBase, outputWidth: 640, outputHeight: 360, fit: 'contain' }, () => {}).done
+  const containedInfo = probe(containedFile)
+  const containedSize = /Video:.*?, (\d+)x(\d+)/.exec(`${spawnSync(ffmpeg, ['-hide_banner', '-i', containedFile], { windowsHide: true, encoding: 'utf8' }).stderr}`)
+  assert.equal(`${containedSize?.[1]}x${containedSize?.[2]}`, '640x360', `补边模式成片尺寸应等于请求的 16:9（实测 ${containedSize?.[1]}x${containedSize?.[2]}）`)
+  assert.ok(Math.abs(containedInfo.duration - 2) < 0.3, `画幅重组不得改变时长（实测 ${containedInfo.duration}）`)
+  // 16:10 素材放进 16:9 是**左右**补黑边（素材更窄，按高装得下），所以取左侧一列来验证补边真的存在。
+  // 注意别取上下：那是 letterbox 的方向，这里补的是 pillarbox。
+  const leftStrip = (file: string, height: number) => spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', '1', '-i', file, '-frames:v', '1', '-vf', `crop=4:${height}:0:0,scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { windowsHide: true, maxBuffer: 1 << 20 })
+  const containedLuma = Number((leftStrip(containedFile, 360).stdout as Buffer)[0])
+  assert.ok(containedLuma < 20, `contain 模式左缘应是补出来的黑边（实测亮度 ${containedLuma}）`)
+  const containedTop = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', '1', '-i', containedFile, '-frames:v', '1', '-vf', 'crop=640:4:0:0,scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { windowsHide: true, maxBuffer: 1 << 20 })
+  assert.ok(Number((containedTop.stdout as Buffer)[0]) > 20, `contain 模式顶部应是画面内容（实测亮度 ${(containedTop.stdout as Buffer)[0]}）`)
+  const coveredFile = join(root, 'aspect-cover.mp4')
+  await startRecordingFfmpeg(ffmpeg, wideSource, coveredFile, { ...aspectBase, outputWidth: 360, outputHeight: 640, fit: 'cover' }, () => {}).done
+  const coveredText = `${spawnSync(ffmpeg, ['-hide_banner', '-i', coveredFile], { windowsHide: true, encoding: 'utf8' }).stderr}`
+  const coveredSize = /Video:.*?, (\d+)x(\d+)/.exec(coveredText)
+  assert.equal(`${coveredSize?.[1]}x${coveredSize?.[2]}`, '360x640', `铺满模式成片尺寸应等于请求的 9:16（实测 ${coveredSize?.[1]}x${coveredSize?.[2]}）`)
+  // 铺满不补边：整幅仍是素材内容（红色），不该出现黑边
+  const coveredLuma = Number((leftStrip(coveredFile, 640).stdout as Buffer)[0])
+  assert.ok(coveredLuma > 20, `cover 模式左缘应是画面内容而不是黑边（实测亮度 ${coveredLuma}）`)
+  console.log(`  画幅重组: contain ${containedSize?.[1]}x${containedSize?.[2]} / cover ${coveredSize?.[1]}x${coveredSize?.[2]}`)
+  // 跨画幅 + 运镜：先按目标画幅裁齐、再把路径重映射进去。这里用横向渐变素材验证两件事——
+  // ① 成片尺寸真的变成目标画幅 ② 取景窗口仍然随帧移动（运镜没被画幅重组吃掉）。
+  const crossFile = join(root, 'motion-cross.mp4')
+  const crossFrames = Array.from({ length: 90 }, (_, index) => ({ x: 0.5, y: 0.5, zoom: 1.5, ...(index === 0 ? {} : {}) }))
+  const crossCrop = { x: (1 - 0.5625 / (640 / 360)) / 2, y: 0, width: 0.5625 / (640 / 360), height: 1 }
+  const crossPath = Array.from({ length: 90 }, (_, index) => {
+    const raw = 0.2 + (0.6 * index) / 89
+    return { x: Math.max(0, Math.min(1, (raw - crossCrop.x) / crossCrop.width)), y: 0.5, zoom: 1.5 }
+  })
+  await startRecordingFfmpeg(ffmpeg, rampSource, crossFile, {
+    ...motionBase,
+    jobId: 'e2e-motion-cross',
+    outputWidth: 360,
+    outputHeight: 640,
+    motion: { fps: 30, frames: crossPath, crop: crossCrop }
+  }, () => {}).done
+  const crossText = `${spawnSync(ffmpeg, ['-hide_banner', '-i', crossFile], { windowsHide: true, encoding: 'utf8' }).stderr}`
+  const crossSize = /Video:.*?, (\d+)x(\d+)/.exec(crossText)
+  assert.equal(`${crossSize?.[1]}x${crossSize?.[2]}`, '360x640', `跨画幅运镜成片应是目标画幅（实测 ${crossSize?.[1]}x${crossSize?.[2]}）`)
+  const crossLuma = frameLuma(crossFile)
+  assert.ok(crossLuma.length > 60, `跨画幅运镜应解出足够帧（实测 ${crossLuma.length}）`)
+  // 跨幅门槛比同画幅低是应该的：裁齐后只剩约 36% 的宽度可供平移，渐变上可取的平均亮度范围
+  // 也按同比例缩小（同画幅实测 115，这里约 37）。断言仍然证明"取景窗口在动"，只是范围更小。
+  assert.ok(spread(crossLuma) > 25, `跨画幅时取景窗口仍应扫过画面（实测跨幅 ${spread(crossLuma)}，裁齐后可用宽度约 36%）`)
+  const crossVerdict = recordingExportVerdict({ ...motionBase, outputWidth: 360, outputHeight: 640 }, await probeRecordingOutput(ffmpeg, crossFile))
+  assert.equal(crossVerdict.warnings.some((w) => /未生效/.test(w)), false, '跨画幅运镜不应被判为未生效')
+  console.log(`  跨画幅运镜: ${crossSize?.[1]}x${crossSize?.[2]}，平均亮度跨幅 ${spread(crossLuma)}`)
   console.log('recording export e2e tests passed')
 } finally {
   await rm(root, { recursive: true, force: true })

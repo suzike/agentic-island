@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { EncoderRunner } from '../src/main/recording-export.ts'
-import { buildRecordingFfmpegArgs, buildRecordingMotionFilter, MOTION_MAX_CENTER_TOLERANCE, buildRecordingRemuxArgs, crfFor, detectHardwareEncoders, hardwareQuantizerForCrf, MAX_MOTION_WAYPOINTS, parseHardwareEncoders, pickFastestEncoder, pickVideoEncoder, recordingExportDurationMs, recordingExportStrategy, recordingExportSubtitleSegments, recordingHasEdits, simplifyRecordingMotion, videoEncoderArgs } from '../src/main/recording-export.ts'
+import { buildRecordingAspectFilters, buildRecordingFfmpegArgs, buildRecordingMotionCropFilter, buildRecordingMotionFilter, MOTION_MAX_CENTER_TOLERANCE, recordingMotionUsable, parseRecordingOutputProbe, probeRecordingOutput, recordingExportVerdict, buildRecordingRemuxArgs, crfFor, detectHardwareEncoders, hardwareQuantizerForCrf, MAX_MOTION_WAYPOINTS, parseHardwareEncoders, pickFastestEncoder, pickVideoEncoder, recordingExportDurationMs, recordingExportStrategy, recordingExportSubtitleSegments, recordingHasEdits, simplifyRecordingMotion, videoEncoderArgs } from '../src/main/recording-export.ts'
 import { recordingContainerOf, recordingFileExtension, sniffRecordingContainer } from '../src/shared/recording-format.ts'
-import { clampRecordingBarPosition, formatRecordingTime, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionFrames, recordingSmoothingAlpha, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
+import { clampRecordingBarPosition, formatRecordingTime, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrames, remapRecordingMotionFrames, recordingSmoothingAlpha, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
 } from '../src/renderer/src/logic/recording.ts'
 import { recordingSourceLabel, recordingWindowHandle, sameRecordingWindowSource } from '../src/shared/recording-source.ts'
 import type { RecordingExportRequest } from '../src/shared/protocol.ts'
@@ -447,5 +447,143 @@ assert.ok(longFilter.length < 12_000, `运镜表达式不能撑爆命令行（�
 // 导出策略：有运镜时必须重编码（拷流等于运镜不生效）
 assert.equal(recordingExportStrategy({ jobId: 'm', name: 'm', format: 'mp4', quality: 'high', durationMs: 1_000, width: 1920, height: 1080, fps: 30, motion: { fps: 30, frames: linear.frames } }, 'mp4'), 'encode', '导出期运镜必须走重编码')
 assert.equal(recordingExportStrategy({ jobId: 'm', name: 'm', format: 'mp4', quality: 'high', durationMs: 1_000, width: 1920, height: 1080, fps: 30 }, 'mp4'), 'remux', '没有运镜时仍走最快的直接封装')
+
+/* ---------------- 导出后自检：读回成品元数据并与请求对照 ---------------- */
+
+// 解析用固定文本（就是 ffmpeg -i 的真实形态），不依赖能否起进程
+const probeText = [
+  "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'out.mp4':",
+  '  Duration: 00:00:08.84, start: 0.000000, bitrate: 1751 kb/s',
+  '  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709), 1920x1080, 30 fps, 30 tbr, 15360 tbn (default)',
+  '  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 192 kb/s (default)'
+].join(String.fromCharCode(10))
+const parsed = parseRecordingOutputProbe(probeText)
+assert.equal(parsed.durationMs, 8_840, `应解析出时长（实测 ${parsed.durationMs}）`)
+assert.equal(parsed.fps, 30, '应解析出视频帧率')
+assert.equal(parsed.videoCodec, 'h264', '应解析出视频编码')
+assert.equal(parsed.hasVideo, true, '应识别出视频轨')
+assert.equal(parsed.hasAudio, true, '应识别出音轨')
+assert.equal(parseRecordingOutputProbe('Stream #0:0: Video: vp9, yuv420p, 1280x720, 25 fps').hasAudio, false, '没有音轨时如实报 false')
+assert.equal(parseRecordingOutputProbe('Duration: 00:00:00.00, start: 0.000000').durationMs, 0, '零时长不编造')
+
+const okRequest: RecordingExportRequest = { jobId: 'v', name: 'v', format: 'mp4', quality: 'high', durationMs: 9_000, width: 1920, height: 1080, fps: 30, hasAudio: true, outputFps: 30 }
+assert.equal(recordingExportVerdict(okRequest, parsed).ok, true, '元数据与请求一致时自检通过')
+assert.match(recordingExportVerdict(okRequest, parsed).summary, /8\.8s · 30fps · H264/, '摘要要能直接给人看')
+
+// 历史事故形态①：时长正常但帧率被时基污染（tbr 1k / 1000fps）
+const polluted = parseRecordingOutputProbe(probeText.replace('30 fps, 30 tbr, 15360 tbn', '1000 fps, 1000 tbr, 1k tbn'))
+const pollutedCheck = recordingExportVerdict(okRequest, polluted)
+assert.equal(pollutedCheck.ok, false, '帧率被污染必须判为未通过')
+assert.match(pollutedCheck.warnings[0], /帧率对不上/, `应明确说是帧率问题（实测"${pollutedCheck.warnings[0]}"）`)
+
+// 历史事故形态②：时长被拉长 512 倍（zoompan 时基 + 后置 fps 滤镜）
+const stretched = parseRecordingOutputProbe(probeText.replace('Duration: 00:00:08.84', 'Duration: 00:25:36.00'))
+const stretchedCheck = recordingExportVerdict(okRequest, stretched)
+assert.equal(stretchedCheck.ok, false, '时长被拉长必须判为未通过')
+assert.match(stretchedCheck.warnings.join(''), /时长对不上/, '应明确说是时长问题')
+
+// 请求带音轨但成品没声音（转 AAC 那一步失败的典型表现）
+assert.equal(recordingExportVerdict(okRequest, parseRecordingOutputProbe(probeText.replace(/\s+Stream #0:1.*$/, ''))).ok, false, '丢了音轨要报出来')
+// 主动静音就不该报：请求说不要声音时成品没声音是对的
+assert.equal(recordingExportVerdict({ ...okRequest, edit: { muteAudio: true } }, parseRecordingOutputProbe(probeText.replace(/\s+Stream #0:1.*$/, ''))).ok, true, '请求静音时无音轨不算异常')
+// 帧数与"时长×帧率"不符（插帧/丢帧留下的轨迹）
+assert.equal(recordingExportVerdict(okRequest, { ...parsed, frames: 2_000 }).ok, false, '帧数密度异常要报出来')
+assert.equal(recordingExportVerdict({ ...okRequest, format: 'gif' }, { durationMs: 9_000, fps: 0, frames: 0, hasVideo: true, hasAudio: false, videoCodec: 'gif' }).ok, true, 'GIF 不按帧率与音轨要求判定')
+assert.equal(recordingExportVerdict({ ...okRequest, format: 'mp3' }, { durationMs: 9_000, fps: 0, frames: 0, hasVideo: false, hasAudio: true, videoCodec: '' }).ok, true, 'MP3 只要求音轨')
+
+// 注入式探测：确认真的把 runner 的输出喂给了解析器（不依赖本机 FFmpeg）
+const probed = await probeRecordingOutput('ffmpeg.exe', 'out.mp4', async () => ({ code: 1, output: probeText, ms: 5 }))
+assert.equal(probed.fps, 30, '探测函数应使用注入 runner 的输出（退出码非零也算，元数据已经打出来了）')
+
+/* ---------------- 导出期画幅重组（原始采集能落到任意画幅） ---------------- */
+
+// 同画幅必须返回空数组：既有导出路径一个字节都不能变
+assert.deepEqual(buildRecordingAspectFilters(2560, 1440, 1920, 1080, 'contain'), [], '同画幅不做重组')
+assert.deepEqual(buildRecordingAspectFilters(1920, 1080, 1920, 1080), [], '尺寸一致更不做重组')
+// 16:10 素材 → 16:9 目标：补边（不裁内容）
+const containChain = buildRecordingAspectFilters(2560, 1600, 1920, 1080, 'contain')
+assert.equal(containChain.length, 2, '跨画幅要两步：缩放 + 补边/裁切')
+assert.match(containChain[0], /force_original_aspect_ratio=decrease/, '补边要"装得下"的缩放')
+assert.match(containChain[1], /^pad=1920:1080/, '补边到目标尺寸')
+// 铺满：放大到盖住目标再裁
+const coverChain = buildRecordingAspectFilters(2560, 1600, 1080, 1920, 'cover')
+assert.match(coverChain[0], /force_original_aspect_ratio=increase/, '铺满要"盖得住"的缩放')
+assert.equal(coverChain[1], 'crop=1080:1920', '铺满裁到目标尺寸')
+// 竖屏目标（9:16）与方形成片
+assert.equal(buildRecordingAspectFilters(2560, 1600, 1080, 1080, 'cover')[1], 'crop=1080:1080', '方形成片')
+// 容差：1% 内的画幅差异不触发重组（避免取整误差导致每次都补边）
+assert.deepEqual(buildRecordingAspectFilters(1920, 1080, 1919, 1079, 'contain'), [], '1‰ 级别的画幅差异不重组')
+
+// 运镜的可用性判定必须抽出来统一用：画幅不一致要**告知**运镜没生效，而不是静默丢掉
+const motionRequest: RecordingExportRequest = { jobId: 'm', name: 'm', format: 'mp4', quality: 'high', durationMs: 5_000, width: 2560, height: 1440, fps: 30, outputWidth: 1920, outputHeight: 1080, outputFps: 30, motion: { fps: 30, frames: [{ x: 0.5, y: 0.5, zoom: 1.2 }, { x: 0.6, y: 0.5, zoom: 1.3 }] } }
+assert.equal(recordingMotionUsable(motionRequest), true, '同画幅且带路径时运镜可用')
+assert.equal(recordingMotionUsable({ ...motionRequest, outputWidth: 1080, outputHeight: 1920 }), false, '跨画幅时运镜不可用（zoompan 会拉伸）')
+assert.equal(recordingMotionUsable({ ...motionRequest, motion: null }), false, '没有路径就谈不上运镜')
+assert.equal(recordingExportVerdict({ ...motionRequest, outputWidth: 1080, outputHeight: 1920 }, parsed).warnings.some((w) => /运镜本次未生效/.test(w)), true, '运镜被画幅挡掉时必须如实告知')
+assert.equal(recordingExportVerdict(motionRequest, parsed).warnings.some((w) => /运镜/.test(w)), false, '运镜生效时不该有相关告警')
+
+/* ---------------- 跨画幅 + 运镜：先裁齐画幅再取景 ---------------- */
+
+assert.equal(recordingMotionCoverCrop(2560, 1440, 1920, 1080), null, '同画幅不裁切')
+const narrow = recordingMotionCoverCrop(2560, 1600, 1080, 1920)!
+assert.equal(narrow.y, 0, '目标更窄时裁左右：纵向不裁')
+assert.equal(narrow.height, 1, '纵向保留满高')
+assert.ok(Math.abs(narrow.width - 0.5625 / 1.6) < 1e-6, `宽度按画幅比收缩（实测 ${narrow.width}）`)
+assert.ok(Math.abs(narrow.x - (1 - narrow.width) / 2) < 1e-6, '裁切窗口居中')
+const flat = recordingMotionCoverCrop(2560, 1600, 1920, 1080)!
+assert.equal(flat.x, 0, '目标更宽时裁上下：横向不裁')
+assert.equal(flat.width, 1, '横向保留满宽')
+assert.ok(Math.abs(flat.height - 1.6 / (16 / 9)) < 1e-6, `高度按画幅比收缩（实测 ${flat.height}）`)
+assert.equal(recordingMotionCoverCrop(1920, 1080, 1921, 1080), null, '极小画幅差不裁切')
+
+const remapped = remapRecordingMotionFrames(
+  [{ x: 0.5, y: 0.5, zoom: 1.2 }, { x: 0, y: 1, zoom: 1 }, { x: 0.3242, y: 0.5, zoom: 1 }],
+  narrow
+)
+assert.ok(Math.abs(remapped[0].x - 0.5) < 0.01, `窗口中心映射后仍是中心（实测 ${remapped[0].x}）`)
+assert.equal(remapped[1].x, 0, '窗口左侧外的点钳到 0')
+assert.equal(remapped[1].y, 1, '纵向满高的点不越界')
+assert.ok(Math.abs(remapped[2].x) < 0.01, '正好落在窗口左缘的点映射到 0')
+assert.equal(remapped[0].zoom, 1.2, '缩放不参与重映射（取景窗口按裁切后的画幅算）')
+assert.deepEqual(remapRecordingMotionFrames([{ x: 0.7, y: 0.2, zoom: 1 }], null), [{ x: 0.7, y: 0.2, zoom: 1 }], '没有裁切窗口时路径原样返回')
+
+const crossRequest: RecordingExportRequest = {
+  ...motionRequest,
+  outputWidth: 1080,
+  outputHeight: 1920,
+  motion: { fps: 30, frames: [{ x: 0.5, y: 0.5, zoom: 1.2 }, { x: 0.6, y: 0.5, zoom: 1.3 }], crop: narrow }
+}
+const crossVerdict = recordingExportVerdict(crossRequest, { ...parsed, durationMs: 5_000, fps: 30, frames: 150 })
+assert.equal(recordingMotionUsable(crossRequest), true, '给了裁切窗口时跨画幅运镜可用')
+assert.equal(crossVerdict.warnings.some((w) => /未生效/.test(w)), false, '跨画幅运镜不应再报"未生效"')
+assert.equal(crossVerdict.warnings.some((w) => /铺满/.test(w)), false, '"按铺满重组"是预期行为，不能塞进告警把自检判成有疑问')
+assert.equal(crossVerdict.ok, true, '跨画幅运镜的自检应通过')
+assert.match(crossVerdict.summary, /画幅按铺满重组/, '但要在摘要里说清楚画幅被重组过')
+const cropFilter = buildRecordingMotionCropFilter(narrow)
+assert.ok(cropFilter.startsWith('crop=trunc(iw*0.3516'), `裁齐滤镜按像素表达（宽度分数 = 目标画幅/源画幅 = 0.5625/1.6；实测 ${cropFilter}）`)
+assert.ok(cropFilter.includes('trunc(ih*1.0000/2)*2'), '满高那一维是整幅')
+assert.ok(Math.abs(narrow.width - 0.3516) < 0.001, '窗口宽度分数与滤镜里的系数一致')
+assert.ok(buildRecordingMotionCropFilter({ x: -1, y: -1, width: 2, height: 2 }).includes('iw*1.0000'), '越界窗口被钳回合法范围')
+
+/* ---------------- 点击信号：光标停着但在点，不算发呆 ---------------- */
+
+// 10 秒里光标完全不动：纯看轨迹就是一段 8 秒空闲（前后各留 1 秒）
+const stillOnly = still(0, 10_000)
+const idleWithoutClicks = recordingIdleRanges(stillOnly, 10_000)
+assert.equal(idleWithoutClicks.length, 1, '光标全程不动应识别为一段空闲')
+assert.ok(idleWithoutClicks[0].endMs - idleWithoutClicks[0].startMs > 7_000, '空闲区间应接近 8 秒')
+
+// 关键场景：光标停着但**一直在点**（翻页、逐条点开）——这种"盯着看并且点了"绝不能被当成发呆剪掉。
+// 每秒点一下时，任何一段重新计时的静止都不足 3 秒，因此不该剪出任何空闲段。
+const denseClicks = [2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000].map((t) => ({ t, x: 0.5, y: 0.5 }))
+assert.deepEqual(recordingIdleRanges(stillOnly, 10_000, { clicks: denseClicks }), [], '持续点击时不该剪出任何空闲段')
+// 点击稀疏时仍会剪，但会被点击切开：3 秒与 7 秒各点一次 → 只剪中间那段（4 秒），两侧各 2 秒不够长
+const idleWithClicks = recordingIdleRanges(stillOnly, 10_000, { clicks: [{ t: 3_000, x: 0.5, y: 0.5 }, { t: 7_000, x: 0.5, y: 0.5 }] })
+assert.deepEqual(idleWithClicks, [{ startMs: 3_000, endMs: 7_000 }], `点击应把静止切成片段、只留够长的那段（实测 ${JSON.stringify(idleWithClicks)}）`)
+const sparse = recordingIdleRanges(still(0, 30_000), 30_000, { clicks: [{ t: 15_000, x: 0.5, y: 0.5 }] })
+assert.equal(sparse.length, 2, `一次点击应把 30 秒静止切成两段（实测 ${JSON.stringify(sparse)}）`)
+assert.ok(sparse.every((range) => range.endMs - range.startMs >= 3_000), '切开后的片段仍要够长')
+// 窗口外的点击（越界时间）不影响判定
+assert.equal(recordingIdleRanges(still(0, 30_000), 30_000, { clicks: [{ t: -5, x: 0, y: 0 }, { t: 99_999, x: 0, y: 0 }] }).length, 1, '越界点击不参与判定')
 
 console.log('recording tests passed')

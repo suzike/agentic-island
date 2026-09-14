@@ -47,6 +47,44 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
 }
 
+/**
+ * 抓取指定采集源的**原生分辨率**单帧。
+ *
+ * 走媒体流而不是 `desktopCapturer` 缩略图：缩略图只能按请求尺寸缩放，而逻辑尺寸乘 scaleFactor
+ * 会有半像素（1707 × 1.5 = 2560.5），取整成 2561 就必然重采样，同一张静态图锐度从 84.9 掉到 64.1。
+ * 媒体流给的是真原生帧（实测与 DPI-aware 的系统级抓图逐像素一致），而且与录制走同一条链路。
+ */
+export async function captureScreenNative(sourceId: string): Promise<string> {
+  const constraints = {
+    audio: false,
+    video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId } }
+  } as unknown as MediaStreamConstraints
+  const stream = await navigator.mediaDevices.getUserMedia(constraints)
+  const video = document.createElement('video')
+  try {
+    video.srcObject = stream
+    video.muted = true
+    video.playsInline = true
+    await video.play()
+    if (!video.videoWidth) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => reject(new Error('抓帧超时（未拿到画面尺寸）')), 6_000)
+        video.addEventListener('loadedmetadata', () => { window.clearTimeout(timer); resolve() }, { once: true })
+      })
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(2, video.videoWidth)
+    canvas.height = Math.max(2, video.videoHeight)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('无法创建画布')
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/png')
+  } finally {
+    video.srcObject = null
+    stream.getTracks().forEach((track) => track.stop())
+  }
+}
+
 export function exportDimensions(width: number, height: number, scale: number): { width: number; height: number; pixels: number } {
   const outWidth = Math.max(1, Math.round(width * scale))
   const outHeight = Math.max(1, Math.round(height * scale))

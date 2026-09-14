@@ -10,8 +10,8 @@ import { RecordingNeuralStyle } from '../logic/recording-neural-style'
 import type { NeuralStyleStatus } from '../logic/recording-neural-style'
 import { deleteRecordingAvatar, loadRecordingAvatar, saveRecordingAvatar } from '../logic/recording-avatar'
 import { formatBytes } from '../logic/screenshot'
-import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionFrames, recordingOutputSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
-import type { RecordingAnimePalette, RecordingAspect, RecordingCaptureMode, RecordingMotion, RecordingResolution } from '../logic/recording'
+import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrames, recordingOutputSize, remapRecordingMotionFrames, recordingRawCaptureSize, recordingRawModeBlockers, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
+import type { RecordingAnimePalette, RecordingAspect, RecordingCaptureMode, RecordingClickSample, RecordingMotion, RecordingResolution } from '../logic/recording'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accentText, accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
@@ -183,8 +183,11 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [startupMessage, setStartupMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [panel, setPanel] = useState<PanelTab>('capture')
-  const [resolution, setResolution] = useState<RecordingResolution>('1080p')
-  const [aspect, setAspect] = useState<RecordingAspect>('16:9')
+  // 默认跟随屏幕原生：2560x1600 的屏如果按 1080p 出片，实际内容只有 1728x1080（还要补黑边），
+  // 全屏回放时放大 1.48 倍 —— 小字必糊。清晰度优先，体积由画质档与导出档控制。
+  const [resolution, setResolution] = useState<RecordingResolution>('source')
+  // 默认跟随源：16:10 的屏按 16:9 出片会同时丢掉清晰度并凭空加黑边
+  const [aspect, setAspect] = useState<RecordingAspect>('source')
   const [fitMode, setFitMode] = useState<RecordingFit>('contain')
   const [recordingPreset, setRecordingPreset] = useState<RecordingPreset>('custom')
   const [fps, setFps] = useState(30)
@@ -305,10 +308,14 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [transcriptLanguage, setTranscriptLanguage] = useState<'auto' | 'zh' | 'en'>('auto')
   const [transcriptSegments, setTranscriptSegments] = useState<RecordingTranscriptSegment[]>([])
   const [cursorTrack, setCursorTrack] = useState<RecordingCursorSample[]>([])
+  const [clickTrack, setClickTrack] = useState<RecordingClickSample[]>([])
   const [idleTrimPlan, setIdleTrimPlan] = useState<{ cutMs: number; keepMs: number; segments: RecordingEditSegment[] } | null>(null)
   // 导出期运镜：素材必须"画面稳定"（录制时运镜关闭）才允许，否则会与烤进画面的运镜叠加
   const [exportMotionReady, setExportMotionReady] = useState(false)
   const [exportMotionEnabled, setExportMotionEnabled] = useState(false)
+  // 导出画幅必须由导出页自己决定、默认"跟随素材"：若沿用采集页的画面比例，用户为下一段录制
+  // 改了竖屏，回头导出既有 16:9 素材就会被莫名其妙地重新裁一次。
+  const [exportAspect, setExportAspect] = useState<RecordingAspect>('source')
   // 导出期运镜必须有自己的档位：能走这条路的素材，录制时运镜一定是"关闭"（否则画面里已烤进运镜），
   // 所以不能借用采集页的档位——那会永远得到一条 zoom=1 的平路，开关等于没接。
   const [exportMotionMode, setExportMotionMode] = useState<RecordingMotion>('gentle')
@@ -368,6 +375,8 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const cursorTrailRef = useRef<Array<{ x: number; y: number }>>([])
   // 拍摄与后期分离：录制期只观测光标（不动画面），轨迹落进工程供剪辑/导出重建运镜
   const cursorSamplesRef = useRef<RecordingCursorSample[]>([])
+  // 点击事件（事后无法补录）：剪除空白用它区分“发呆”与“盯着看并且点了”，导出期涟漪也依赖它
+  const clickSamplesRef = useRef<RecordingClickSample[]>([])
   const cursorLogTimerRef = useRef(0)
   const cursorLogAtRef = useRef(0)
   const cursorLogPendingRef = useRef(false)
@@ -377,7 +386,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   personaOptionsRef.current = { cameraEffect, cameraFrame, animeStrength, animePalette, avatarMotion, cameraMirror }
 
   // 原始采集不能用到的能力（画布相关）：非空时"原始画面"选项给出逐条原因
-  const rawModeBlockers = useMemo(() => recordingRawModeBlockers({ aspect, fitMode, regionEnabled, webcam, watermarkEnabled, privacyTop, privacyBottom }), [aspect, fitMode, regionEnabled, webcam, watermarkEnabled, privacyTop, privacyBottom])
+  const rawModeBlockers = useMemo(() => recordingRawModeBlockers({ regionEnabled, webcam, watermarkEnabled, privacyTop, privacyBottom }), [regionEnabled, webcam, watermarkEnabled, privacyTop, privacyBottom])
   const rawModeReady = rawModeBlockers.length === 0
   const selectedSource = useMemo(() => sources.find((source) => source.id === sourceId), [sources, sourceId])
   const visibleSources = useMemo(() => {
@@ -431,6 +440,16 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
       cursorLogPendingRef.current = true
       const at = currentElapsed()
       void island.recordingCursor().then((cursor) => {
+        // 点击随同一次轮询一起取回；暂停期间的点击不记（时间轴不推进，记了会落到错位置）
+        if (cursor.clicks?.length && statusRef.current !== 'paused') {
+          for (const click of cursor.clicks) {
+            if (clickSamplesRef.current.length >= MAX_CURSOR_SAMPLES) break
+            if (source.displayId && cursor.displayId !== source.displayId) continue
+            const clickX = Math.max(0, Math.min(1, (click.x - bounds.x) / bounds.width))
+            const clickY = Math.max(0, Math.min(1, (click.y - bounds.y) / bounds.height))
+            clickSamplesRef.current.push({ t: Math.round(at), x: Number(clickX.toFixed(4)), y: Number(clickY.toFixed(4)), button: click.button })
+          }
+        }
         if (statusRef.current === 'paused') return
         // 光标在别的显示器上时**照样记点**（坐标钳到录制画面的边缘），不要丢弃：
         // 轨迹描述的是"被录的那块屏幕上有没有在动"，人跑去另一块屏操作时被录画面确实没变化，
@@ -612,11 +631,11 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     setRecordingPreset(preset)
     if (preset === 'custom') return
     if (preset === 'tutorial') {
-      setResolution('1080p'); setAspect('16:9'); setFps(30); setCaptureQuality('high'); setMotionMode('gentle'); setSystemAudio(true); setMicrophone(true); setKeyframeIntervalSeconds(10)
+      setResolution('source'); setAspect('source'); setFps(30); setCaptureQuality('high'); setMotionMode('gentle'); setSystemAudio(true); setMicrophone(true); setKeyframeIntervalSeconds(10)
     } else if (preset === 'meeting') {
-      setResolution('1080p'); setAspect('16:9'); setFps(24); setCaptureQuality('standard'); setMotionMode('off'); setSystemAudio(true); setMicrophone(true); setKeyframeIntervalSeconds(30)
+      setResolution('source'); setAspect('source'); setFps(24); setCaptureQuality('standard'); setMotionMode('off'); setSystemAudio(true); setMicrophone(true); setKeyframeIntervalSeconds(30)
     } else {
-      setResolution('1440p'); setAspect('16:9'); setFps(60); setCaptureQuality('ultra'); setMotionMode('dynamic'); setSystemAudio(true); setMicrophone(false); setKeyframeIntervalSeconds(8)
+      setResolution('source'); setAspect('source'); setFps(60); setCaptureQuality('ultra'); setMotionMode('dynamic'); setSystemAudio(true); setMicrophone(false); setKeyframeIntervalSeconds(8)
     }
   }
 
@@ -751,6 +770,8 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     systemGainRef.current = null
     micGainRef.current = null
     island.setRecordingProtection(false)
+    // 卸载点击钩子（平时完全不监听输入）；样本由停止流程快照后清空
+    void island.setRecordingClickLog(false).catch(() => {})
   }
 
   const captureKeyframe = (at: number, markTimeline = true): void => {
@@ -1048,6 +1069,8 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
       setCountdown(0)
       updateStatus('starting'); setStartupMessage('正在连接屏幕画面…')
       island.setRecordingProtection(true)
+      // 点击采集只在录制期间装钩子；失败不影响录制
+      void island.setRecordingClickLog(true).catch(() => {})
       const desktopConstraints = {
         audio: systemAudio ? { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: source.id } } : false,
         video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: source.id, maxFrameRate: fps } }
@@ -1253,6 +1276,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
         setStartupMessage(''); updateStatus('ready'); setPanel('edit')
         setTimeline((items) => [...items, { at: finalElapsed, type: 'end', label: stopReason || '录制完成' }])
         setCursorTrack([...cursorSamplesRef.current])
+        setClickTrack([...clickSamplesRef.current])
         if (stopReason) flash(stopReason)
       }
       startAtRef.current = performance.now(); pausedAtRef.current = 0; pausedTotalRef.current = 0; elapsedRef.current = 0; frameCaptureAtRef.current = 0; lastAutoMarkerAtRef.current = 0; stopReasonRef.current = ''
@@ -1311,6 +1335,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     setEditSettings({ ...project.edit, crop: project.edit.crop ? { ...project.edit.crop } : undefined, segments: undefined })
     setTimeline(project.timeline.map((item) => ({ ...item }))); setTranscriptSegments(project.transcript.segments.map((item) => ({ ...item })))
     setCursorTrack((project.cursorTrack || []).map((item) => ({ ...item }))); cursorSamplesRef.current = (project.cursorTrack || []).map((item) => ({ ...item }))
+    setClickTrack((project.clickTrack || []).map((item) => ({ ...item }))); clickSamplesRef.current = (project.clickTrack || []).map((item) => ({ ...item }))
     setExportMotionReady(Boolean(project.exportMotionReady)); setExportMotionEnabled(Boolean(project.exportMotionReady) && (project.cursorTrack || []).length > 0)
     setTranscriptModel(project.transcript.model); setTranscriptLanguage(project.transcript.language)
     setTimelineZoom(project.workspace.timelineZoom); setTimelineSnap(project.workspace.timelineSnap)
@@ -1354,7 +1379,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     if (previewIdRef.current) { island.releaseRecordingPreview(previewIdRef.current); previewIdRef.current = '' }
     projectSaveTokenRef.current++
     recordingSessionIdRef.current = ''; setRecordingSessionId(''); projectIdRef.current = ''; setProjectId(''); setProjectSaveState('idle')
-    setRecordingBlob(null); setRecordingUrl(''); updateStatus('idle'); setElapsed(0); setRecordedBytes(0); recordedBytesRef.current = 0; stopReasonRef.current = ''; setTimeline([]); setKeyframes([]); setTranscriptSegments([]); setCursorTrack([]); cursorSamplesRef.current = []; setIdleTrimPlan(null); setExportMotionReady(false); setExportMotionEnabled(false); setEditSegments([]); setActiveSegmentId(''); setEditHistory([]); setEditFuture([]); setRecordingHasAudio(false); setExportProgress(null); setPanel('capture')
+    setRecordingBlob(null); setRecordingUrl(''); updateStatus('idle'); setElapsed(0); setRecordedBytes(0); recordedBytesRef.current = 0; stopReasonRef.current = ''; setTimeline([]); setKeyframes([]); setTranscriptSegments([]); setCursorTrack([]); cursorSamplesRef.current = []; setClickTrack([]); clickSamplesRef.current = []; setIdleTrimPlan(null); setExportMotionReady(false); setExportMotionEnabled(false); setEditSegments([]); setActiveSegmentId(''); setEditHistory([]); setEditFuture([]); setRecordingHasAudio(false); setExportProgress(null); setPanel('capture')
   }
 
   const seekPreview = (ms: number): void => {
@@ -1437,7 +1462,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const planIdleTrim = (): void => {
     const total = elapsed
     if (!cursorTrack.length) { flash('这次录制没有光标轨迹，无法判断空白片段（窗口来源或旧工程不采集轨迹）'); return }
-    const idle = recordingIdleRanges(cursorTrack, total)
+    const idle = recordingIdleRanges(cursorTrack, total, { clicks: clickTrack })
     if (!idle.length) { flash('没有发现值得剪掉的空白（连续静止不足 3 秒）'); return }
     const kept = recordingKeptSegmentsFromIdle(idle, total)
     const keptMs = kept.reduce((sum, range) => sum + Math.max(0, range.endMs - range.startMs), 0)
@@ -1598,6 +1623,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     timeline: timeline.map((item) => ({ ...item })),
     transcript: { model: transcriptModel, language: transcriptLanguage, segments: transcriptSegments.map((item) => ({ ...item })) },
     cursorTrack: cursorTrack.map((item) => ({ ...item })),
+    clickTrack: clickTrack.map((item) => ({ ...item })),
     exportMotionReady,
     workspace: { timelineZoom, timelineSnap, videoTrackLocked, markerTrackLocked, aiEditMode },
     aiResults: aiResults.map((item) => ({ ...item }))
@@ -1634,7 +1660,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     setProjectSaveState('saving')
     const timer = window.setTimeout(() => { void persistRecordingProject(false) }, 1000)
     return () => window.clearTimeout(timer)
-  }, [status, recordingSessionId, recordingName, elapsed, recordingSize.width, recordingSize.height, fps, recordingHasAudio, editSegments, editSettings, playbackRate, timeline, transcriptModel, transcriptLanguage, transcriptSegments, cursorTrack, exportMotionReady, timelineZoom, timelineSnap, videoTrackLocked, markerTrackLocked, aiEditMode, aiResults])
+  }, [status, recordingSessionId, recordingName, elapsed, recordingSize.width, recordingSize.height, fps, recordingHasAudio, editSegments, editSettings, playbackRate, timeline, transcriptModel, transcriptLanguage, transcriptSegments, cursorTrack, clickTrack, exportMotionReady, timelineZoom, timelineSnap, videoTrackLocked, markerTrackLocked, aiEditMode, aiResults])
 
   const openRecordingProject = async (summary: RecordingProjectSummary): Promise<void> => {
     const sessionsResult: Awaited<ReturnType<typeof island.listRecordingSessions>> = await island.listRecordingSessions().catch(() => ({ ok: false }))
@@ -1677,14 +1703,27 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     if ((!recordingBlob && !recordingSessionId) || exporting) return
     const jobId = `export-${Date.now()}`
     setExporting(true); setExportProgress({ jobId, phase: 'preparing', progress: 0 })
-    const maxSize = exportResolution === '1080p' ? { width: 1920, height: 1080 } : exportResolution === '720p' ? { width: 1280, height: 720 } : recordingSize
-    const scale = Math.min(1, maxSize.width / recordingSize.width, maxSize.height / recordingSize.height)
-    const outputSize = { width: Math.max(2, Math.round(recordingSize.width * scale / 2) * 2), height: Math.max(2, Math.round(recordingSize.height * scale / 2) * 2) }
+    // 输出尺寸按**采集页的画幅设置**算：合成模式下素材本身就是该画幅（等价于旧行为），
+    // 原始采集录的是屏幕原样，于是画幅在这里落地——导出时再重组（补黑边或裁切）。
+    // 导出档位是 source/1080p/720p，采集档位是 source/1080p/1440p/4k —— 取交集映射，720p 用 1080p 的短边规则再按目标短边等比缩
+    const exportTarget: RecordingResolution = exportResolution === '720p' ? '1080p' : exportResolution
+    const outputSize = recordingOutputSize(recordingSize.width, recordingSize.height, exportTarget, exportAspect)
+    if (exportResolution === '720p') {
+      const shrink = 720 / Math.max(1, outputSize.height)
+      outputSize.width = Math.max(2, Math.round(outputSize.width * shrink / 2) * 2)
+      outputSize.height = Math.max(2, Math.round(outputSize.height * shrink / 2) * 2)
+    }
     const outputFps = exportFps === 'source' ? fps : Number(exportFps)
     // 导出期运镜：只有素材本身没有把运镜烤进画面时才有意义（否则是双重运镜）。
     // 轨迹按**成片帧序**重建，主进程只需把它编译成 zoompan 表达式。
+    // 跨画幅时先算"铺满"裁切窗口并把路径重映射进去——否则 zoompan 会把画面拉变形
+    const motionCrop = recordingMotionCoverCrop(recordingSize.width, recordingSize.height, outputSize.width, outputSize.height)
     const motion = exportMotionEnabled && exportMotionReady && cursorTrack.length && (format === 'mp4' || format === 'webm')
-      ? { fps: outputFps, frames: recordingMotionFrames(cursorTrack, editSegments.filter((segment) => segment.enabled !== false), { fps: outputFps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate }) }
+      ? {
+          fps: outputFps,
+          frames: remapRecordingMotionFrames(recordingMotionFrames(cursorTrack, editSegments.filter((segment) => segment.enabled !== false), { fps: outputFps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate }), motionCrop),
+          crop: motionCrop || undefined
+        }
       : null
     const request = {
       jobId, name: recordingName, format, quality: exportQuality, durationMs: elapsed,
@@ -1693,14 +1732,30 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
       outputWidth: outputSize.width, outputHeight: outputSize.height, outputFps,
       subtitle: { mode: format === 'mp4' || format === 'webm' ? exportSubtitleMode : 'none' as const, language: transcriptLanguage, segments: transcriptSegments },
       edit: { ...editSettings, speed: playbackRate, segments: editSegments },
+      fit: fitMode,
       motion
     }
-    const result = recordingSessionId
-      ? await island.exportRecordingSession(recordingSessionId, request)
-      : await island.exportRecording(await recordingBlob!.arrayBuffer(), request)
+    // 导出链路的任何异常都必须变成一句人话。此前这里没有 try/catch：只要主进程那次 invoke
+    // 拒绝（保存框/落盘/探测任何一环），await 直接抛出、被 `void exportRecording()` 吞掉，
+    // 表现就是"点了导出什么也没发生"——审计里就是这样静默失败的。
+    let result: Awaited<ReturnType<typeof island.exportRecordingSession>>
+    try {
+      result = recordingSessionId
+        ? await island.exportRecordingSession(recordingSessionId, request)
+        : await island.exportRecording(await recordingBlob!.arrayBuffer(), request)
+    } catch (error) {
+      setExporting(false)
+      setExportProgress(null)
+      flash(`导出失败：${recordingStartError(error)}`)
+      return
+    }
     setExporting(false)
-    if (result.ok) flash(`已导出 ${result.path || ''}`)
-    else if (!result.canceled) flash(result.error || '导出失败')
+    if (result.ok) {
+      // 自检结论直接摆在成功提示里：文件名之外还要说清"成品是不是请求的那条片子"
+      const check = result.check
+      if (check && !check.ok) flash(`已导出 ${result.path || ''}，但自检有疑问：${check.warnings[0]}`)
+      else flash(`已导出 ${result.path || ''}${check?.summary && check.summary !== '未自检' ? ` · 自检通过（${check.summary}）` : ''}`)
+    } else if (!result.canceled) flash(result.error || '导出失败')
   }
 
   const runAI = async (label: string, prompt: string): Promise<void> => {
@@ -2194,7 +2249,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                     // 原始采集没有画布，运镜只能在导出期重建——顺手把跟随关掉并允许导出期运镜
                     if (mode === 'raw') { setMotionMode('off'); setExportMotionEnabled(true); setCursorHalo(false); setCursorTrail(false); flash('原始采集：运镜改为导出期按轨迹重建，画幅与裁剪也留到导出期') }
                   }} options={[{ key: 'composite', label: '画布合成' }, { key: 'raw', label: rawModeReady ? '原始画面' : '原始画面（不可用）' }]} />
-                  <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.55 }}>{captureMode === 'raw' ? `桌面轨道直接进编码器：没有画布重绘、不占 CPU/GPU 合成，录制就是屏幕原样与原生尺寸（本机实测：同一活动画面 29.8fps vs 画布合成 22.4fps）。采集是变化驱动的：画面不动就不会产生重复帧（导出时按目标帧率补齐）。裁剪、水印、画中画这类叠加层需要在导出期补，因此这里不支持。` : rawModeReady ? '画布逐帧合成：裁剪、比例、运镜、画中画、水印都在录制时烤进画面（改了要重录）。想拿满帧率、运镜留到导出期改，就切"原始画面"。' : `切到"原始画面"需要先关掉：${rawModeBlockers.join('、')}。`}</div>
+                  <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.55 }}>{captureMode === 'raw' ? `桌面轨道直接进编码器：没有画布重绘、不占 CPU/GPU 合成，录制就是屏幕原样与原生尺寸（本机实测：同一活动画面 29.8fps vs 画布合成 22.4fps）。采集是变化驱动的：画面不动就不会产生重复帧（导出时按目标帧率补齐）。输出画幅按上面的“画面比例”在导出期重组（补黑边或裁切）；裁剪、水印、画中画这类逐帧叠加层需要画布，因此这里仍不支持。` : rawModeReady ? '画布逐帧合成：裁剪、比例、运镜、画中画、水印都在录制时烤进画面（改了要重录）。想拿满帧率、运镜留到导出期改，就切"原始画面"。' : `切到"原始画面"需要先关掉：${rawModeBlockers.join('、')}。`}</div>
                 </div>
                 <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>分辨率</span><Segmented value={resolution} onChange={setResolution} style={{ flex: 1 }} options={[{ key: 'source', label: '原生' }, { key: '1080p', label: '1080P' }, { key: '1440p', label: '2K' }, { key: '4k', label: '4K' }]} /></div>
                 <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>画面比例</span><Segmented value={aspect} onChange={setAspect} style={{ flex: 1 }} options={[{ key: 'source', label: '跟随源' }, { key: '16:9', label: '横屏' }, { key: '9:16', label: '竖屏' }, { key: '1:1', label: '方形' }]} /></div>
@@ -2342,7 +2397,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}><Button sm variant="tinted" icon={Play} onClick={playTrimmedPreview}>播放片段</Button><Button sm variant="ghost" icon={RefreshCw} onClick={resetEdits}>重置全部</Button></div>
                   </div>}
                   <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-                    <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><Timer size={12} />剪除空白</span><span style={{ ...text.num(9), color: cursorTrack.length ? sem.calm : ink(4) }}>{cursorTrack.length ? `${cursorTrack.length} 个轨迹点` : '无轨迹'}</span></div>
+                    <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><Timer size={12} />剪除空白</span><span style={{ ...text.num(9), color: cursorTrack.length ? sem.calm : ink(4) }}>{cursorTrack.length ? `${cursorTrack.length} 个轨迹点 · ${clickTrack.length} 次点击` : '无轨迹'}</span></div>
                     {idleTrimPlan ? <>
                       <div style={{ color: ink(2), fontSize: 10.5, lineHeight: 1.5 }}>将剪掉 <span style={{ color: sem.warn, ...text.num(10.5) }}>{(idleTrimPlan.cutMs / 1000).toFixed(1)}s</span> 发呆/等加载段，成片保留 <span style={{ ...text.num(10.5) }}>{idleTrimPlan.segments.length}</span> 段（{(idleTrimPlan.keepMs / 1000).toFixed(1)}s）。应用后可用撤销恢复。</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}><Button sm variant="primary" icon={Check} onClick={applyIdleTrim}>应用剪除</Button><Button sm variant="ghost" icon={X} onClick={() => setIdleTrimPlan(null)}>取消</Button></div>
@@ -2453,7 +2508,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                       <span style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.5 }}>无剪辑 · 导出时直接封装：视频流不重编码，只把音频转成 AAC（秒级完成、画质无损）。一旦做了裁剪、缩放、变速或字幕就会重编码。</span>
                     </div>
                   )}
-                  {format !== 'mp3' && <><div style={labelStyle}>输出画面</div><div style={controlRow}><Segmented value={exportResolution} onChange={setExportResolution} style={{ flex: 1 }} options={[{ key: 'source', label: '源分辨率' }, { key: '1080p', label: '1080p' }, { key: '720p', label: '720p' }]} /><Segmented value={exportFps} onChange={setExportFps} style={{ flex: 1 }} options={[{ key: 'source', label: `${fps}fps` }, { key: '30', label: '30' }, { key: '24', label: '24' }, { key: '15', label: '15' }]} /></div></>}
+                  {format !== 'mp3' && <><div style={labelStyle}>输出画面</div><div style={controlRow}><Segmented value={exportResolution} onChange={setExportResolution} style={{ flex: 1 }} options={[{ key: 'source', label: '源分辨率' }, { key: '1080p', label: '1080p' }, { key: '720p', label: '720p' }]} /><Segmented value={exportFps} onChange={setExportFps} style={{ flex: 1 }} options={[{ key: 'source', label: `${fps}fps` }, { key: '30', label: '30' }, { key: '24', label: '24' }, { key: '15', label: '15' }]} /></div><div style={controlRow}><span style={{ ...text.faint(), width: 46 }}>画布</span><Segmented value={exportAspect} onChange={setExportAspect} style={{ flex: 1 }} options={[{ key: 'source', label: '跟随素材' }, { key: '16:9', label: '横屏' }, { key: '9:16', label: '竖屏' }, { key: '1:1', label: '方形' }]} /></div>{exportAspect !== 'source' && Math.abs(recordingSize.width / Math.max(1, recordingSize.height) - (exportAspect === '16:9' ? 16 / 9 : exportAspect === '9:16' ? 9 / 16 : 1)) > 0.01 && <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>素材画幅与目标不同：按采集页的"适配方式"重组画面（完整显示＝补黑边，铺满＝裁切）。</div>}</>}
                   {(format === 'mp4' || format === 'webm') && <div style={{ ...surface.inset(), padding: '8px 9px', display: 'flex', flexDirection: 'column', gap: 7 }}>
                     <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><MousePointer2 size={12} />导出期运镜</span><Switch on={exportMotionEnabled && exportMotionReady} onChange={(on) => { if (!exportMotionReady) { flash('这段素材录制时已把运镜合成进画面，导出期再套一层会变成双重运镜'); return } setExportMotionEnabled(on) }} /></div>
                     {exportMotionEnabled && exportMotionReady && <Segmented value={exportMotionMode} onChange={(value) => setExportMotionMode(value as RecordingMotion)} options={[{ key: 'gentle', label: '柔和聚焦' }, { key: 'dynamic', label: '动态跟随' }]} />}
