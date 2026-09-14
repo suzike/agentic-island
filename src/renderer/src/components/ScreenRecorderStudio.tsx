@@ -2303,6 +2303,12 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                     <Chip active={exportQuality === 'near-lossless'} onClick={() => setExportQuality('near-lossless')}>{format === 'mp3' ? '320 kbps' : '视觉无损'}</Chip>
                     {format === 'webm' && <Chip active={exportQuality === 'lossless'} onClick={() => setExportQuality('lossless')}>无损归档</Chip>}
                   </div>
+                  {!hasExportEdits && (format === 'mp4' || format === 'webm') && (
+                    <div style={{ ...surface.inset(), padding: '7px 9px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Zap size={11} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
+                      <span style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.5 }}>无剪辑 · 导出时直接封装：视频流不重编码，只把音频转成 AAC（秒级完成、画质无损）。一旦做了裁剪、缩放、变速或字幕就会重编码。</span>
+                    </div>
+                  )}
                   {format !== 'mp3' && <><div style={labelStyle}>输出画面</div><div style={controlRow}><Segmented value={exportResolution} onChange={setExportResolution} style={{ flex: 1 }} options={[{ key: 'source', label: '源分辨率' }, { key: '1080p', label: '1080p' }, { key: '720p', label: '720p' }]} /><Segmented value={exportFps} onChange={setExportFps} style={{ flex: 1 }} options={[{ key: 'source', label: `${fps}fps` }, { key: '30', label: '30' }, { key: '24', label: '24' }, { key: '15', label: '15' }]} /></div></>}
                   {(format === 'mp4' || format === 'webm') && <div style={{ ...surface.inset(), padding: '8px 9px', display: 'flex', flexDirection: 'column', gap: 7 }}><div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><Type size={12} />字幕轨</span><span style={{ ...text.num(9), color: transcriptSegments.length ? sem.calm : ink(3) }}>{transcriptSegments.length} 段</span></div><Segmented value={exportSubtitleMode} onChange={setExportSubtitleMode} options={[{ key: 'none', label: '不内嵌' }, { key: 'embedded', label: '内嵌可开关' }]} /><div style={{ ...text.faint(), fontSize: 9 }}>MP4 使用 mov_text，WebM 使用 WebVTT；字幕会按剪辑片段和播放速度自动重排时间码。</div></div>}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

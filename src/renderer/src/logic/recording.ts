@@ -430,11 +430,27 @@ export function stylizeRecordingAnimeFrame(
   return pixels
 }
 
+/**
+ * 录制容器/编码优先链：**MP4 + H.264 优先**，WebM/VP9 逐级回退。
+ *
+ * 为什么 MP4/H.264 排最前（本机实测，Electron 44 / Chromium 152）：
+ *  1. **容器元数据可信**：MediaRecorder 产出的 WebM 没有 Duration、且 tbr 被写成时基
+ *     （实测 `tbn 1k`，FFmpeg 读成 1000fps），导出时只能猜标称帧率——"导出画面飞快跑完"
+ *     那类事故的根就在这里。同样条件录出的 MP4 是 `Duration 2.00s / 29.92 tbr / 30k tbn`。
+ *  2. **导出可直通**：目标也是 MP4 时能 `-c:v copy`（实测 60 秒素材 1 秒，重编码要 18 秒）。
+ *  3. **省 CPU**：不再用软件 libvpx 编 VP8/VP9，把 CPU 让回给画面合成，缓解高分屏丢帧。
+ *  4. **兼容性最好**：H.264 + AAC 在微信/剪映/Windows 播放器/手机上都能直接播。
+ *
+ * 级位串按"高画质 → 高兼容"排：High@5.1 覆盖到 4K，High@4.0 退一档，Baseline 兜底。
+ * 刻意**不**把不带 codecs 的 `video/mp4` 放进优先链——实测它会被 Chromium 塞成 VP9-in-MP4，
+ * 既拿不到 H.264 的兼容性，又丢了 WebM 的原生支持。
+ */
 export function selectRecorderMime(isSupported: (mime: string) => boolean, withAudio = true): string {
-  const candidates = withAudio
+  const mp4 = ['video/mp4;codecs=avc1.640033', 'video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1.42001f']
+  const webm = withAudio
     ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
     : ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
-  return candidates.find(isSupported) || 'video/webm'
+  return [...mp4, ...webm].find(isSupported) || 'video/webm'
 }
 
 export function recordingVideoBitrate(width: number, height: number, fps: number, quality: 'standard' | 'high' | 'ultra'): number {

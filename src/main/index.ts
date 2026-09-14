@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, safeStorage, screen, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
-import { copyFile, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { copyFile, mkdtemp, open, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, join } from 'path'
 import { pathToFileURL } from 'url'
@@ -38,7 +38,8 @@ import { initUpdater } from './updater'
 import { setApprovalPolicy, approvalSessionAllow, setApprovalAuditSink, policyAutoDecision, clearSessionAllows } from './approval-policy'
 import { createExternalYieldController, type ExternalYieldController } from './external-yield'
 import { createScreenshotPoller } from './screenshot-poller'
-import { recordingExportSubtitleSegments, recordingHasEdits, startRecordingFfmpeg } from './recording-export'
+import { buildRecordingRemuxArgs, createEncoderPicker, crfFor, recordingExportStrategy, type VideoEncoder, recordingExportSubtitleSegments, recordingHasEdits, startRecordingFfmpeg, startRecordingFfmpegWithArgs } from './recording-export'
+import { sniffRecordingContainer } from '../shared/recording-format'
 import { RecordingSessionStore } from './recording-session-store'
 import { RecordingProjectStore } from './recording-project-store'
 import { transcribeRecordingFile } from './recording-transcription'
@@ -1198,7 +1199,29 @@ function wireIpc(): void {
   ipcMain.on('recording-export-cancel', (_e, jobId: string) => {
     recordingExportJobs.get(String(jobId || ''))?.kill()
   })
-  const exportRecordingPath = async (event: IpcMainInvokeEvent, inputPath: string, rawRequest: RecordingExportRequest) => {
+  /** 只读文件头若干字节用于容器嗅探：整文件可达数百 MB，绝不能全读进内存。 */
+async function readFileHead(path: string, bytes = 64): Promise<Buffer> {
+  const handle = await open(path, 'r')
+  try {
+    const buffer = Buffer.alloc(bytes)
+    const { bytesRead } = await handle.read(buffer, 0, bytes, 0)
+    return buffer.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
+  }
+}
+
+/** 编码器选取器按 ffmpeg 路径缓存（同一次运行内只试编码一次）。 */
+const encoderPickers = new Map<string, ReturnType<typeof createEncoderPicker>>()
+const encoderPickerFor = (ffmpegPath: string): ReturnType<typeof createEncoderPicker> => {
+  const existing = encoderPickers.get(ffmpegPath)
+  if (existing) return existing
+  const created = createEncoderPicker(ffmpegPath)
+  encoderPickers.set(ffmpegPath, created)
+  return created
+}
+
+const exportRecordingPath = async (event: IpcMainInvokeEvent, inputPath: string, rawRequest: RecordingExportRequest) => {
     const jobId = String(rawRequest?.jobId || `recording-${Date.now()}`)
     const sendProgress = (phase: RecordingExportProgress['phase'], progress: number, message?: string): void => {
       event.sender.send('recording-export-progress', { jobId, phase, progress, message } satisfies RecordingExportProgress)
@@ -1253,20 +1276,39 @@ function wireIpc(): void {
         }
       }
 
-      const fullRange = request.trimStartMs === 0 && request.trimEndMs === request.durationMs
-      if (format === 'webm' && request.quality === 'original' && fullRange && !recordingHasEdits(request)) {
+      // 无剪辑时按真实容器选最快路径（嗅探文件头，比扩展名/mimeType 可信）
+      const sourceContainer = sniffRecordingContainer(await readFileHead(inputPath))
+      const strategy = recordingExportStrategy(request, sourceContainer)
+      if (strategy === 'copy') {
         await copyFile(inputPath, outputPath)
         sendProgress('done', 1, '原始录制已保存')
+        return { ok: true, path: outputPath }
+      }
+      if (strategy === 'remux') {
+        const executable = app.isPackaged ? String(ffmpegStatic || '').replace('app.asar', 'app.asar.unpacked') : String(ffmpegStatic || '')
+        if (!executable) return { ok: false, error: '内置 FFmpeg 不可用，请改用原始 WebM 导出' }
+        sendProgress('encoding', 0.1, '无剪辑 · 直接封装（画质无损）')
+        const remux = startRecordingFfmpegWithArgs(executable, buildRecordingRemuxArgs(inputPath, outputPath, request), (value) => {
+          sendProgress('encoding', 0.1 + value * 0.88)
+        }, request.durationMs)
+        recordingExportJobs.set(jobId, remux.child)
+        await remux.done
+        sendProgress('done', 1, '无剪辑 · 已直接封装')
         return { ok: true, path: outputPath }
       }
 
       const configured = String(ffmpegStatic || '')
       const executable = app.isPackaged ? configured.replace('app.asar', 'app.asar.unpacked') : configured
       if (!executable) return { ok: false, error: '内置 FFmpeg 不可用，请改用原始 WebM 导出' }
+      // 需要重编码时才做编码器选择：探测 + 用真实素材试编码计时，只有**明确更快**才用硬件编码。
+      // 结果按进程缓存，一次会话只付一次试编码成本；失败一律回落 libx264。
+      const encoder: VideoEncoder = format === 'mp4'
+        ? await encoderPickerFor(executable)(inputPath, crfFor(request.quality))
+        : 'libx264'
       sendProgress('encoding', 0.05, format === 'gif' ? '正在生成 GIF 调色板' : format === 'mp3' ? '正在编码音频' : '正在压缩视频')
       const running = startRecordingFfmpeg(executable, inputPath, outputPath, request, (value) => {
         sendProgress('encoding', 0.05 + value * 0.94)
-      })
+      }, encoder)
       recordingExportJobs.set(jobId, running.child)
       await running.done
       sendProgress('done', 1, '导出完成')
@@ -1365,7 +1407,8 @@ function wireIpc(): void {
       if (!data?.length) return { ok: false, error: '录制数据为空' }
       if (data.length > 1_600_000_000) return { ok: false, error: '内存录制导出不能超过 1.6GB，请使用分块录制' }
       tempDir = await mkdtemp(join(tmpdir(), 'agentic-island-recording-'))
-      const inputPath = join(tempDir, 'capture.webm')
+      // 临时文件名不代表容器：导出侧按文件头嗅探真实容器，这里的名字只是占位
+      const inputPath = join(tempDir, 'capture.bin')
       await writeFile(inputPath, data)
       return await exportRecordingPath(event, inputPath, rawRequest)
     } finally {

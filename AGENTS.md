@@ -43,6 +43,8 @@ node --experimental-strip-types scripts/test-terminal-project.ts # 项目任务�
 npm run audit:terminal # 隔离 Electron 验证输入、退出码、危险确认与恢复
 npm run audit:ask      # 隔离 Electron 验证回答方法、气泡分析与窄宽布局
 npm run audit:contrast # 全岛像素级对比度审计（2 主题 × 11 分区，硬失败线 3.0）
+npm run audit:recording # 隔离实例真录一段：容器/扩展名/时长/应用内播放断言
+npm run bench:recording # 导出基准：直通封装 vs 软件编码 vs 各硬件编码器
 ```
 
 ## 架构总览
@@ -92,7 +94,8 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 8. **卡片入场动画禁用带 translate 的 keyframes**（ai-toast 是给居中 toast 的，会把卡片甩出面板）——用 `ui/motion.ts` 的 fadeScaleIn；**同样禁用 filter: blur 入场动画**（透明窗口+大树重绘会掉帧，Tab 切换卡顿的根因），AnimatePresence 不加 `mode="wait"`（新分区要等旧分区退出才挂载，感知卡顿）。
 9. **hooks 转发脚本必须 fail-open**（岛没开时绝不能卡住用户 CLI）；诊断走 `~/.agentic-island/events.log`（cc 与 codex 都写）。
 10. **视觉体系**：OKLCH 色相令牌（`--th/--th2/--ths` + `--cs/--css` 饱和倍率、`--pl` 面板明度倍率），主题在 `logic/themes.ts`；语义色（琥珀警示 75 / 红危险 / 紫专注）跨主题固定。组件样式一律走 `ui/tokens.ts` + `ui/components.tsx`（见上方"设计系统"），动效用 `ui/motion.ts`（framer-motion）+ `src/renderer/index.html` 的全局 keyframes/class（.hv/.ai-card/.ai-scroll/.row-acts 仍保留使用）。
-11. **原生依赖只用 N-API 预编译包**（@lydell/node-pty）——避免依赖用户机 node-gyp、Python 与 Visual Studio 构建链。
+11. **录制容器与导出路径**：录制优先 `video/mp4;codecs=avc1.640033`（H.264），WebM/VP9 逐级回退——MP4 容器的时长与帧率**可信**，而 MediaRecorder 的 WebM 没有 Duration、且 `tbr` 是时基（实测 `1k`），导出时只能猜帧率（"导出画面飞快跑完"的根因）。导出按需分流：无剪辑且容器相同 → `-c:v copy` + 音频转 AAC（秒级）；单段裁剪 → `-ss/-t` 输入定位；多段/跨容器/GIF/MP3 → 重编码。硬件编码必须先**试编码计时**（`h264_amf` 会出现在 `-encoders` 里但运行期 DLL 缺失；`h264_qsv` 在核显机器上比软件还慢），只有明确快 15% 才采用——入口 `npm run bench:recording`。
+12. **原生依赖只用 N-API 预编译包**（@lydell/node-pty）——避免依赖用户机 node-gyp、Python 与 Visual Studio 构建链。
 12. **外网请求走 electron `net.fetch`**（继承系统代理）；Node 全局 fetch 不认代理（GitHub API 等会连不上）。
 13. **录屏定位框与成片必须共用源裁剪参数**：显示器/窗口先以实际媒体轨尺寸为准，区域、`contain/cover` 和运镜统一走 `recordingFitComposition` / `recordingFocusCrop`；控制条收起只能隐藏工作台，不能卸载 Canvas。
 

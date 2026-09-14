@@ -55,10 +55,11 @@ export class RecordingSessionStore {
     await mkdir(this.root, { recursive: true })
     const id = `recording-${Date.now()}-${randomUUID().slice(0, 8)}`
     const now = Date.now()
+    const mimeType = String(input.mimeType || 'video/webm').slice(0, 160)
     const manifest: RecordingSessionManifest = {
       id,
       name: safeName(input.name),
-      mimeType: String(input.mimeType || 'video/webm').slice(0, 160),
+      mimeType,
       sourceName: String(input.sourceName || '未知来源').slice(0, 200),
       sourceKind: input.sourceKind === 'window' ? 'window' : 'screen',
       width: Math.max(2, positiveInteger(input.width, 1920)),
@@ -71,7 +72,10 @@ export class RecordingSessionStore {
       durationMs: 0,
       bytes: 0,
       chunks: 0,
-      fileName: `${id}.webm.part`
+      // 扩展名跟随实际容器：录 MP4 时不能写成 .webm（导出旁路要靠它判断能否直通封装）。
+      // 就地推导而不 import '../shared/recording-format'：本文件被 raw-node 测试直接加载，
+      // 顶层不得有无扩展名的相对运行时导入（见 AGENTS.md 工程约束 1）。
+      fileName: `${id}.${/mp4/i.test(mimeType) ? 'mp4' : 'webm'}.part`
     }
     const mediaPath = this.mediaPath(manifest)
     await writeFile(mediaPath, new Uint8Array())

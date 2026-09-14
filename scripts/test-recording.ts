@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { buildRecordingFfmpegArgs, recordingExportDurationMs, recordingExportSubtitleSegments, recordingHasEdits } from '../src/main/recording-export.ts'
+import type { EncoderRunner } from '../src/main/recording-export.ts'
+import { buildRecordingFfmpegArgs, buildRecordingRemuxArgs, crfFor, detectHardwareEncoders, hardwareQuantizerForCrf, parseHardwareEncoders, pickFastestEncoder, pickVideoEncoder, recordingExportDurationMs, recordingExportStrategy, recordingExportSubtitleSegments, recordingHasEdits, videoEncoderArgs } from '../src/main/recording-export.ts'
+import { recordingContainerOf, recordingFileExtension, sniffRecordingContainer } from '../src/shared/recording-format.ts'
 import { clampRecordingBarPosition, formatRecordingTime, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
 } from '../src/renderer/src/logic/recording.ts'
 import { recordingSourceLabel, recordingWindowHandle, sameRecordingWindowSource } from '../src/shared/recording-source.ts'
@@ -38,8 +40,8 @@ assert.equal(recordingZoomForMotion('off', 0), 1, '关闭运镜不缩放')
 assert.ok(recordingZoomForMotion('dynamic', 0) > recordingZoomForMotion('gentle', 0), '动态运镜聚焦更强')
 assert.ok(recordingZoomForMotion('dynamic', 1000) < recordingZoomForMotion('dynamic', 0), '快速移动自动减弱缩放')
 assert.equal(recordingLerp(0, 1, 0.25), 0.25, '平滑插值')
-assert.equal(selectRecorderMime((mime) => mime.includes('vp8,opus')), 'video/webm;codecs=vp8,opus', '编码能力自动降级')
-assert.equal(selectRecorderMime(() => true, false), 'video/webm;codecs=vp9', '无音轨时不声明 Opus 编码')
+assert.equal(selectRecorderMime((mime) => mime.includes('vp8')), 'video/webm;codecs=vp8,opus', '只有 VP8 可用时降级到 VP8+Opus')
+assert.equal(selectRecorderMime((mime) => !mime.includes('mp4'), false), 'video/webm;codecs=vp9', 'WebM 回退且无音轨时不声明 Opus 编码')
 assert.ok(recordingVideoBitrate(3840, 2160, 60, 'ultra') > recordingVideoBitrate(1920, 1080, 30, 'high'), '4K60 码率高于 1080P30')
 assert.equal(recordingHealth({ active: true, elapsedMs: 5000, bytes: 0, chunkGapMs: 1000, writeLatencyMs: 0, droppedFrames: 0, totalFrames: 150 }).level, 'critical', '编码器无输出判定为严重异常')
 assert.equal(recordingHealth({ active: true, elapsedMs: 5000, bytes: 1_000_000, chunkGapMs: 4000, writeLatencyMs: 20, droppedFrames: 0, totalFrames: 150 }).message, '编码分片延迟', '分片中断产生健康告警')
@@ -206,5 +208,107 @@ assert.deepEqual(clampRecordingBarPosition(9999, 9999, bar, viewport), { x: 2560
 assert.deepEqual(clampRecordingBarPosition(600, 400, bar, viewport), { x: 600, y: 400 }, '可视区内的位置原样保留')
 assert.deepEqual(clampRecordingBarPosition(Number.NaN, 0, bar, viewport), { x: 8, y: 8 }, '非法坐标退回边距内')
 assert.deepEqual(clampRecordingBarPosition(0, 0, { width: 3000, height: 2000 }, viewport), { x: 8, y: 8 }, '控制条比视口还大时仍保持在左上角边距')
+
+/* ---------------- 录制容器与导出路径（P0：MP4/H.264 优先 + 无剪辑直通封装） ---------------- */
+
+// 编码器优先链：MP4/H.264 必须排在 WebM 之前（容器元数据可信 + 导出可直通 + 不用软件 VP9）。
+const chainSupported = selectRecorderMime(() => true)
+assert.match(chainSupported, /^video\/mp4;codecs=avc1\.640033$/, '首选 H.264 High@5.1（覆盖到 4K）')
+assert.equal(selectRecorderMime((mime) => !mime.includes('mp4')), 'video/webm;codecs=vp9,opus', 'MP4 不可用时回退到 WebM/VP9+Opus')
+assert.equal(selectRecorderMime(() => false), 'video/webm', '全不支持时给出兜底容器')
+assert.equal(selectRecorderMime(() => true).includes(',opus'), false, 'MP4 分支不带音频 codecs（Chromium 会自行补 opus）')
+// 裸 video/mp4 实测会被 Chromium 塞成 VP9-in-MP4：既没有 H.264 的兼容性，也不是原生 WebM
+const mp4Candidates = selectRecorderMime(() => true).split('|')
+const allMimes = [selectRecorderMime(() => true), selectRecorderMime(() => true, false)].join(' ')
+assert.ok(!/video\/mp4(?![;a-z0-9])/i.test(allMimes), '不得使用裸 video/mp4（会被塞成 VP9-in-MP4）')
+
+// 容器判定与文件头嗅探
+assert.equal(recordingContainerOf('video/mp4;codecs=avc1.640033'), 'mp4', 'mp4 mime 判定为 mp4 容器')
+assert.equal(recordingContainerOf('video/webm;codecs=vp9,opus'), 'webm', 'webm mime 判定为 webm 容器')
+assert.equal(recordingFileExtension('video/mp4;codecs=avc1.640033'), 'mp4', '扩展名跟随实际容器（不能把 MP4 存成 .webm）')
+const mp4Head = Buffer.from([0x00, 0x00, 0x00, 0x24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00])
+const webmHead = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81, 0x01, 0x42, 0xf2, 0x81])
+assert.equal(sniffRecordingContainer(mp4Head), 'mp4', '按文件头识别 MP4（ftyp）')
+assert.equal(sniffRecordingContainer(webmHead), 'webm', '按文件头识别 WebM/Matroska（EBML 魔数）')
+assert.equal(sniffRecordingContainer(Buffer.from([1, 2, 3])), 'unknown', '过短的头部返回 unknown 而不是猜')
+assert.equal(sniffRecordingContainer(null), 'unknown', '空头部返回 unknown')
+
+// 导出路径决策矩阵
+const strategyBase = { jobId: 'j', name: 'n', format: 'mp4' as const, quality: 'balanced' as const, durationMs: 10_000, width: 1920, height: 1080, fps: 30, hasAudio: true }
+assert.equal(recordingExportStrategy(strategyBase, 'mp4'), 'remux', 'MP4 源 + MP4 目标 + 无剪辑 → 直通封装')
+assert.equal(recordingExportStrategy({ ...strategyBase, format: 'webm' }, 'webm'), 'copy', 'WebM 源 + WebM 目标 + 无剪辑 → 原样保存')
+assert.equal(recordingExportStrategy(strategyBase, 'webm'), 'encode', '跨容器必须重编码（VP9 → H.264）')
+assert.equal(recordingExportStrategy({ ...strategyBase, format: 'webm' }, 'mp4'), 'encode', '跨容器必须重编码（H.264 → VP9）')
+assert.equal(recordingExportStrategy(strategyBase, 'unknown'), 'encode', '容器无法识别时走安全的重编码路径')
+assert.equal(recordingExportStrategy({ ...strategyBase, format: 'gif' }, 'mp4'), 'encode', 'GIF 始终重编码')
+assert.equal(recordingExportStrategy({ ...strategyBase, format: 'mp3' }, 'mp4'), 'encode', 'MP3 始终重编码')
+assert.equal(recordingExportStrategy({ ...strategyBase, trimEndMs: 5_000 }, 'mp4'), 'encode', '有裁剪范围 → 重编码')
+assert.equal(recordingExportStrategy({ ...strategyBase, outputWidth: 1280, outputHeight: 720 }, 'mp4'), 'encode', '改变输出分辨率 → 重编码')
+assert.equal(recordingExportStrategy({ ...strategyBase, edit: { speed: 1.5 } }, 'mp4'), 'encode', '变速 → 重编码')
+
+// 直通封装参数：视频流 copy、音频转 AAC（Opus-in-MP4 兼容性差）
+const remuxArgs = buildRecordingRemuxArgs('in.mp4', 'out.mp4', strategyBase)
+assert.ok(remuxArgs.includes('-c:v') && remuxArgs[remuxArgs.indexOf('-c:v') + 1] === 'copy', '直通封装不得重编码视频流')
+assert.ok(remuxArgs.includes('-c:a') && remuxArgs[remuxArgs.indexOf('-c:a') + 1] === 'aac', '直通封装把音频转成 AAC')
+assert.ok(remuxArgs.includes('-movflags') && remuxArgs.includes('+faststart'), '直通封装带 faststart')
+const remuxMuted = buildRecordingRemuxArgs('in.mp4', 'out.mp4', { ...strategyBase, edit: { muteAudio: true } })
+assert.ok(remuxMuted.includes('-an') && !remuxMuted.includes('-c:a'), '静音的直通封装不引入音轨')
+
+/* ---------------- 编码器选择（P0：探测 + 实测 + 回退，绝不盲用硬件） ---------------- */
+
+// 量化档映射：硬件编码器没有逐帧码率控制，保守 +1 档补偿感知质量损失
+assert.equal(hardwareQuantizerForCrf(22), 23, 'crf 22 → cq 23')
+assert.equal(hardwareQuantizerForCrf(0), 0, 'crf 0（无损档）映射为 0')
+assert.equal(hardwareQuantizerForCrf(51), 51, '上限收敛到 51')
+assert.equal(hardwareQuantizerForCrf(Number.NaN), 23, '非法输入回落到均衡档，不产生 NaN，也不会意外变成超大无损')
+assert.equal(crfFor('balanced'), 22, '质量档到 CRF 的映射与导出侧共用同一张表')
+assert.deepEqual(videoEncoderArgs('libx264', 22), ['-c:v', 'libx264', '-preset', 'medium', '-crf', '22', '-pix_fmt', 'yuv420p'], '软件编码参数保持不变')
+const nvenc = videoEncoderArgs('h264_nvenc', 22)
+assert.ok(nvenc.includes('h264_nvenc') && nvenc.includes('-cq') && nvenc.includes('-b:v') && nvenc.includes('0'), 'NVENC 用 CQ 且必须显式 -b:v 0（否则 CQ 被码率上限覆盖）')
+assert.ok(videoEncoderArgs('h264_qsv', 22).includes('h264_qsv') && videoEncoderArgs('h264_qsv', 22).includes('nv12'), 'QSV 需要 nv12 像素格式')
+assert.ok(videoEncoderArgs('h264_amf', 22).includes('-rc') && videoEncoderArgs('h264_amf', 22).includes('cqp'), 'AMF 用 CQP')
+
+// 列表解析只做筛选；能不能用必须靠试编码（本机实测：amf 在列表里但 DLL 缺失）
+const listing = [' V....D h264_nvenc            NVIDIA NVENC H.264 encoder', ' V..... h264_qsv              H.264 (Intel QSV)', ' V....D h264_amf              AMD AMF H.264 Encoder', ' V....D libx264              libx264 H.264'].join(String.fromCharCode(10))
+assert.deepEqual(parseHardwareEncoders(listing), ['h264_nvenc', 'h264_amf', 'h264_qsv'], '按 nvenc → amf → qsv 顺序筛出硬件编码器')
+assert.deepEqual(parseHardwareEncoders(' V..... libx264  libx264 H.264'), [], '没有硬件编码器时返回空数组（调用方保持软件编码）')
+
+// 决策：只有明确更快才切硬件
+const trials = (entries: Array<[string, number, boolean]>) => entries.map(([encoder, ms, ok]) => ({ encoder: encoder as never, ms, ok }))
+assert.equal(pickFastestEncoder(trials([['libx264', 20_000, true], ['h264_nvenc', 8_000, true]])), 'h264_nvenc', '实测快 2.5× 的硬件编码应被采用')
+assert.equal(pickFastestEncoder(trials([['libx264', 20_000, true], ['h264_qsv', 20_300, true]])), 'libx264', '与软件持平（本机实测）不切换')
+assert.equal(pickFastestEncoder(trials([['libx264', 20_000, true], ['h264_amf', 600, false]])), 'libx264', '试编码失败（DLL 缺失）不得被采用')
+assert.equal(pickFastestEncoder(trials([['libx264', 20_000, true], ['h264_nvenc', 18_000, true]])), 'libx264', '只快 11% 不到 15% 门槛时不切换')
+assert.equal(pickFastestEncoder(trials([['libx264', 20_000, true], ['h264_nvenc', 8_000, true], ['h264_qsv', 6_000, true]])), 'h264_qsv', '多个可用时取最快')
+assert.equal(pickFastestEncoder(trials([['h264_nvenc', 8_000, true]])), 'libx264', '没有软件基线时不冒险切硬件')
+
+// 试编码选择：注入假 runner 直接验证"探测 → 实测 → 回退"的完整流程
+const encoderListing = [' V....D h264_nvenc            NVIDIA NVENC H.264 encoder', ' V..... h264_qsv              H.264 (Intel QSV)', ' V....D h264_amf              AMD AMF H.264 Encoder'].join(String.fromCharCode(10))
+const fakeRunner = (listing: string, times: Record<string, number>, failures: string[] = []): EncoderRunner =>
+  (args) => {
+    if (args.includes('-encoders')) return Promise.resolve({ code: 0, output: listing, ms: 5 })
+    const line = args.join(' ')
+    for (const encoder of failures) if (line.includes(encoder)) return Promise.resolve({ code: 1, output: 'DLL failed to open', ms: 600 })
+    const encoder = ['h264_nvenc', 'h264_qsv', 'h264_amf', 'libx264'].find((name) => line.includes(name)) || 'libx264'
+    return Promise.resolve({ code: 0, output: '', ms: times[encoder] ?? 1_000 })
+  }
+
+const merged = await detectHardwareEncoders('ffmpeg.exe', fakeRunner(encoderListing, {}))
+assert.deepEqual(merged, ['h264_nvenc', 'h264_amf', 'h264_qsv'], '探测结果按偏好顺序返回')
+
+// 本机实测形态：nvenc 快 2.76×、qsv 与软件持平、amf 列表里有但运行期失败
+const picked = await pickVideoEncoder('ffmpeg.exe', 'in.webm', 22, {}, fakeRunner(encoderListing, { libx264: 21_890, h264_nvenc: 7_930, h264_qsv: 20_328 }, ['h264_amf']))
+assert.equal(picked.encoder, 'h264_nvenc', '本机实测形态下应选中 NVENC（2.76×）')
+assert.equal(picked.trials.find((t) => t.encoder === 'h264_amf')?.ok, false, '试编码失败的编码器被标记为不可用')
+assert.equal(picked.trials.find((t) => t.encoder === 'h264_qsv')?.ok, true, '试编码成功但不够快，仅记录不采用')
+
+// 只有 Intel 核显的机器：qsv 不比软件快 → 保持软件编码
+const intelOnly = [' V..... h264_qsv              H.264 (Intel QSV)'].join(String.fromCharCode(10))
+const intelPick = await pickVideoEncoder('ffmpeg.exe', 'in.webm', 22, {}, fakeRunner(intelOnly, { libx264: 6_000, h264_qsv: 7_000 }))
+assert.equal(intelPick.encoder, 'libx264', '核显机器上 QSV 更慢时保持软件编码')
+
+// 软件基线自身失败 → 不冒险切硬件
+const noBaseline = await pickVideoEncoder('ffmpeg.exe', 'in.webm', 22, {}, fakeRunner(encoderListing, { h264_nvenc: 1_000 }, ['libx264']))
+assert.equal(noBaseline.encoder, 'libx264', '软件基线试编码失败时不切硬件')
 
 console.log('recording tests passed')

@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.6.13](https://img.shields.io/badge/release-v0.6.13-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.13)
+[![Release v0.6.14](https://img.shields.io/badge/release-v0.6.14-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.14)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/terminal-v0613.png" alt="Agentic-Island v0.6.4 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
+<img src="screenshots/terminal-v0614.png" alt="Agentic-Island v0.6.4 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
 
 </div>
 
@@ -34,6 +34,13 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **成果没有沉淀** | 执行记录、情报简报、每日复盘与知识资料成为下一轮工作的上下文 |
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
+
+## v0.6.14 更新概览
+
+- **录制容器改为 MP4 + H.264 优先**（WebM/VP9 回退）。同一份录制实测：MP4 容器时长 8.91 秒可读、帧率 27.4fps 可信；而旧的 WebM 产出**没有时长**、帧率字段是时基（`tbn 1k`）——后者正是上一版修的"导出画面飞快跑完"的源头。同时不再用软件 libvpx 编 VP9，CPU 让回给画面合成。
+- **导出按需分流，不再一律重编码**：无剪辑且容器相同 → **视频流直接拷贝**（20 秒 1440p 素材实测 **1.0 秒**，完整重编码要 21.9 秒）；单段裁剪 → `-ss/-t` 输入定位（不再全解码）；多段剪辑/跨容器/GIF/MP3 才完整重编码。音轨单独转 AAC（应用内 Opus-in-MP4 可正常解码，转 AAC 是为了微信/剪映/Windows 播放器也能播）。
+- **编码器选择：探测 → 实测 → 回退**。先用 `-encoders` 筛候选，再**拿真实素材试编码计时**，只有明确快 15% 才切硬件。同机实测：`h264_nvenc` 快 **2.76×**（采用）、`h264_qsv` 比软件还慢（拒绝）、`h264_amf` 在列表里但运行期 DLL 缺失（拒绝）——所以判定只能来自试编码，不能来自列表。
+- 新增 `npm run bench:recording`（导出基准）与 `npm run audit:recording`（真录一段并验证应用内预览能解出视频与音频）。
 
 ## v0.6.13 更新概览
 
@@ -144,24 +151,24 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v0613.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v0613.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v0614.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v0614.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v0613.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v0613.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v0614.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v0614.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v0613.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v0613.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v0614.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v0614.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/recording-v0613.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>多源采集 · 实时运镜 · 三轨剪辑 · AI 后期</sub></td>
-<td width="50%" align="center"><img src="screenshots/settings-v0613.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v0614.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>多源采集 · 实时运镜 · 三轨剪辑 · AI 后期</sub></td>
+<td width="50%" align="center"><img src="screenshots/settings-v0614.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v0613.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v0614.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -261,7 +268,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.6.13.exe
+Agentic-Island-Setup-0.6.14.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。
@@ -335,6 +342,8 @@ npm test                # 全部离线、可重复测试脚本
 npm run build           # electron-vite 三端生产构建
 npm run audit:ask       # 隔离 Electron 验证问答方法与气泡分析交互
 npm run audit:contrast  # 全岛像素级对比度审计（2 主题 × 11 分区）
+npm run audit:recording # 隔离实例真录一段，验证容器/元数据与应用内播放
+npm run bench:recording # 录屏导出基准：直通封装 / 软件编码 / 各硬件编码器
 npm run audit:terminal  # 隔离 Electron 验证真实 ConPTY 交互与恢复
 npm run package         # 构建 NSIS 安装包到 dist/
 npm run verify:package  # 隔离验证 unpacked、静默安装启动与卸载

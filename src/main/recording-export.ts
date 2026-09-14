@@ -7,7 +7,8 @@ export interface RecordingExportProcess {
   done: Promise<void>
 }
 
-const crfFor = (quality: RecordingExportRequest['quality']): number => {
+/** 质量档 → CRF（导出侧与编码器选择都要用同一张表，避免两处漂移）。 */
+export const crfFor = (quality: RecordingExportRequest['quality']): number => {
   if (quality === 'compact') return 30
   if (quality === 'near-lossless') return 15
   if (quality === 'lossless') return 0
@@ -88,7 +89,13 @@ export function recordingHasEdits(request: RecordingExportRequest): boolean {
     || Boolean(edit.muteAudio || Number(edit.fadeInMs) > 0 || Number(edit.fadeOutMs) > 0)
 }
 
-export function buildRecordingFfmpegArgs(inputPath: string, outputPath: string, request: RecordingExportRequest): string[] {
+export function buildRecordingFfmpegArgs(
+  inputPath: string,
+  outputPath: string,
+  request: RecordingExportRequest,
+  /** 由 encoder-selection 实测选出；默认软件编码（任何探测失败都回落到这里） */
+  encoder: VideoEncoder = 'libx264'
+): string[] {
   const trimStart = Math.max(0, Math.min(request.durationMs, Number(request.trimStartMs) || 0))
   const trimEnd = Math.max(trimStart + 1, Math.min(request.durationMs, Number(request.trimEndMs) || request.durationMs))
   const edit = request.edit || {}
@@ -96,16 +103,19 @@ export function buildRecordingFfmpegArgs(inputPath: string, outputPath: string, 
   const speed = Math.max(0.5, Math.min(2, Number(edit.speed) || 1))
   const editedDurationMs = recordingExportDurationMs(request)
   const includeAudio = request.hasAudio === true && edit.muteAudio !== true && request.format !== 'gif'
-  // 工坊每份录制都会自动生成一个覆盖全长的片段；那等于"没剪"，不该走分段裁剪——
-  // 走进去就会把视频按帧序号重排时间轴（源多为 VFR，见下方 fps 归一化注释）。
-  const trimming = segments.length > 0
-    && !(segments.length === 1 && segments[0].startMs <= 1 && segments[0].endMs >= request.durationMs - 1)
+  // 只有**多段**才是真正的分段剪辑（要 trim+concat）。
+  // 单段 = 普通裁剪：交给 -ss/-t 输入定位，FFmpeg 从定位点开始解码，不必要的前段全部跳过；
+  // 覆盖全长的单段（工坊每份录制都会自动生成一个）= 没剪，什么都不做。
+  const trimming = segments.length > 1
   const hasSegmentFilter = trimming
+  const singleRange = segments.length === 1 && !(segments[0].startMs <= 1 && segments[0].endMs >= request.durationMs - 1) ? segments[0] : null
+  const cutStart = singleRange ? singleRange.startMs : trimStart
+  const cutEnd = singleRange ? singleRange.endMs : trimEnd
   const common = [
     '-y', '-hide_banner', '-nostats', '-progress', 'pipe:1', '-i', inputPath,
     ...(request.subtitleFilePath && request.format !== 'gif' && request.format !== 'mp3' ? ['-i', request.subtitleFilePath] : []),
-    ...(!hasSegmentFilter && trimStart > 0 ? ['-ss', (trimStart / 1000).toFixed(3)] : []),
-    ...(!hasSegmentFilter && (trimStart > 0 || trimEnd < request.durationMs) ? ['-t', ((trimEnd - trimStart) / 1000).toFixed(3)] : []),
+    ...(!hasSegmentFilter && cutStart > 0 ? ['-ss', (cutStart / 1000).toFixed(3)] : []),
+    ...(!hasSegmentFilter && (cutStart > 0 || cutEnd < request.durationMs) ? ['-t', ((cutEnd - cutStart) / 1000).toFixed(3)] : []),
     '-map_metadata', '-1'
   ]
   // 分段裁剪：按时间 trim 出每段再 concat，段内原始时间轴（含 VFR 的不均匀间隔）完整保留。
@@ -229,10 +239,10 @@ export function buildRecordingFfmpegArgs(inputPath: string, outputPath: string, 
     return [
       ...common,
       ...filterArgs,
-      '-c:v', 'libx264',
-      '-preset', request.quality === 'compact' ? 'slow' : 'medium',
-      '-crf', String(crf),
-      '-pix_fmt', 'yuv420p',
+      // 编码器由探测+实测决定：硬件明确更快才用硬件，否则软件编码（见 encoder-selection.ts）
+      ...(encoder === 'libx264' && request.quality === 'compact'
+        ? ['-c:v', 'libx264', '-preset', 'slow', '-crf', String(crf), '-pix_fmt', 'yuv420p']
+        : videoEncoderArgs(encoder, crf)),
       '-movflags', '+faststart',
       ...(includeAudio ? ['-c:a', 'aac', '-b:a', request.quality === 'compact' ? '112k' : '192k'] : []),
       ...subtitleArgs,
@@ -271,20 +281,81 @@ export function buildRecordingFfmpegArgs(inputPath: string, outputPath: string, 
   ]
 }
 
+/**
+ * 导出路径决策（纯函数，便于离线测试）。
+ * - `copy`：源与目标同容器且无剪辑 → 原样保存（WebM→WebM 最常见）
+ * - `remux`：源已是 H.264+MP4、目标 MP4 且无剪辑 → 视频流直接拷、音频转 AAC（实测 60 秒素材 1 秒）
+ * - `encode`：跨容器、有剪辑、或输出为 GIF/MP3 → 走完整重编码
+ */
+export function recordingExportStrategy(
+  request: RecordingExportRequest,
+  source: 'mp4' | 'webm' | 'unknown'
+): 'copy' | 'remux' | 'encode' {
+  const format = request.format
+  if (format !== 'mp4' && format !== 'webm') return 'encode'
+  const trimStart = Number(request.trimStartMs) || 0
+  const trimEnd = Number(request.trimEndMs) || request.durationMs
+  if (trimStart > 0 || trimEnd < request.durationMs) return 'encode'
+  if (recordingHasEdits(request)) return 'encode'
+  if (source === 'unknown') return 'encode'
+  if (format !== source) return 'encode'
+  return format === 'mp4' ? 'remux' : 'copy'
+}
+
+/**
+ * 「无剪辑 · 直接封装」的最快路径：视频流原样拷贝，只把音频转成 AAC。
+ *
+ * 适用条件（由 `recordingExportStrategy` 判定）：没有剪辑/滤镜/字幕，源已经是 H.264 + MP4 容器。
+ * 为什么值得单独开一条：实测 60 秒 1440p 素材走完整重编码要 18 秒，而只拷视频流 + 转音频是 **1 秒**
+ * —— 差两个数量级，而且画质不二次损失。
+ * 为什么音频要转：MediaRecorder 录进 MP4 的音轨是 **Opus**，Opus-in-MP4 在微信/剪映/Windows
+ * 播放器上支持很差；转成 AAC 全部搞定，代价可忽略（音频重编码是流式的，不碰视频）。
+ */
+export function buildRecordingRemuxArgs(inputPath: string, outputPath: string, request: RecordingExportRequest): string[] {
+  const includeAudio = request.hasAudio === true && request.edit?.muteAudio !== true
+  return [
+    '-y', '-hide_banner', '-nostats', '-progress', 'pipe:1',
+    '-i', inputPath,
+    '-map_metadata', '-1',
+    '-map', '0:v:0',
+    ...(includeAudio ? ['-map', '0:a:0?'] : ['-an']),
+    '-c:v', 'copy',
+    ...(includeAudio ? ['-c:a', 'aac', '-b:a', '192k'] : []),
+    '-movflags', '+faststart',
+    outputPath
+  ]
+}
+
 export function startRecordingFfmpeg(
   ffmpegPath: string,
   inputPath: string,
   outputPath: string,
   request: RecordingExportRequest,
-  onProgress: (progress: number) => void
+  onProgress: (progress: number) => void,
+  encoder: VideoEncoder = 'libx264'
 ): RecordingExportProcess {
-  const child = spawn(ffmpegPath, buildRecordingFfmpegArgs(inputPath, outputPath, request), {
+  return startRecordingFfmpegWithArgs(
+    ffmpegPath,
+    buildRecordingFfmpegArgs(inputPath, outputPath, request, encoder),
+    onProgress,
+    recordingExportDurationMs(request)
+  )
+}
+
+/** 用预先构造好的参数启动 FFmpeg（直通封装等旁路复用同一套进度/错误处理）。 */
+export function startRecordingFfmpegWithArgs(
+  ffmpegPath: string,
+  args: string[],
+  onProgress: (progress: number) => void,
+  durationMs = 0
+): RecordingExportProcess {
+  const child = spawn(ffmpegPath, args, {
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
   })
   let progressBuffer = ''
   let errorBuffer = ''
-  const durationUs = recordingExportDurationMs(request) * 1000
+  const durationUs = Math.max(1, durationMs) * 1000
 
   child.stdout.setEncoding('utf8')
   child.stdout.on('data', (chunk: string) => {
@@ -316,4 +387,148 @@ export function startRecordingFfmpeg(
     })
   })
   return { child, done }
+}
+
+/* ---------------- 视频编码器参数映射（纯函数：被 raw-node 测试直接加载，不能引入相对运行时导入） ---------------- */
+
+export type VideoEncoder = 'libx264' | 'h264_nvenc' | 'h264_qsv' | 'h264_amf'
+
+/** CRF(x264) → 硬件编码器量化档的近似映射。硬件编码器没有逐帧码率控制；社区口径是同码率下
+    需要多给 15–30% 码率才追平软件编码的感知质量，因此这里略偏保守（crf 22 → cq 23）。 */
+export function hardwareQuantizerForCrf(crf: number): number {
+  const value = Number(crf)
+  // 非法输入回落到均衡档（23），而不是 0——0 在硬件编码器上等于"最高质量"，会意外产出超大文件
+  if (!Number.isFinite(value)) return 23
+  const clamped = Math.max(0, Math.min(51, Math.round(value)))
+  return clamped === 0 ? 0 : Math.max(1, Math.min(51, clamped + 1))
+}
+
+/** 按目标编码器给出视频编码参数；软件路径保持原有语义（质量优先、码率由质量决定）。 */
+export function videoEncoderArgs(encoder: VideoEncoder, crf: number): string[] {
+  const quantizer = hardwareQuantizerForCrf(crf)
+  if (encoder === 'h264_nvenc') {
+    // -b:v 0 必须显式给：否则 -cq 会被码率上限覆盖而失效
+    return ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', String(quantizer), '-b:v', '0', '-pix_fmt', 'yuv420p']
+  }
+  if (encoder === 'h264_qsv') {
+    return ['-c:v', 'h264_qsv', '-preset', 'medium', '-global_quality', String(quantizer), '-pix_fmt', 'nv12']
+  }
+  if (encoder === 'h264_amf') {
+    return ['-c:v', 'h264_amf', '-quality', 'balanced', '-rc', 'cqp', '-qp_i', String(quantizer), '-qp_p', String(quantizer), '-pix_fmt', 'yuv420p']
+  }
+  return ['-c:v', 'libx264', '-preset', 'medium', '-crf', String(crf), '-pix_fmt', 'yuv420p']
+}
+
+/** 从 `ffmpeg -encoders` 输出里筛出本机编译进来的 H.264 硬件编码器（顺序即偏好）。 */
+export function parseHardwareEncoders(listing: string): VideoEncoder[] {
+  const found: VideoEncoder[] = []
+  for (const encoder of ['h264_nvenc', 'h264_amf', 'h264_qsv'] as VideoEncoder[]) {
+    if (new RegExp(`^\\s*\\S+\\s+${encoder}\\b`, 'm').test(listing)) found.push(encoder)
+  }
+  return found
+}
+
+/**
+ * 从试编码结果里挑出值得采用的编码器：硬件必须**明确**快于软件基线（默认 1.15×）才切换。
+ * 依据是本机实测：同一台机器上 h264_nvenc 快 2.76×（该用），而 h264_qsv 与软件持平甚至更慢（不该用），
+ * 且 h264_amf 会出现在 `-encoders` 列表里但运行期 DLL 缺失——所以判定只能来自**试编码**，不能来自列表。
+ */
+export function pickFastestEncoder(
+  trials: Array<{ encoder: VideoEncoder; ms: number; ok: boolean }>,
+  threshold = 1.15
+): VideoEncoder {
+  const baseline = trials.find((trial) => trial.encoder === 'libx264' && trial.ok && trial.ms > 0)
+  if (!baseline) return 'libx264'
+  let best: { encoder: VideoEncoder; ms: number } | null = null
+  for (const trial of trials) {
+    if (!trial.ok || trial.encoder === 'libx264' || trial.ms <= 0) continue
+    if (trial.ms * threshold < baseline.ms && (!best || trial.ms < best.ms)) best = { encoder: trial.encoder, ms: trial.ms }
+  }
+  return best?.encoder ?? 'libx264'
+}
+
+
+/* ---------------- 编码器探测与试编码（依赖注入 runner，便于离线测试选择逻辑） ---------------- */
+
+export type EncoderRunner = (args: string[], timeoutMs: number) => Promise<{ code: number | null; output: string; ms: number }>
+
+export const spawnEncoderRunner = (ffmpegPath: string): EncoderRunner => (args: string[], timeoutMs: number): Promise<{ code: number | null; output: string; ms: number }> =>
+  new Promise((resolve) => {
+    const started = Date.now()
+    let output = ''
+    let settled = false
+    const child = spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
+    const finish = (code: number | null): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve({ code, output, ms: Date.now() - started })
+    }
+    const timer = setTimeout(() => { try { child.kill() } catch { /* 已退出 */ } finish(null) }, timeoutMs)
+    child.stderr?.on('data', (chunk) => { output = (output + String(chunk)).slice(-2000) })
+    child.once('error', () => finish(null))
+    child.once('close', (code) => finish(code))
+  })
+
+/** 列出本机可用的 H.264 硬件编码器（探测失败返回空数组，调用方回退软件编码）。 */
+export async function detectHardwareEncoders(ffmpegPath: string, runner: EncoderRunner = spawnEncoderRunner(ffmpegPath)): Promise<VideoEncoder[]> {
+  const result = await runner(['-hide_banner', '-encoders'], 8_000)
+  return result.code === 0 ? parseHardwareEncoders(result.output) : []
+}
+
+/**
+ * 用一小段真实素材给候选编码器计时，返回**明确快于软件基线**的最快者；没有就保持 libx264。
+ * 试编码输出到 null muxer，不落盘。整段逻辑有超时保护，任何异常都回退软件编码。
+ */
+export async function pickVideoEncoder(
+  ffmpegPath: string,
+  sourcePath: string,
+  crf: number,
+  options: { sampleMs?: number; speedupThreshold?: number; timeoutMs?: number } = {},
+  // 依赖注入：测试用假 runner 直接验证选择逻辑，不必真的编码
+  runner: EncoderRunner = spawnEncoderRunner(ffmpegPath)
+): Promise<{ encoder: VideoEncoder; trials: Array<{ encoder: VideoEncoder; ms: number; ok: boolean }> }> {
+  const sampleMs = Math.max(500, options.sampleMs ?? 2_000)
+  const threshold = options.speedupThreshold ?? 1.15
+  const timeoutMs = options.timeoutMs ?? 25_000
+  const candidates = await detectHardwareEncoders(ffmpegPath, runner)
+  const trials: Array<{ encoder: VideoEncoder; ms: number; ok: boolean }> = []
+  if (!candidates.length) return { encoder: 'libx264', trials }
+
+  const trial = async (encoder: VideoEncoder): Promise<number | null> => {
+    const args = [
+      '-y', '-hide_banner', '-loglevel', 'error',
+      '-t', (sampleMs / 1000).toFixed(3), '-i', sourcePath,
+      '-an', ...videoEncoderArgs(encoder, crf), '-f', 'null', '-'
+    ]
+    const result = await runner(args, timeoutMs)
+    const ok = result.code === 0 && result.ms > 0
+    trials.push({ encoder, ms: result.ms, ok })
+    return ok ? result.ms : null
+  }
+
+  const baseline = await trial('libx264')
+  if (baseline === null) return { encoder: 'libx264', trials }
+  for (const encoder of candidates) await trial(encoder)
+  return { encoder: pickFastestEncoder(trials, threshold), trials }
+}
+
+/**
+ * 进程内缓存的编码器选取器：第一次导出付一次试编码成本，之后复用同一个决定。
+ * 刻意不落盘持久化——GPU 状态（外接显卡、驱动更新、被其它程序独占）会变，
+ * 每次启动重新实测比"记住一个可能已经过期的结论"更可靠。
+ */
+export function createEncoderPicker(ffmpegPath: string, runner?: EncoderRunner): (sourcePath: string, crf: number) => Promise<VideoEncoder> {
+  let cached: VideoEncoder | null = null
+  let pending: Promise<VideoEncoder> | null = null
+  return async (sourcePath: string, crf: number) => {
+    if (cached) return cached
+    if (!pending) {
+      pending = pickVideoEncoder(ffmpegPath, sourcePath, crf, {}, runner)
+        .then((result) => result.encoder)
+        .catch(() => 'libx264' as VideoEncoder)
+        .then((encoder) => { cached = encoder; pending = null; return encoder })
+    }
+    return pending
+  }
 }
