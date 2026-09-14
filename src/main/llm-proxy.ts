@@ -3,7 +3,7 @@
 
 import type { LlmRequestConfig } from '../shared/protocol'
 import { netFetch } from './http-client'
-import { buildAnthropicRequestBody, buildChatRequestBody, isAnthropicRequest, normalizeLlmBaseUrl, normalizeLlmConfig, sanitizeLlmErrorDetail } from './llm-request'
+import { buildAnthropicRequestBody, buildChatRequestBody, isAnthropicRequest, isBudgetExhausted, normalizeLlmBaseUrl, normalizeLlmConfig, outputBudgetOf, retryBudget, sanitizeLlmErrorDetail, withOutputBudget } from './llm-request'
 
 const chatUrl = (baseUrl: string): string => normalizeLlmBaseUrl(baseUrl) + '/chat/completions'
 /** 本地端点（Ollama / LM Studio）无密钥：不带 Authorization，避免发送空的 Bearer 头 */
@@ -51,33 +51,62 @@ export async function complete(
     const body = anthropic
       ? buildAnthropicRequestBody(cfg, system, user, deep, history)
       : buildChatRequestBody(cfg, system, user, deep, history)
-    const res = await netFetch(anthropic ? cfg.baseUrl + '/messages' : chatUrl(cfg.baseUrl), {
-      method: 'POST',
-      timeoutMs: deep ? 120000 : 60000,
-      headers: anthropic ? anthropicHeaders(cfg.apiKey) : { 'content-type': 'application/json', ...bearer(cfg.apiKey) },
-      body: JSON.stringify(body)
-    })
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      // 本轮带图但端点拒绝 image_url（模型不支持视觉）——给出可操作提示，而非生肉 400
-      const hasImage = Array.isArray(user) && user.some((p) => p && (p as { type?: string }).type === 'image_url')
-      if (hasImage && (res.status === 400 || /image_url|vision|multimodal|deserialize/i.test(body))) {
-        return { ok: false, error: `当前模型「${cfg.model}」不支持图片输入。请到「设置 › 问答助手模型」切换或新增当前账号可用的视觉多模态模型后再试。` }
+    const send = async (requestBody: Record<string, unknown>): Promise<{ ok: boolean; text?: string; reasoning?: string; finishReason?: string; error?: string }> => {
+      const res = await netFetch(anthropic ? cfg.baseUrl + '/messages' : chatUrl(cfg.baseUrl), {
+        method: 'POST',
+        timeoutMs: deep ? 120000 : 60000,
+        headers: anthropic ? anthropicHeaders(cfg.apiKey) : { 'content-type': 'application/json', ...bearer(cfg.apiKey) },
+        body: JSON.stringify(requestBody)
+      })
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        // 本轮带图但端点拒绝 image_url（模型不支持视觉）——给出可操作提示，而非生肉 400
+        const hasImage = Array.isArray(user) && user.some((p) => p && (p as { type?: string }).type === 'image_url')
+        if (hasImage && (res.status === 400 || /image_url|vision|multimodal|deserialize/i.test(body))) {
+          return { ok: false, error: `当前模型「${cfg.model}」不支持图片输入。请到「设置 › 问答助手模型」切换或新增当前账号可用的视觉多模态模型后再试。` }
+        }
+        return { ok: false, error: requestError(res.status, body, cfg.model, cfg.baseUrl, cfg.apiKey) }
       }
-      return { ok: false, error: requestError(res.status, body, cfg.model, cfg.baseUrl, cfg.apiKey) }
+      if (anthropic) {
+        const data = await res.json() as { content?: Array<{ type?: string; text?: string; thinking?: string }>; stop_reason?: string }
+        const text = (data.content || []).filter((item) => item.type === 'text' && item.text).map((item) => item.text).join('\n\n')
+        const reasoning = (data.content || []).filter((item) => item.type === 'thinking' && item.thinking).map((item) => item.thinking).join('\n\n')
+        return {
+          ok: Boolean(text.trim()),
+          text,
+          reasoning: reasoning || undefined,
+          finishReason: data.stop_reason === 'max_tokens' ? 'length' : data.stop_reason,
+          error: '响应为空'
+        }
+      }
+      const data = (await res.json()) as { choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string }; finish_reason?: string }[] }
+      const choice = data.choices?.[0]
+      const msg = choice?.message
+      const text = msg?.content
+      // 推理型模型（如 deepseek-reasoner / deepseek-flash）会单独返回思维链
+      const reasoning = msg?.reasoning_content || msg?.reasoning
+      const value = typeof text === 'string' ? text : ''
+      return {
+        ok: Boolean(value.trim()),
+        text: value,
+        reasoning: typeof reasoning === 'string' && reasoning ? reasoning : undefined,
+        finishReason: choice?.finish_reason,
+        error: '响应为空'
+      }
     }
-    if (anthropic) {
-      const data = await res.json() as { content?: Array<{ type?: string; text?: string; thinking?: string }> }
-      const text = (data.content || []).filter((item) => item.type === 'text' && item.text).map((item) => item.text).join('\n\n')
-      const reasoning = (data.content || []).filter((item) => item.type === 'thinking' && item.thinking).map((item) => item.thinking).join('\n\n')
-      return text ? { ok: true, text, reasoning: reasoning || undefined } : { ok: false, error: '响应为空' }
+    let outcome = await send(body)
+    // 推理把输出预算吃满（正文空串 + finish_reason=length）时自动放宽预算重试一次：
+    // 推理型模型的思考长度不可预知，靠固定预算必然偶发"模型未返回内容"。
+    if (!outcome.ok && isBudgetExhausted(outcome)) {
+      outcome = await send(withOutputBudget(body, retryBudget(outputBudgetOf(body))))
     }
-    const data = (await res.json()) as { choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[] }
-    const msg = data.choices?.[0]?.message
-    const text = msg?.content
-    // 推理型模型（如 deepseek-reasoner）会单独返回思维链
-    const reasoning = msg?.reasoning_content || msg?.reasoning
-    return typeof text === 'string' ? { ok: true, text, reasoning } : { ok: false, error: '响应为空' }
+    if (!outcome.ok) {
+      if (outcome.finishReason === 'length') {
+        return { ok: false, error: '模型只输出了思考过程、未给出正文（输出预算被推理占满）。已自动放宽预算重试仍失败，建议降低推理强度或改用非推理型号' }
+      }
+      return { ok: false, error: outcome.error }
+    }
+    return { ok: true, text: outcome.text, reasoning: outcome.reasoning }
   } catch (e) {
     return { ok: false, error: sanitizeLlmErrorDetail(String(e), cfg.apiKey) }
   }

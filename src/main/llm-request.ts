@@ -76,12 +76,49 @@ function isKimiCodeRequest(cfg: LlmRequestConfig): boolean {
   return requestHost(cfg) === 'api.kimi.com' || /\/coding(?:\/v1)?\/?$/i.test(cfg.baseUrl)
 }
 
-function isDeepSeekV4Request(cfg: LlmRequestConfig): boolean {
-  return /^deepseek-v4-(?:pro|flash)$/i.test(cfg.model) || requestHost(cfg) === 'api.deepseek.com' && /^deepseek-v4-/i.test(cfg.model)
+/** DeepSeek 的 pro/flash 型号（含带版本段的 deepseek-v4-*）走 thinking 方言。
+    版本段必须可选：官方同时提供 `deepseek-flash`/`deepseek-pro` 与 `deepseek-v4-flash`，
+    只匹配后者会让前者落到通用分支——那样思考无法关闭，推理会把输出预算吃光、
+    正文返回空串（实测 `deepseek-flash` + max_tokens 900：reasoning_tokens 900、content 长度 0）。
+    刻意不匹配 `deepseek-chat`：老型号未必接受 thinking 字段。 */
+function isDeepSeekThinkingRequest(cfg: LlmRequestConfig): boolean {
+  return /^deepseek-(?:v\d+(?:\.\d+)?-)?(?:pro|flash)$/i.test(cfg.model)
 }
 
 function isOpenAiReasoningRequest(cfg: LlmRequestConfig): boolean {
   return /^gpt-5(?:\.|$)/i.test(cfg.model) && requestHost(cfg) === 'api.openai.com'
+}
+
+/** 把已构建请求体的输出预算改成 value。
+    字段名随端点方言而异（`max_tokens` / `max_completion_tokens`），这里改写**已存在**的那个键，
+    不重新推导分支逻辑，避免重试时把请求体改造成另一个方言。 */
+export function withOutputBudget(body: Record<string, unknown>, value: number): Record<string, unknown> {
+  if (typeof body['max_completion_tokens'] === 'number') return { ...body, max_completion_tokens: value }
+  return { ...body, max_tokens: value }
+}
+
+/** 取请求体当前的输出预算（未设置时按 0 计）。 */
+export function outputBudgetOf(body: Record<string, unknown>): number {
+  const value = body['max_completion_tokens'] ?? body['max_tokens']
+  return typeof value === 'number' ? value : 0
+}
+
+/**
+ * 是否属于"输出预算被推理过程占满"——需要放宽预算重试一次。
+ * 典型形态：HTTP 200、finish_reason=length、content 为空串、reasoning_content 有内容
+ *（推理型模型把 max_tokens 全花在思考上，正文一个字都没写）。
+ * 只认"被长度截断且正文为空"，不要求必须有 reasoning：非推理模型在预算刚好卡在首个
+ * token 上时同样是这个形态，放宽预算重试对两者都安全。
+ * 内容被截断但非空的不重试——用户已看到部分回答，重试会让回答跳变。
+ */
+export function isBudgetExhausted(result: { text?: string; reasoning?: string; finishReason?: string }): boolean {
+  if (typeof result.text === 'string' && result.text.trim()) return false
+  return result.finishReason === 'length'
+}
+
+/** 放宽后的重试预算：至少翻倍并抬到 12000，避免再次被推理吃满。 */
+export function retryBudget(current: number): number {
+  return Math.max(current * 2, 12000)
 }
 
 /** 上游报错可能回显密钥或 Authorization；返回渲染层前统一脱敏。 */
@@ -113,11 +150,14 @@ export function buildChatRequestBody(
       body.thinking = { type: 'enabled' }
       if (cfg.model.toLowerCase() === 'k3') body.reasoning_effort = deep ? 'max' : 'low'
     }
-  } else if (isDeepSeekV4Request(cfg)) {
-    body.max_tokens = deep ? 3000 : 900
+  } else if (isDeepSeekThinkingRequest(cfg)) {
+    // 深度模式实测：`reasoning_effort: 'max'` 是负优化——模型把推理写到 18000+ 字仍不产出正文，
+    // 即便给到 8000 预算也被推理占满（finish_reason=length、content 空串）。
+    // 不开 effort（服务端默认强度）在 12000 预算下 25 秒给出完整回答，比 max 更快也更可靠。
+    body.max_tokens = deep ? 8000 : 900
     body.thinking = { type: deep ? 'enabled' : 'disabled' }
-    if (deep) body.reasoning_effort = 'max'
-    else body.temperature = 0.4
+    // 关闭 thinking 时 900 预算足够（实测 4.5 秒 / 完整回答）；开启时不接受自定义采样参数
+    if (!deep) body.temperature = 0.4
   } else if (isOpenAiReasoningRequest(cfg)) {
     body.max_completion_tokens = deep ? 3000 : 900
     body.reasoning_effort = deep && /^gpt-5\.6(?:-|$)/i.test(cfg.model) ? 'max' : deep ? 'high' : 'low'

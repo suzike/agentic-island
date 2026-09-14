@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-09-14
+
+### Fixed
+
+- **"回答分析中心"的方法论全部执行失败**（用户复报：界面上能看到 `⚠ 反事实检验失败：模型未返回内容`）。v0.6.11 让失败可见之后，这条消息本身指出了真因方向——它对应的是"HTTP 200 但正文为空"，而不是认证/网络问题。用真实端点（`api.deepseek.com/v1` + `deepseek-flash`）打原始请求后确认：
+
+  | 请求形态 | finish_reason | 正文长度 | reasoning_tokens | 耗时 |
+  | --- | --- | --- | --- | --- |
+  | 快速模式（原：`max_tokens 900`） | `length` | **0** | 900（=全部预算） | 6.0s |
+  | 深度模式（原：`max_tokens 3000` + `reasoning_effort: max`） | `length` | **0** | 2999（=全部预算） | 17.7s |
+  | 深度模式（`effort: max` + 8000） | `length` | **0** | 7999（=全部预算） | 42.1s |
+  | 快速模式 + `thinking: {type:'disabled'}`（900） | `stop` | 1399 | **0** | 4.5s |
+  | 深度模式 + `thinking: {type:'enabled'}`（8000，不发 effort） | `stop` | 1851 | 5222 | 33.2s |
+
+  即：`deepseek-flash` 是**推理型模型**，思考过程与正文共享输出预算；而岛内的 DeepSeek `thinking` 方言分支只匹配 `deepseek-v4-*`，**不带版本段的 `deepseek-flash` / `deepseek-pro` 落到了通用分支**——思考关不掉，900/3000 的预算被推理吃光，正文返回空串。三处修复：
+
+  1. **方言识别**：`isDeepSeekThinkingRequest` 的版本段改为可选，`deepseek-flash` / `deepseek-pro` 与 `deepseek-v4-flash` / `deepseek-v4-pro` 同样走 thinking 方言；刻意不匹配 `deepseek-chat`（老型号未必接受 `thinking` 字段）。
+  2. **去掉实测有害的 `reasoning_effort: max`**：它在深度模式下让模型写到 18000+ 字仍不产出正文，给到 8000 预算也全部耗在推理上；不发该字段（服务端默认强度）反而 25 秒就给出完整回答。深度预算同时由 3000 抬到 8000。
+  3. **预算耗尽自动重试**：推理型模型的思考长度不可预知，靠固定预算必然偶发空正文。新增 `isBudgetExhausted()` / `retryBudget()` / `withOutputBudget()`：命中"被长度截断且正文为空"时自动放宽预算（至少翻倍且不低于 12000）重试一次；正文非空的截断不重试（避免回答跳变）；重试后仍失败则给出可操作提示，而不是停留在"响应为空"。
+
+  修复后实测（同一端点、同一密钥、走主进程完整链路）：快速模式 5.2 秒返回 1450 字正文、推理 0 tokens；深度模式 31 秒返回 1293 字正文。
+
+  附带修掉的同类隐患：`complete()` 原先在正文为空串时返回 `{ ok: true, text: '' }`，渲染层只看到"响应为空"，而 `finish_reason` 被直接丢弃——上游已经说清了原因（`length`），信息却在解析处丢失。现在 `finish_reason` 会一路传到错误文案里。
+
+### Verification
+
+- 41 个离线测试脚本（新增大写小写两套型号的方言识别、`deepseek-chat` 不被误判、预算耗尽判定、预算改写不混用字段名等断言）、两套 TypeScript 检查、生产构建。
+- 真实端点复现 + 修复验证（上表）：两模式均返回正文。
+- `npm run audit:contrast` 硬失败 0 条（未触及视觉层，作为回归）。
+
 ## [0.6.11] - 2026-09-14
 
 ### Added

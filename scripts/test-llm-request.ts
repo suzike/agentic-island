@@ -1,4 +1,4 @@
-import { buildAnthropicRequestBody, buildChatRequestBody, isAnthropicRequest, normalizeLlmBaseUrl, normalizeLlmConfig, sanitizeLlmErrorDetail } from '../src/main/llm-request.ts'
+import { buildAnthropicRequestBody, buildChatRequestBody, isAnthropicRequest, isBudgetExhausted, normalizeLlmBaseUrl, normalizeLlmConfig, outputBudgetOf, retryBudget, sanitizeLlmErrorDetail, withOutputBudget } from '../src/main/llm-request.ts'
 
 function ok(condition: unknown, message: string): void {
   if (!condition) throw new Error(message)
@@ -59,8 +59,39 @@ const deepSeekDeep = buildChatRequestBody({
   baseUrl: 'https://api.deepseek.com/v1', apiKey: 'deep-key', model: 'deepseek-v4-pro'
 }, 'system', 'ping', true, [])
 ok(JSON.stringify(deepSeekFast.thinking) === JSON.stringify({ type: 'disabled' }), 'DeepSeek 快速模式应真正关闭 thinking')
-ok(JSON.stringify(deepSeekDeep.thinking) === JSON.stringify({ type: 'enabled' }) && deepSeekDeep.reasoning_effort === 'max', 'DeepSeek 深度模式应开启 thinking 并提高推理强度')
+ok(JSON.stringify(deepSeekDeep.thinking) === JSON.stringify({ type: 'enabled' }), 'DeepSeek 深度模式应开启 thinking')
+// 实测 reasoning_effort=max 会让模型写到 18000+ 字仍不产出正文（8000 预算也被推理占满），
+// 故深度模式不再发送该字段，并把预算抬到 8000 让思考与正文都装得下。
+ok(!('reasoning_effort' in deepSeekDeep), 'DeepSeek 深度模式不应发送实测有害的 reasoning_effort')
+ok(deepSeekDeep.max_tokens === 8000, 'DeepSeek 深度模式预算应能容纳推理过程')
 ok(!('temperature' in deepSeekDeep), 'DeepSeek thinking 模式不应发送无效 temperature')
+
+// 官方同时提供不带版本段的 `deepseek-flash`/`deepseek-pro`：必须同样走 thinking 方言，
+// 否则思考关不掉、推理吃满预算、正文返回空串（线上表现为"模型未返回内容"）。
+const deepSeekUnversioned = buildChatRequestBody({
+  baseUrl: 'https://api.deepseek.com/v1', apiKey: 'deep-key', model: 'deepseek-flash'
+}, 'system', 'ping', false, [])
+ok(JSON.stringify(deepSeekUnversioned.thinking) === JSON.stringify({ type: 'disabled' }), 'deepseek-flash 应识别为 thinking 方言并关闭思考')
+ok(!('temperature' in deepSeekUnversioned) === false, 'deepseek-flash 关闭思考时可发送 temperature')
+
+// 老型号 `deepseek-chat` 未必接受 thinking 字段，不能被误判进该方言
+const deepSeekChat = buildChatRequestBody({
+  baseUrl: 'https://api.deepseek.com/v1', apiKey: 'deep-key', model: 'deepseek-chat'
+}, 'system', 'ping', false, [])
+ok(!('thinking' in deepSeekChat), 'deepseek-chat 不应收到 thinking 字段')
+
+// 预算耗尽 → 放宽预算重试（推理型模型的思考长度不可预知，固定预算必然偶发空正文）
+ok(isBudgetExhausted({ text: '', reasoning: 'think...', finishReason: 'length' }), '推理吃满预算、正文为空应判为需要重试')
+ok(isBudgetExhausted({ text: '', finishReason: 'length' }), '正文为空且被长度截断即应重试（非推理模型同样适用）')
+ok(!isBudgetExhausted({ text: '部分回答', finishReason: 'length' }), '正文非空的截断不重试（避免回答跳变）')
+ok(!isBudgetExhausted({ text: '', reasoning: 'think', finishReason: 'stop' }), '正常结束但正文为空不属于预算问题')
+ok(retryBudget(900) === 12000 && retryBudget(8000) === 16000, '重试预算应至少翻倍且不低于 12000')
+
+const rewritten = withOutputBudget({ model: 'm', max_tokens: 900 }, 12000)
+ok(rewritten.max_tokens === 12000 && outputBudgetOf(rewritten) === 12000, '应改写 max_tokens 方言的预算')
+const rewrittenCompletion = withOutputBudget({ model: 'm', max_completion_tokens: 900 }, 12000)
+ok(rewrittenCompletion.max_completion_tokens === 12000 && !('max_tokens' in rewrittenCompletion), '应改写 max_completion_tokens 方言且不混入另一种字段')
+ok(outputBudgetOf({ model: 'm' }) === 0, '未设置预算时按 0 计')
 
 const secret = 'sk-secret-value-123456'
 const sanitized = sanitizeLlmErrorDetail(`invalid api_key=${secret}; Authorization: Bearer ${secret}`, secret)
