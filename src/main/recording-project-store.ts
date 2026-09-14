@@ -1,12 +1,38 @@
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { RecordingProjectDocument, RecordingProjectSaveInput, RecordingProjectSummary } from '../shared/protocol'
+import type { RecordingCursorSample, RecordingProjectDocument, RecordingProjectSaveInput, RecordingProjectSummary } from '../shared/protocol'
 
 const MAX_PROJECT_BYTES = 8 * 1024 * 1024
 const safeText = (value: unknown, limit: number): string => String(value || '').trim().slice(0, limit)
 const finite = (value: unknown, fallback = 0): number => Number.isFinite(Number(value)) ? Number(value) : fallback
 const clamp = (value: unknown, min: number, max: number, fallback = min): number => Math.min(max, Math.max(min, finite(value, fallback)))
+
+/**
+ * 光标轨迹按固定上限落盘：9 分钟 @12.5Hz 约 6.7k 个点（~190KB），仍远小于 8MB 工程上限。
+ * 超过上限时按等间隔抽稀（保留首尾）而不是截断，否则长录制的后半段会完全没有轨迹。
+ */
+const MAX_CURSOR_SAMPLES = 60_000
+function normalizeCursorTrack(input: unknown, durationMs: number): RecordingCursorSample[] {
+  if (!Array.isArray(input) || !input.length) return []
+  const cleaned: RecordingCursorSample[] = []
+  for (const item of input) {
+    const point = item as Partial<RecordingCursorSample>
+    const t = clamp(point.t, 0, durationMs)
+    const x = clamp(point.x, 0, 1, Number.NaN)
+    const y = clamp(point.y, 0, 1, Number.NaN)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+    // 速度与实时运镜同量纲：归一化位移 × 10000。整屏横穿约 10000，上限取 5 倍余量防脏数据
+    cleaned.push({ t, x, y, s: Math.max(0, Math.min(50_000, finite(point.s, 0))) })
+    if (cleaned.length >= MAX_CURSOR_SAMPLES * 2) break
+  }
+  if (cleaned.length <= MAX_CURSOR_SAMPLES) return cleaned
+  const stride = Math.ceil(cleaned.length / MAX_CURSOR_SAMPLES)
+  const thinned = cleaned.filter((_, index) => index % stride === 0)
+  const last = cleaned[cleaned.length - 1]
+  if (thinned[thinned.length - 1] !== last) thinned.push(last)
+  return thinned
+}
 
 export class RecordingProjectStore {
   private readonly root: string
@@ -32,6 +58,9 @@ export class RecordingProjectStore {
       try {
         const project = JSON.parse(await readFile(join(this.root, file), 'utf8')) as RecordingProjectDocument
         if (project.schema !== 'agentic-island-recording-project/v2' || !project.id || !project.sessionId) continue
+        // v0.6.14 之前的工程没有光标轨迹字段，补成空数组，避免下游到处判 undefined
+        if (!Array.isArray(project.cursorTrack)) project.cursorTrack = []
+        if (typeof project.exportMotionReady !== 'boolean') project.exportMotionReady = false
         this.projects.set(project.id, project)
       } catch { /* ignore damaged project files without blocking app startup */ }
     }
@@ -70,6 +99,8 @@ export class RecordingProjectStore {
         language: input.transcript?.language === 'zh' || input.transcript?.language === 'en' ? input.transcript.language : 'auto',
         segments: (input.transcript?.segments || []).slice(0, 20_000).map((item) => ({ startMs: clamp(item.startMs, 0, durationMs), endMs: clamp(item.endMs, 0, durationMs), text: safeText(item.text, 2000) })).filter((item) => item.text && item.endMs >= item.startMs)
       },
+      cursorTrack: normalizeCursorTrack(input.cursorTrack, durationMs),
+      exportMotionReady: Boolean(input.exportMotionReady),
       workspace: {
         timelineZoom: clamp(input.workspace?.timelineZoom, 0.5, 8, 1),
         timelineSnap: input.workspace?.timelineSnap !== false,

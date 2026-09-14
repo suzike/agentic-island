@@ -98,6 +98,10 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 12. **原生依赖只用 N-API 预编译包**（@lydell/node-pty）——避免依赖用户机 node-gyp、Python 与 Visual Studio 构建链。
 12. **外网请求走 electron `net.fetch`**（继承系统代理）；Node 全局 fetch 不认代理（GitHub API 等会连不上）。
 13. **录屏定位框与成片必须共用源裁剪参数**：显示器/窗口先以实际媒体轨尺寸为准，区域、`contain/cover` 和运镜统一走 `recordingFitComposition` / `recordingFocusCrop`；控制条收起只能隐藏工作台，不能卸载 Canvas。
+14. **拍摄与后期分离（光标事件日志）**：录制期只以 12.5Hz 采样光标（`startCursorLog`，80ms 一次）落进工程的 `cursorTrack`，运镜与光标美化属于导出期的事——轨迹事后无法补录，**不要按 `displayId` 过滤采样**：光标停在另一块屏时整条轨迹会变空（隔离审计里表现为"时有时无"），坐标钳到录制画面边缘才是正确语义（被录画面确实没动，就该算空白）。相机平滑一律用 `recordingLerpTimed`（按真实帧间隔 + 目标帧长换算 α）；固定每帧系数在掉帧时会让跟随变慢。破坏性剪辑（"剪除空白"）必须**两段式**：先算方案给人看数字、再确认落地——审计里合成光标 8.2s 曾因一次点击被剪到 2s。工程落盘前按 60k 点上限等间隔抽稀。
+15. **导出期运镜（zoompan 表达式）**：`request.motion` 是**按成片帧序**给逐帧相机路径（`{x,y,zoom}`），渲染层用 `recordingMotionFrames` 从轨迹+剪辑段重建，主进程 `buildRecordingMotionFilter` 压成折线航点再编译成 FFmpeg 表达式。四条实测结论：① `sendcmd` 驱动不了 `crop` 的 x/y（命令解析成功、裁剪位置不动），所以只能走表达式；② `zoompan` 的表达式里**没有 `t`**（报 Undefined constant），时间轴只能用帧序 `in`；③ 文件输入时 zoompan 的输出时间戳停在 15360 时基，后面再挂 `fps` 滤镜会被读成 15360fps 并复制帧凑数（3 秒素材导出成 25 分 36 秒），**帧率归一化必须放在 zoompan 之前**；④ 代价 +24%（1600p→1080p 十秒 1.93s vs 1.56s）。能力边界：只有录制时运镜**关闭**（`exportMotionReady`，画面稳定）的素材才能在导出期重建运镜，否则与烤进画面的运镜叠加成双重运镜；导出侧档位必须独立（`exportMotionMode`），借用采集页档位会永远得到 zoom=1 的平路。
+16. **原始画面采集（`captureMode: 'raw'`）**：桌面轨道直接进编码器，不建画布、不跑渲染循环，`size` 用屏幕原生尺寸（`recordingRawCaptureSize`）。**实测（同一活动画面）：合成 22.4fps@1920×1080 → 原始 29.8fps@2560×1600**——多 33% 像素还多 33% 帧。代价是画布类能力全部要在导出期补：`recordingRawModeBlockers` 逐项列出画幅比例/适配方式/区域/画中画/水印/隐私条为什么必须画布（鼠标光晕与轨迹**不**算阻塞项：切过去就不画，顺手关掉即可）。**桌面采集是变化驱动的**：画面不动就不出帧（静止屏幕实测只有 1.11fps，那不是丢帧而是"屏幕没变"），所以导出时必须按目标帧率补齐，评估帧率也必须在**会变的画面**上测。
+17. **测采集帧率时活动源必须来自另一个进程**：录制期间应用对**自己所有窗口**开 `setContentProtection`，岛自己窗口里跑的动画对采集器是隐形的——第一版审计把动画注入岛窗口，测出"原始 1.11fps"这种假阴性。现在审计另起一个独立 Electron 实例铺满主显示器做活动源（见 `audit-recording-container.mjs` 的 `activity-main.js`）。
 
 ## 数据与持久化
 

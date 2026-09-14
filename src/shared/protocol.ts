@@ -86,9 +86,30 @@ export interface RecordingExportRequest {
   outputHeight?: number
   outputFps?: number
   subtitle?: { mode: 'none' | 'embedded'; language: 'auto' | 'zh' | 'en'; segments: RecordingTranscriptSegment[] }
-  /** 主进程生成的临时字幕路径，渲染层传入值会被忽略。 */
+  /** 主进程生成的临时字幕路径，渲染层传入值无效。 */
   subtitleFilePath?: string
   edit?: RecordingEditSettings
+  /**
+   * 导出期运镜：按**成片帧序**给出的相机路径，由渲染层从工程的光标轨迹重建。
+   *
+   * 之所以在渲染层建：只有渲染层知道剪辑段（保留哪些区间、什么速度），而主进程只需要把
+   * 这条路径压成 FFmpeg 表达式。为 null 时按原样导出（运镜已在录制期合成进画面）。
+   */
+  motion?: RecordingMotionTrack | null
+}
+
+/**
+ * 导出期运镜的单帧相机状态。x/y 是**归一化画面中心**（0..1），zoom ≥ 1（1 表示不放大）。
+ * 时间轴由帧序隐含：第 i 项就是成片第 i 帧，主进程按 `fps` 把它换算成 zoompan 的 `in`。
+ */
+export interface RecordingMotionFrame {
+  x: number
+  y: number
+  zoom: number
+}
+export interface RecordingMotionTrack {
+  frames: RecordingMotionFrame[]
+  fps: number
 }
 
 export interface RecordingExportProgress {
@@ -141,6 +162,21 @@ export interface RecordingProjectAiResult {
   text: string
   error?: boolean
 }
+
+/**
+ * 录制期采集的光标轨迹点——"拍摄与后期分离"的事件日志。
+ *
+ * 录制时只做**观测**（不动画面）：运镜、光标美化、剪除空白都在剪辑/导出期按这份日志重建。
+ * 好处是运镜参数改了不必重录，且运镜不再受录制帧率影响（掉帧时以前会跟着变慢）。
+ * t 为相对录制开始的毫秒偏移（暂停期间不推进），x/y 为相对录制来源区域的归一化坐标。
+ */
+export interface RecordingCursorSample {
+  t: number
+  x: number
+  y: number
+  /** 归一化瞬时移动速度（导出期重建缩放强度用；缺省按 0 处理） */
+  s?: number
+}
 export interface RecordingProjectDocument {
   schema: 'agentic-island-recording-project/v2'
   id: string
@@ -156,6 +192,15 @@ export interface RecordingProjectDocument {
   edit: RecordingEditSettings & { segments: RecordingEditSegment[] }
   timeline: RecordingProjectTimelineEvent[]
   transcript: { model: string; language: 'auto' | 'zh' | 'en'; segments: RecordingTranscriptSegment[] }
+  cursorTrack: RecordingCursorSample[]
+  /**
+   * 这段素材能不能在导出期重建运镜。
+   *
+   * 只有录制时**没有**把运镜合成进画面（运镜=关闭，所以画面是稳定的）才为 true：否则录制像素里
+   * 已经带着当时的推近/平移，导出再套一层就是双重运镜。真正的"拍摄与后期分离"（录原始画面、
+   * 运镜完全留给导出）是下一步，这里先如实标注能力边界。
+   */
+  exportMotionReady: boolean
   workspace: {
     timelineZoom: number
     timelineSnap: boolean
@@ -165,7 +210,7 @@ export interface RecordingProjectDocument {
   }
   aiResults: RecordingProjectAiResult[]
 }
-export type RecordingProjectSaveInput = Omit<RecordingProjectDocument, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+export type RecordingProjectSaveInput = Omit<RecordingProjectDocument, 'id' | 'createdAt' | 'updatedAt' | 'cursorTrack' | 'exportMotionReady'> & { id?: string; cursorTrack?: RecordingCursorSample[]; exportMotionReady?: boolean }
 export interface RecordingProjectSummary {
   id: string
   sessionId: string

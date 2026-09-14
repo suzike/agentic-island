@@ -78,6 +78,51 @@ try {
   const audioTime = /time=(\d+):(\d+):(\d+\.\d+)/.exec(`${editedAudio.stderr}`)
   const audioSeconds = audioTime ? Number(audioTime[1]) * 3600 + Number(audioTime[2]) * 60 + Number(audioTime[3]) : 0
   assert.ok(Math.abs(audioSeconds - 2) < 0.35, `多片段音轨应与画面等长（实测 ${audioSeconds}）`)
+
+  // 导出期运镜：必须真的让"取景窗口"随帧移动，而不是接了个名字却什么都不做。
+  // 用**横向亮度渐变**当素材：取景窗口越靠右，整帧平均亮度越高 —— 于是"逐帧平均亮度"这条
+  // 曲线就是取景位置的直接读数（scale=1:1 把每帧压成一个像素，直接 dump 原始字节）。
+  const rampSource = join(root, 'ramp.mp4')
+  const ramp = spawnSync(ffmpeg, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=640x360:r=30:d=3', '-vf', 'geq=lum=255*X/W:cb=128:cr=128', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', rampSource], { windowsHide: true, encoding: 'utf8' })
+  assert.equal(ramp.status, 0, ramp.stderr || '生成渐变素材失败')
+  const frameLuma = (file: string): number[] => {
+    const dump = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-i', file, '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { windowsHide: true, maxBuffer: 1 << 24 })
+    return [...(dump.stdout as Buffer)]
+  }
+  const motionBase: RecordingExportRequest = {
+    ...base,
+    jobId: 'e2e-motion',
+    width: 640,
+    height: 360,
+    outputWidth: 640,
+    outputHeight: 360,
+    outputFps: 30,
+    subtitleFilePath: undefined,
+    subtitle: undefined,
+    hasAudio: false
+  }
+  const controlFile = join(root, 'motion-control.mp4')
+  await startRecordingFfmpeg(ffmpeg, rampSource, controlFile, motionBase, () => {}).done
+  // zoom 必须 > 1 才**有**东西可平移：zoom=1 时取景窗口等于整幅画面，x 被钳死在 0（这是对的，
+  // 否则就会露出黑边）。所以下面的轨迹是"1.5 倍推近 + 横向扫过"。
+  const motionFile = join(root, 'motion.mp4')
+  const frames = Array.from({ length: 90 }, (_, index) => ({ x: 0.2 + (0.6 * index) / 89, y: 0.5, zoom: 1.5 }))
+  const motionStart = Date.now()
+  await startRecordingFfmpeg(ffmpeg, rampSource, motionFile, { ...motionBase, motion: { fps: 30, frames } }, () => {}).done
+  const motionInfo = probe(motionFile)
+  assert.equal(motionInfo.videoFps, 30, '导出期运镜同样要归一化帧率')
+  assert.ok(Math.abs(motionInfo.duration - 3) < 0.35, `导出期运镜不得改变时长（实测 ${motionInfo.duration}）`)
+  const controlLuma = frameLuma(controlFile)
+  const motionLuma = frameLuma(motionFile)
+  assert.ok(controlLuma.length > 60 && motionLuma.length > 60, `应解出足够多的帧（对照 ${controlLuma.length} / 运镜 ${motionLuma.length}）`)
+  const spread = (values: number[]) => Math.max(...values) - Math.min(...values)
+  assert.ok(spread(controlLuma) < 6, `无运镜时逐帧平均亮度应基本不变（实测波动 ${spread(controlLuma)}）`)
+  assert.ok(spread(motionLuma) > 50, `有运镜时取景窗口应明显扫过画面（实测平均亮度跨幅 ${spread(motionLuma)}）`)
+  assert.ok(motionLuma.at(-1)! > motionLuma[0] + 30, `向右扫过时平均亮度应整体上升（${motionLuma[0]} → ${motionLuma.at(-1)}）`)
+  // 单调性：允许夹紧在画面边界造成的平台，但不允许回退
+  const regressions = motionLuma.filter((value, index) => index > 0 && value < motionLuma[index - 1] - 3).length
+  assert.equal(regressions, 0, `取景扫过不应出现回退（实测 ${regressions} 帧回退）`)
+  console.log(`  导出期运镜: 平均亮度 ${motionLuma[0]} → ${motionLuma.at(-1)}（跨幅 ${spread(motionLuma)}），耗时 ${Date.now() - motionStart}ms`)
   console.log('recording export e2e tests passed')
 } finally {
   await rm(root, { recursive: true, force: true })

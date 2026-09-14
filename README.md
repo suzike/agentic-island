@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.6.14](https://img.shields.io/badge/release-v0.6.14-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.14)
+[![Release v0.6.15](https://img.shields.io/badge/release-v0.6.15-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.15)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/terminal-v0614.png" alt="Agentic-Island v0.6.4 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
+<img src="screenshots/terminal-v0615.png" alt="Agentic-Island v0.6.15 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
 
 </div>
 
@@ -34,6 +34,27 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **成果没有沉淀** | 执行记录、情报简报、每日复盘与知识资料成为下一轮工作的上下文 |
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
+
+## v0.6.15 更新概览
+
+录屏工坊这一版做的是**拍摄与后期分离**：录制期只做"观测"，运镜与剪辑变成可以事后重做、不必重录的事。
+
+- **新增原始画面采集，实测找回合成吃掉的那 8fps**。桌面轨道**直接**进编码器，不建画布、不跑渲染循环。同一块正在变化的屏幕、同一台机器：
+
+  | 采集方式 | 帧率 | 成片分辨率 |
+  | --- | --- | --- |
+  | 画布合成（旧行为） | 19.5–22.4 fps | 1920×1080 |
+  | **原始画面** | **29.8 fps** | **2560×1600**（屏幕原生） |
+
+  多 33% 像素的同时多 33% 帧。代价是裁剪/画幅/水印/画中画这类逐帧合成能力要留到导出期，应用会逐项说明"为什么必须画布"以及怎么改。另需注意：**桌面采集是变化驱动的**——屏幕不动就不出帧（静止屏幕实测 1.11fps，那不是丢帧，是"屏幕没变"），导出时会按目标帧率补齐。
+
+- **新增导出期运镜**：录制时可把运镜切到「固定画面」，运镜改到**导出时**按录制期采到的光标轨迹重建 —— 改档位、跟随速度、最大放大后重新导出即可，不必重录。实现走 FFmpeg `zoompan` 表达式（逐帧相机路径压成折线航点，容差上限 2% 画面），代价实测 +24%。
+
+- **新增剪除空白**：按光标轨迹找出"人在发呆 / 等加载"的区间并剪掉。**两段式**——先算方案给人看数字（"将剪掉 6.9s，成片保留 2 段"），确认后才落到时间线，且可撤销。隔离审计里合成光标 8.2 秒曾被一次点击剪到 2 秒，所以破坏性操作必须先让人看见数字。
+
+- **新增光标事件日志**：录制期以 12.5Hz 采样光标（只读坐标、不动画面）落进工程。这是事后无法补录的数据，剪除空白与导出期运镜都靠它。
+
+- **相机平滑改为帧率无关**：按目标帧长反推时间常数（`α = 1 - exp(-Δt/τ)`），掉帧只影响运镜粗糙度，不再让跟随变慢。
 
 ## v0.6.14 更新概览
 
@@ -151,24 +172,24 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v0614.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v0614.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v0615.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v0615.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v0614.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v0614.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v0615.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v0615.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v0614.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v0614.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v0615.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v0615.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/recording-v0614.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>多源采集 · 实时运镜 · 三轨剪辑 · AI 后期</sub></td>
-<td width="50%" align="center"><img src="screenshots/settings-v0614.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v0615.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原始采集 30fps · 导出期运镜 · 自动剪空白 · AI 后期</sub></td>
+<td width="50%" align="center"><img src="screenshots/settings-v0615.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v0614.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v0615.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -198,7 +219,7 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **本地知识库** | 独立 Embedding 地址/模型/密钥；接入文件夹、文件、网页和问答会话；支持常见源码/文本、PDF、DOCX；回答、完整分支或框选片段可直接沉淀；分块、向量索引、引用问答、Wiki 概览与重建索引 |
 | **Markdown 工作台** | 本地打开/保存；编辑、分栏、阅读模式；查找替换；目录；快照；Zen；PDF/HTML/文本导出；AI 写作工具 |
 | **截图工坊** | 区域截图、无损保存、边框/背景/留白/圆角/阴影、标注、OCR/视觉分析、发送问答 |
-| **专业录屏工坊** | 显示器/窗口/区域录制；鼠标聚焦运镜；音频混合；画中画与人物替换；分块落盘与恢复；三轨时间线；真实转写与 AI 粗剪；工程库；MP4/WebM/GIF/MP3、多档压缩、分辨率/帧率和可开关字幕轨 |
+| **专业录屏工坊** | 显示器/窗口/区域录制；画布合成或**原始画面采集**（跳过合成、实测 30fps 原生画质）；鼠标聚焦运镜（录制时实时，或**留到导出期按光标轨迹重建**）；**按轨迹自动剪除发呆/等加载空白**；音频混合；画中画与人物替换；分块落盘与恢复；三轨时间线；真实转写与 AI 粗剪；工程库；MP4/WebM/GIF/MP3、多档压缩、分辨率/帧率和可开关字幕轨 |
 | **屏幕分析** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> 捕获当前屏幕并交给视觉模型分析 |
 | **工程计算** | 多行表达式、变量跨行引用、数学函数、统计与温度换算 |
 | **学习中心** | 便签间隔重复复习、技术雷达和学习状态管理 |
@@ -268,7 +289,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.6.14.exe
+Agentic-Island-Setup-0.6.15.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。

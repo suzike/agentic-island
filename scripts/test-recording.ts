@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { EncoderRunner } from '../src/main/recording-export.ts'
-import { buildRecordingFfmpegArgs, buildRecordingRemuxArgs, crfFor, detectHardwareEncoders, hardwareQuantizerForCrf, parseHardwareEncoders, pickFastestEncoder, pickVideoEncoder, recordingExportDurationMs, recordingExportStrategy, recordingExportSubtitleSegments, recordingHasEdits, videoEncoderArgs } from '../src/main/recording-export.ts'
+import { buildRecordingFfmpegArgs, buildRecordingMotionFilter, MOTION_MAX_CENTER_TOLERANCE, buildRecordingRemuxArgs, crfFor, detectHardwareEncoders, hardwareQuantizerForCrf, MAX_MOTION_WAYPOINTS, parseHardwareEncoders, pickFastestEncoder, pickVideoEncoder, recordingExportDurationMs, recordingExportStrategy, recordingExportSubtitleSegments, recordingHasEdits, simplifyRecordingMotion, videoEncoderArgs } from '../src/main/recording-export.ts'
 import { recordingContainerOf, recordingFileExtension, sniffRecordingContainer } from '../src/shared/recording-format.ts'
-import { clampRecordingBarPosition, formatRecordingTime, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
+import { clampRecordingBarPosition, formatRecordingTime, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionFrames, recordingSmoothingAlpha, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
 } from '../src/renderer/src/logic/recording.ts'
 import { recordingSourceLabel, recordingWindowHandle, sameRecordingWindowSource } from '../src/shared/recording-source.ts'
 import type { RecordingExportRequest } from '../src/shared/protocol.ts'
@@ -310,5 +310,142 @@ assert.equal(intelPick.encoder, 'libx264', '核显机器上 QSV 更慢时保持�
 // 软件基线自身失败 → 不冒险切硬件
 const noBaseline = await pickVideoEncoder('ffmpeg.exe', 'in.webm', 22, {}, fakeRunner(encoderListing, { h264_nvenc: 1_000 }, ['libx264']))
 assert.equal(noBaseline.encoder, 'libx264', '软件基线试编码失败时不切硬件')
+
+/* ---------------- P1：帧率无关的相机平滑 + 空闲区间识别 ---------------- */
+
+// 平滑：同一段真实时间跨过多少，收敛程度应当一致，与帧率无关
+const alphaAt30 = recordingSmoothingAlpha(1000 / 30, 0.11)
+const alphaAt24 = recordingSmoothingAlpha(1000 / 24, 0.11)
+assert.ok(Math.abs(alphaAt30 - 0.11) < 0.002, '30fps 下换算回的系数应等于原调参值（保持既有手感）')
+assert.ok(alphaAt24 > alphaAt30, '帧间隔更长时单帧系数应变大（这样每秒收敛程度才一致）')
+// 跨 100ms：30fps 走 3 帧、24fps 走 2.4 帧，剩余误差应接近
+const remain = (alpha: number, steps: number) => (1 - alpha) ** steps
+assert.ok(Math.abs(remain(alphaAt30, 3) - remain(alphaAt24, 2.4)) < 0.03, `跨同样时长后残余误差应接近（30fps ${remain(alphaAt30, 3).toFixed(3)} vs 24fps ${remain(alphaAt24, 2.4).toFixed(3)}）`)
+assert.equal(recordingSmoothingAlpha(33, 1), 1, '系数 1 表示瞬时贴合')
+assert.ok(recordingSmoothingAlpha(Number.NaN, 0.1) > 0, '非法帧间隔回落到参考帧长而不是产生 NaN')
+assert.equal(recordingLerpTimed(0, 100, 1000 / 30, 1), 100, '按时间平滑在系数为 1 时直接到目标')
+// 录制目标 60fps 时以 60fps 为参考：掉到 24fps 后系数变大、按秒计的收敛程度不变
+const half = 1000 / 60
+assert.ok(Math.abs(recordingSmoothingAlpha(half, 0.11, half) - 0.11) < 0.002, '参考帧长等于真实帧长时系数就是调参值')
+assert.ok(
+  recordingSmoothingAlpha(1000 / 24, 0.11, half) > recordingSmoothingAlpha(half, 0.11, half),
+  '以 60fps 为目标时，掉帧到 24fps 的单帧系数应变大以补偿时间跨度'
+)
+const perSecond = (alpha: number, steps: number) => 1 - (1 - alpha) ** steps
+assert.ok(
+  Math.abs(perSecond(recordingSmoothingAlpha(half, 0.11, half), 60) - perSecond(recordingSmoothingAlpha(1000 / 24, 0.11, half), 24)) < 0.05,
+  '每秒收敛程度在 60fps 与 24fps 下应基本一致（掉帧只影响运镜粗糙度，不影响跟随速度）'
+)
+
+// 空闲识别：光标静止超过阈值即空闲；头尾各留 1 秒避免剪掉开场与收尾
+const still = (from: number, to: number, x = 100, y = 100) => {
+  const out = []
+  for (let t = from; t <= to; t += 16) out.push({ t, x, y })
+  return out
+}
+const moving = (from: number, to: number) => {
+  const out = []
+  let x = 0
+  for (let t = from; t <= to; t += 16) out.push({ t, x: (x += 40), y: 0 })
+  return out
+}
+const idleSamples = [...moving(0, 10_000), ...still(10_000, 20_000), ...moving(20_000, 30_000)]
+const idle = recordingIdleRanges(idleSamples, 30_000)
+assert.equal(idle.length, 1, `应识别出一段空闲（实测 ${JSON.stringify(idle)}）`)
+assert.ok(idle[0].startMs >= 10_000 && idle[0].startMs < 11_100, '空闲起点应贴近光标停止移动的时刻（允许一个采样间隔）')
+assert.ok(idle[0].endMs <= 20_100, '空闲终点应贴近光标恢复移动的时刻')
+assert.deepEqual(recordingIdleRanges([...moving(0, 30_000)], 30_000), [], '全程有移动时不产生空闲段')
+assert.deepEqual(recordingIdleRanges([], 30_000), [], '没有轨迹数据时不做任何猜测')
+// 开场长时间静止：要识别出来（"录了才发现还在发呆"是最常见的待剪内容），但前 edgeKeepMs 保留
+const headIdle = recordingIdleRanges([...still(0, 8_000), ...moving(8_000, 30_000)], 30_000)
+assert.equal(headIdle.length, 1, '开场长时间静止应被识别')
+assert.equal(headIdle[0].startMs, 1_000, '开头保留 edgeKeepMs，避免把开场画面整段抹掉')
+assert.ok(headIdle[0].endMs <= 8_100, '开场空闲的终点应贴近光标开始移动的时刻')
+
+// 保留段：空闲之外的部分就是要保留的片段，且不产出碎片
+const kept = recordingKeptSegmentsFromIdle([{ startMs: 10_000, endMs: 20_000 }], 30_000)
+assert.deepEqual(kept, [{ startMs: 0, endMs: 10_000 }, { startMs: 20_000, endMs: 30_000 }], '空闲区间之外应保留为两段')
+assert.deepEqual(recordingKeptSegmentsFromIdle([], 30_000), [], '没有空闲段时不改动时间轴')
+assert.deepEqual(recordingKeptSegmentsFromIdle([{ startMs: 0, endMs: 30_000 }], 30_000), [], '整段空闲时没有可保留的片段')
+// 两段空闲之间只隔 200ms：合并成一段，不产出夹在中间的几百毫秒碎片保留段
+const tiny = recordingKeptSegmentsFromIdle([{ startMs: 1_000, endMs: 10_000 }, { startMs: 10_200, endMs: 20_000 }], 30_000)
+assert.deepEqual(
+  tiny,
+  [{ startMs: 0, endMs: 1_000 }, { startMs: 20_000, endMs: 30_000 }],
+  '相隔很近的两段空闲应合并，不产生碎片段'
+)
+assert.equal(
+  tiny.some((range) => range.startMs >= 9_000 && range.endMs <= 12_000),
+  false,
+  '不得出现夹在两段空闲之间的碎片保留段'
+)
+
+/* ---------------- P1-d：导出期运镜（轨迹 → 逐帧路径 → FFmpeg 表达式） ---------------- */
+
+// 逐帧路径：与录制期实时运镜同语义（缩放 ≥1、中心钳在画面内、剪掉的区间不占帧位）
+const pathSamples = [...still(0, 2_000), ...moving(2_000, 10_000)]
+const pathFrames = recordingMotionFrames(pathSamples, [{ startMs: 0, endMs: 10_000 }], { fps: 30, motion: 'gentle', strength: 0.6, maxZoom: 1.6 })
+assert.equal(pathFrames.length, 300, `30fps × 10 秒应产出 300 帧路径（实测 ${pathFrames.length}）`)
+assert.ok(pathFrames.every((frame) => frame.zoom >= 1 && frame.zoom <= 1.6), '缩放必须落在 [1, maxZoom]')
+assert.ok(pathFrames.every((frame) => frame.x >= 0 && frame.x <= 1 && frame.y >= 0 && frame.y <= 1), '画面中心必须钳在 [0,1]')
+assert.ok(pathFrames.at(-1)!.zoom > 1.01, '光标一直在动时成片应推近（而不是恒定 1 倍）')
+assert.deepEqual(recordingMotionFrames([], [{ startMs: 0, endMs: 1_000 }], { fps: 30, motion: 'gentle', strength: 0.6, maxZoom: 1.6 }), [], '没有轨迹时不给运镜路径')
+// 剪辑后：只按保留区间的帧数出路径，被剪掉的时间不占帧位（主进程才能把下标直接当 zoompan 的 in）
+const clipped = recordingMotionFrames(pathSamples, [{ startMs: 0, endMs: 2_000 }, { startMs: 8_000, endMs: 10_000 }], { fps: 30, motion: 'gentle', strength: 0.6, maxZoom: 1.6 })
+assert.equal(clipped.length, 120, `两段各 2 秒 → 120 帧（实测 ${clipped.length}）`)
+
+// 表达式编译：直线运动应压成两个航点，且 x/y 必须钳在画面内（否则放大后露黑边）
+const linear = { fps: 30, frames: Array.from({ length: 90 }, (_, index) => ({ x: 0.2 + (0.6 * index) / 89, y: 0.5, zoom: 1.5 })) }
+assert.equal(simplifyRecordingMotion(linear).length, 2, '严格的直线运动只需首尾两个航点')
+const motionFilter = buildRecordingMotionFilter(linear, 640, 360, 30)
+assert.ok(motionFilter, '应生成 zoompan 滤镜')
+assert.match(motionFilter!, /^zoompan=/, '运镜滤镜是 zoompan')
+assert.match(motionFilter!, /d=1/, 'd=1：输出帧数等于输入帧数（默认 d=90 会把每帧复制 90 份）')
+assert.match(motionFilter!, /s=640x360/, '输出尺寸由 s= 决定')
+assert.match(motionFilter!, /max\(0,min\(iw-iw\/zoom/, 'x 必须钳在 [0, iw-iw/zoom]，放大后不能露黑边')
+assert.match(motionFilter!, /max\(0,min\(ih-ih\/zoom/, 'y 同理')
+assert.doesNotMatch(motionFilter!, /[^a-z]t[^a-z]/, 'zoompan 表达式里没有 t（实测报 Undefined constant），时间轴必须用帧序 in')
+assert.equal(buildRecordingMotionFilter({ fps: 30, frames: [{ x: 0.5, y: 0.5, zoom: 1 }] }, 640, 360, 30), null, '单帧构不成运动，不生成滤镜')
+// 真实路径（录制期平滑过的光标轨迹 → 逐帧相机路径）应能在基准容差内压进上限，并逐帧逼近
+const realPath = { fps: 30, frames: recordingMotionFrames(pathSamples, [{ startMs: 0, endMs: 10_000 }], { fps: 30, motion: 'dynamic', strength: 0.6, maxZoom: 1.6 }) }
+const realWaypoints = simplifyRecordingMotion(realPath)
+assert.ok(realWaypoints.length > 2, `真实运镜路径不能只剩两个航点（实测 ${realWaypoints.length}）`)
+assert.ok(realWaypoints.length <= MAX_MOTION_WAYPOINTS, `真实路径的航点数应在上限内（实测 ${realWaypoints.length}）`)
+/** 折线逼近误差：任何被丢弃的帧与相邻两航点插值的最大偏差（归一化画面）。 */
+const polylineError = (track: { frames: Array<{ x: number; y: number }> }, waypoints: number[]): number => {
+  let worst = 0
+  for (let index = 0; index < waypoints.length - 1; index += 1) {
+    const start = waypoints[index]
+    const end = waypoints[index + 1]
+    for (let probe = start; probe <= end; probe += 1) {
+      const ratio = (probe - start) / Math.max(1, end - start)
+      worst = Math.max(
+        worst,
+        Math.abs(track.frames[probe].x - (track.frames[start].x + (track.frames[end].x - track.frames[start].x) * ratio)),
+        Math.abs(track.frames[probe].y - (track.frames[start].y + (track.frames[end].y - track.frames[start].y) * ratio))
+      )
+    }
+  }
+  return worst
+}
+const realError = polylineError(realPath, realWaypoints)
+assert.ok(realError <= MOTION_MAX_CENTER_TOLERANCE, `真实路径的折线逼近误差应不超过 2% 画面（实测 ${realError.toFixed(4)}）`)
+assert.equal(realWaypoints[0], 0, '首帧必留')
+assert.equal(realWaypoints.at(-1), realPath.frames.length - 1, '末帧必留')
+
+// 退化情形：逐帧来回抖动（周期约 19 帧）在 48 段内根本没法逐帧逼近。这时只保证
+// "不塌成直线、首尾不丢、表达式不撑爆命令行"——真实轨迹经录制期平滑不会长这样。
+const jittery = { fps: 30, frames: Array.from({ length: 600 }, (_, index) => ({ x: 0.5 + Math.sin(index / 3) * 0.3, y: 0.5 + Math.cos(index / 5) * 0.3, zoom: 1 + Math.abs(Math.sin(index / 7)) * 0.5 })) }
+const jitterWaypoints = simplifyRecordingMotion(jittery)
+assert.ok(jitterWaypoints.length > 2, `来回运动的路径不能只剩两个航点（实测 ${jitterWaypoints.length}）`)
+assert.ok(jitterWaypoints.length <= MAX_MOTION_WAYPOINTS, `航点数必须受上限约束（实测 ${jitterWaypoints.length}）`)
+assert.equal(jitterWaypoints[0], 0, '首帧必留')
+assert.equal(jitterWaypoints.at(-1), 599, '末帧必留')
+const longFilter = buildRecordingMotionFilter(jittery, 1920, 1080, 30)!
+assert.ok(longFilter.length < 12_000, `运镜表达式不能撑爆命令行（实测 ${longFilter.length} 字符）`)
+
+// 导出策略：有运镜时必须重编码（拷流等于运镜不生效）
+assert.equal(recordingExportStrategy({ jobId: 'm', name: 'm', format: 'mp4', quality: 'high', durationMs: 1_000, width: 1920, height: 1080, fps: 30, motion: { fps: 30, frames: linear.frames } }, 'mp4'), 'encode', '导出期运镜必须走重编码')
+assert.equal(recordingExportStrategy({ jobId: 'm', name: 'm', format: 'mp4', quality: 'high', durationMs: 1_000, width: 1920, height: 1080, fps: 30 }, 'mp4'), 'remux', '没有运镜时仍走最快的直接封装')
 
 console.log('recording tests passed')

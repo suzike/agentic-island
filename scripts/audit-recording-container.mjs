@@ -7,7 +7,7 @@
 //
 // 用法：node scripts/audit-recording-container.mjs   （或 npm run audit:recording）
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtemp, rm, readdir, readFile, stat } from 'node:fs/promises'
+import { mkdtemp, rm, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -50,25 +50,78 @@ try {
   await sleep(2600)
   console.log('关倒计时:', await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>n.textContent?.trim()==='关闭'); b?.click(); return Boolean(b) })()`))
   await sleep(300)
-  console.log('点开始录制:', await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/开始录制/.test(n.textContent||'')); b?.click(); return Boolean(b) })()`))
-
-  let barReady = false
-  for (let i = 0; i < 40; i += 1) { await sleep(750); barReady = Boolean(await ev(`Boolean(document.querySelector('[data-recording-control]'))`)); if (barReady) break }
-  console.log('录制中控制条:', barReady)
-  if (!barReady) {
-    console.log('界面文案:', String(await ev(`(document.body.innerText||'').replace(/\\s+/g,' ').slice(0,200)`)))
-    throw new Error('录制未启动')
-  }
-  await sleep(8000)
-  console.log('停止录制:', await ev(`(() => { const b=[...document.querySelectorAll('[data-recording-control] [title],[data-recording-control] button')].find((n)=>String(n.getAttribute('title')||'').includes('结束')); b?.click(); return Boolean(b) })()`))
-  await sleep(3500)
-
-  let mediaChecked = 0
+  // 录制前把运镜切成"固定画面"：只有画面稳定的素材才能在导出期按轨迹重建运镜（否则是双重运镜）
+  await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>n.textContent?.trim()==='运镜'); b?.click(); return Boolean(b) })()`)
+  await sleep(900)
+  const fixedFraming = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/固定画面/.test(n.textContent||'')); if (!b) return 'missing'; b.click(); return 'clicked' })()`)
+  console.log('运镜切固定画面:', fixedFraming)
+  assert.equal(fixedFraming, 'clicked', '运镜页应有"固定画面"档')
+  await sleep(400)
   const recordingsDir = join(profile, 'recordings')
-  const files = (await readdir(recordingsDir)).filter((f) => !f.endsWith('.json'))
-  console.log('\n录制产物:', files.join(', '))
-  for (const file of files) {
-    const path = join(recordingsDir, file)
+  let mediaChecked = 0
+  let compositeFps = 0
+  let compositeSize = ''
+  /** 从 ffmpeg 的流信息里取时长/编码/帧率/尺寸（不依赖 ffprobe）。 */
+  const probeFile = (path) => {
+    const info = spawnSync(ffmpeg, ['-hide_banner', '-i', path], { encoding: 'utf8', windowsHide: true })
+    const text = `${info.stderr}${info.stdout}`
+    return {
+      duration: /Duration: ([^\s,]+)/.exec(text)?.[1] || 'N/A',
+      video: /Stream #0:0.*/.exec(text)?.[0]?.trim() || '',
+      fps: Number(/Video:.*?(\d+(?:\.\d+)?) fps/.exec(text)?.[1] || 0),
+      size: /Video:.*?, (\d{3,5})x(\d{3,5})/.exec(text)?.slice(1).join('x') || ''
+    }
+  }
+  /** 录一段并返回新产出的素材文件（多次录制要能分别归属）。 */
+  const recordOnce = async (label, seconds) => {
+    let startEnabled = false
+    for (let i = 0; i < 60; i += 1) {
+      startEnabled = Boolean(await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/开始录制/.test(n.textContent||'')); return b && !b.disabled })()`))
+      if (startEnabled) break
+      await sleep(500)
+    }
+    console.log(`[${label}] 开始录制按钮可用:`, startEnabled)
+    assert.ok(startEnabled, `[${label}] "开始录制"应可用（来源枚举中它是 disabled，点了会静默无动作）`)
+    const before = new Set(await readdir(recordingsDir).catch(() => []))
+    await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/开始录制/.test(n.textContent||'')); b?.click(); return Boolean(b) })()`)
+    let barReady = false
+    for (let i = 0; i < 40; i += 1) { await sleep(750); barReady = Boolean(await ev(`Boolean(document.querySelector('[data-recording-control]'))`)); if (barReady) break }
+    if (!barReady) console.log(`[${label}] 界面文案:`, String(await ev(`(document.body.innerText||'').replace(/\s+/g,' ').slice(0,300)`)))
+    assert.ok(barReady, `[${label}] 录制未启动`)
+    await sleep(seconds * 1000)
+    await ev(`(() => { const b=[...document.querySelectorAll('[data-recording-control] [title],[data-recording-control] button')].find((n)=>String(n.getAttribute('title')||'').includes('结束')); b?.click(); return Boolean(b) })()`)
+    await sleep(5500)
+    const after = (await readdir(recordingsDir)).filter((name) => !name.endsWith('.json') && !before.has(name))
+    assert.equal(after.length, 1, `[${label}] 应恰好新增一个素材文件（实测 ${after.length}）`)
+    return join(recordingsDir, after[0])
+  }
+  /**
+   * 屏幕活动发生器：桌面采集是**变化驱动**的——画面不动就没有帧（静止屏幕上原始采集实测只有
+   * 1.11fps，那不是丢帧，是"屏幕没变，没什么可录"）。比较两种采集方式就必须让屏幕真的在变。
+   *
+   * 必须是**另一个进程**的窗口：录制期间应用会对自己的所有窗口开 `setContentProtection`，
+   * 岛自己窗口里的动画对采集器是隐形的（踩过）。这里起一个独立 Electron 实例铺满主显示器。
+   */
+  const activityMain = join(profile, 'activity-main.js')
+  // 单行 main.js：避免在脚本里嵌多行字符串时被转义坑到（\n 反复被吃掉）
+  const activitySource = [
+    "const { app, BrowserWindow, screen } = require('electron')",
+    "app.disableHardwareAcceleration()",
+    "app.whenReady().then(() => {",
+    "  const bounds = screen.getPrimaryDisplay().bounds",
+    "  const win = new BrowserWindow({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, frame: false, alwaysOnTop: true, skipTaskbar: true, focusable: false })",
+    "  const html = '<html><body style=\"margin:0;overflow:hidden\"><div id=\"b\" style=\"position:fixed;inset:0;background:#c00\"></div><scr' + 'ipt>let i=0;setInterval(()=>{document.getElementById(\"b\").style.background=\"hsl(\"+(i=(i+9)%360)+\",85%,50%)\"},16)</scr' + 'ipt></body></html>'",
+    "  win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))",
+    "})"
+  ].join(String.fromCharCode(10))
+  await writeFile(activityMain, activitySource, 'utf8')
+  const activityChild = spawn(electron, [activityMain, '--user-data-dir=' + join(profile, 'activity-userdata')], { stdio: 'ignore', windowsHide: true })
+  await sleep(3500)
+  console.log('屏幕活动窗口:', child.exitCode === null && activityChild.exitCode === null ? '已启动' : '启动失败')
+  await sleep(1200)
+  const compositeFile = await recordOnce('合成', 8)
+  console.log('\n录制产物:', compositeFile.slice(recordingsDir.length + 1))
+  for (const path of [compositeFile]) {
     const size = (await stat(path)).size
     const head = Buffer.alloc(16)
     const { open } = await import('node:fs/promises')
@@ -86,6 +139,8 @@ try {
     assert.notEqual(duration, 'N/A', '成品必须带可用时长（WebM/MediaRecorder 产出实测没有 Duration）')
     assert.match(video, /Video: h264/, '视频编码应为 H.264')
     assert.doesNotMatch(video, /tbr 1k|1000 fps/, '容器不得把时基当帧率（tbr 1k 是 WebM 路径的坑）')
+    compositeFps = Math.max(compositeFps, probeFile(path).fps)
+    compositeSize = probeFile(path).size
     mediaChecked += 1
   }
   const manifests = (await readdir(recordingsDir)).filter((f) => f.endsWith('.json'))
@@ -96,6 +151,48 @@ try {
     assert.match(String(manifest.fileName), /\.mp4$/, '成品扩展名应跟随真实容器（不能把 MP4 存成 .webm）')
     assert.equal(manifest.status, 'ready', '停止录制后会话状态应为 ready')
   }
+  // 拍摄与后期分离：录制期必须真的采集到光标轨迹并落进工程。
+  // 这是"剪除空白"和导出期重建运镜的数据来源，事后无法补录，采不到就是功能整体失效。
+  // 工程是录制结束后**延迟 1 秒防抖落盘**的，读得太早会拿到还没有轨迹的版本——轮询到写出为止。
+  const projectsDir = join(profile, 'recording-projects')
+  let trackPoints = 0
+  let motionReady = false
+  let projectFiles = []
+  for (let attempt = 0; attempt < 14; attempt += 1) {
+    projectFiles = await readdir(projectsDir).catch(() => [])
+    trackPoints = 0
+    for (const file of projectFiles.filter((name) => name.endsWith('.json'))) {
+      const project = JSON.parse(await readFile(join(projectsDir, file), 'utf8'))
+      const track = Array.isArray(project.cursorTrack) ? project.cursorTrack : []
+      trackPoints = Math.max(trackPoints, track.length)
+      motionReady = motionReady || project.exportMotionReady === true
+      const last = track.at(-1)
+      if (track.length && attempt === 0) console.log(`  光标轨迹: ${track.length} 点 | 末点 t=${last.t}ms (${last.x}, ${last.y}) 速度=${last.s}`)
+    }
+    if (trackPoints > 0) break
+    await sleep(500)
+  }
+  if (trackPoints > 0) console.log(`  光标轨迹: ${trackPoints} 点（工程数 ${projectFiles.length}）`)
+  else console.log(`  光标轨迹: 空（工程目录内容: ${projectFiles.join(', ') || '空'}）`)
+  assert.ok(trackPoints >= 20, `8 秒录制应采到足够的光标轨迹点（实测 ${trackPoints} 个；0 表示采样或落盘链路断了）`)
+  assert.equal(motionReady, true, '"固定画面"录制的素材应标注为可在导出期重建运镜')
+
+  // 剪除空白的入口必须真的挂在剪辑页上，并且是**两段式**（先给方案，再落地）。
+  // 这次录制用的是合成光标，正是"录播放中的视频"那类退化素材——绝不能一次点击就把成片剪到只剩几秒。
+  await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/剪辑与预览/.test(n.textContent||'')); b?.click(); return Boolean(b) })()`)
+  await sleep(1200)
+  const trimPlan = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/算出待剪空白/.test(n.textContent||'')); if (!b) return 'missing'; b.click(); return 'clicked' })()`)
+  await sleep(500)
+  const planText = String(await ev(`(() => { const nodes=[...document.querySelectorAll('div')].filter((n)=>/将剪掉/.test(n.textContent||'')); nodes.sort((a,b)=>(a.textContent||'').length-(b.textContent||'').length); return (nodes[0]?.textContent||'').replace(/\\s+/g,' ').trim() })()`))
+  console.log('剪除空白 · 方案:', trimPlan, '|', planText)
+  assert.equal(trimPlan, 'clicked', '剪辑页应存在"剪除空白"入口')
+  assert.match(planText, /将剪掉\s*[\d.]+s/, '应先给出"剪多少、留几段"的方案而不是直接改时间线')
+  const applied = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/应用剪除/.test(n.textContent||'')); if (!b) return 'missing'; b.click(); return 'clicked' })()`)
+  await sleep(600)
+  const trimToast = String(await ev(`(() => { const nodes=[...document.querySelectorAll('*')].filter((n)=>n.children.length===0&&/已剪除|未做改动|不足|不可靠/.test(n.textContent||'')); return nodes.map((n)=>n.textContent.trim()).slice(-1).join('') })()`))
+  console.log('剪除空白 · 落地:', applied, '|', trimToast)
+  assert.equal(applied, 'clicked', '方案展示后应能确认应用')
+  assert.match(trimToast, /已剪除/, '确认后应落到时间线并如实报告剪掉多少')
   // 播放验证：录出的 MP4 音轨是 Opus，必须确认**应用自己的预览**能解码（含声音），
   // 否则就是"录得到、放不出"的静默回归。
   // 直接复用工作室页面上那个 <video>（停止录制后它就在播预览），比自建 URL 更忠实——
@@ -130,6 +227,32 @@ try {
   assert.ok(played.audioBytes > 0, 'MP4 音轨应能被应用解码（否则预览没声音）')
 
   assert.ok(mediaChecked > 0, '应至少校验一个录制成品')
+  // 原始采集：同样时长，画面不做任何合成。这是"合成管线掉帧"的直接对照——
+  // 合成模式实测 21–28fps（叠加层多时更低），原始采集应当基本跑满目标帧率。
+  await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/重新录制/.test(n.textContent||'')); b?.click(); return Boolean(b) })()`)
+  await sleep(1500)
+  await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>n.textContent?.trim()==='采集'); b?.click(); return Boolean(b) })()`)
+  await sleep(900)
+  // 原始采集按屏幕原始画幅录制：先把"画面比例"切到"跟随源"（这是它唯一的前置条件）
+  const aspectPick = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/跟随源/.test(n.textContent||'')); if (!b) return 'missing'; b.click(); return 'clicked' })()`)
+  console.log('画面比例切跟随源:', aspectPick)
+  assert.equal(aspectPick, 'clicked', '采集页应有"跟随源"比例档')
+  await sleep(400)
+  const rawPick = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/原始画面/.test(n.textContent||'')); if (!b) return 'missing'; if (/不可用/.test(b.textContent||'')) return 'blocked'; b.click(); return 'clicked' })()`)
+  console.log('采集方式切原始画面:', rawPick)
+  if (rawPick === 'blocked') console.log('  被挡住的原因:', String(await ev(`(() => { const n=[...document.querySelectorAll('div')].filter((x)=>x.children.length===0&&/切到"原始画面"需要先关掉/.test(x.textContent||'')); return n[0]?.textContent?.trim() || '（未找到说明）' })()`)))
+  assert.equal(rawPick, 'clicked', '采集页应能切到"原始画面"（blocked 表示前置项没被清干净）')
+  const rawFile = await recordOnce('原始', 8)
+  if (activityChild.exitCode === null) spawnSync('taskkill.exe', ['/pid', String(activityChild.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+  const rawInfo = probeFile(rawFile)
+  console.log(`  帧率对照：合成 ${compositeFps}fps → 原始 ${rawInfo.fps}fps（尺寸 ${compositeSize} → ${rawInfo.size}）`)
+  assert.match(rawInfo.video, /Video: h264/, '原始采集同样应是 H.264')
+  assert.notEqual(rawInfo.duration, 'N/A', '原始采集的容器也必须带可用时长')
+  assert.ok(compositeFps > 0, '应测得合成模式的帧率作为对照')
+  // 屏幕在动的前提下：原始采集没有画布重绘，帧率应不低于合成模式（合成实测 21–28fps 且随叠加层增加而下降）
+  assert.ok(rawInfo.fps >= compositeFps, `同样的活动画面下原始采集帧率不应低于合成模式（原始 ${rawInfo.fps}fps vs 合成 ${compositeFps}fps）`)
+  // 桌面采集是变化驱动的：源静止时不会产出重复帧，这里只要求"动起来之后确实有帧"
+  assert.ok(rawInfo.fps >= 20, `活动画面下原始采集应跑满目标帧率（实测 ${rawInfo.fps}fps，静止屏幕实测只有 1.11fps）`)
   process.stdout.write('recording container audit passed' + String.fromCharCode(10))
 } finally {
   try { await Promise.race([cdp?.send('Runtime.evaluate', { expression: 'window.island.quitApp(); true', returnByValue: true }), sleep(1500)]) } catch {}

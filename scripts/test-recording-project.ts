@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RecordingProjectStore } from '../src/main/recording-project-store.ts'
@@ -28,6 +28,12 @@ try {
     },
     timeline: [{ at: 1_000, type: 'marker', label: '介绍' }],
     transcript: { model: 'whisper-1', language: 'zh', segments: [{ startMs: 250, endMs: 1_500, text: '测试字幕' }] },
+    cursorTrack: [
+      { t: 0, x: 0.2, y: 0.3, s: 0 },
+      { t: 500, x: 0.5, y: 0.4, s: 6_000 },
+      { t: 1_200, x: 1.8, y: -0.4, s: 99_999 },
+      { t: 999_999, x: Number.NaN, y: 0.5, s: 1 }
+    ],
     workspace: { timelineZoom: 1.8, timelineSnap: true, videoTrackLocked: false, markerTrackLocked: true, aiEditMode: 'tutorial' },
     aiResults: [{ id: 1, label: '摘要', text: '工程摘要' }]
   }
@@ -36,6 +42,10 @@ try {
   assert.match(created.id, /^project-/, '创建稳定工程 ID')
   assert.equal(created.edit.segments.length, 1, '丢弃结束时间早于开始时间的无效片段')
   assert.equal(store.list()[0].transcriptCount, 1, '摘要包含字幕数量')
+  assert.equal(created.cursorTrack.length, 3, '丢弃坐标非法的轨迹点（NaN）')
+  assert.deepEqual(created.cursorTrack[2], { t: 1_200, x: 1, y: 0, s: 50_000 }, '越界坐标钳到边界，速度上限钳到 50000')
+  assert.equal(created.cursorTrack[3], undefined, 'NaN 坐标不会混进工程')
+  assert.equal(created.cursorTrack[0].t, 0, '轨迹时间戳按录制偏移落盘')
 
   const updated = await store.save({ ...input, id: created.id, name: '教程工程 v2' })
   assert.equal(updated.id, created.id, '更新工程不会创建重复记录')
@@ -61,6 +71,13 @@ try {
   assert.ok(restarted.load(duplicate.id), '删除原工程不影响副本')
   await restarted.deleteBySession(created.sessionId)
   assert.equal(restarted.list().length, 0, '清理素材时同步清理关联工程')
+
+  // v0.6.14 之前的工程没有光标轨迹字段：读取时补空数组，避免下游到处判 undefined
+  const legacy = { ...input, id: 'project-legacy', createdAt: 1, updatedAt: 2, cursorTrack: undefined }
+  await writeFile(join(root, 'project-legacy.json'), JSON.stringify(legacy), 'utf8')
+  const reopened = new RecordingProjectStore(root)
+  await reopened.initialize()
+  assert.deepEqual(reopened.load('project-legacy')?.cursorTrack, [], '旧工程缺少轨迹字段时补空数组而不是 undefined')
   console.log('recording project tests passed')
 } finally {
   await rm(root, { recursive: true, force: true })
