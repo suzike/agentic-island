@@ -20,7 +20,8 @@
     "audit:recording": "node --experimental-strip-types scripts/audit-recording-container.mjs",
     "audit:terminal": "node scripts/audit-terminal-ui.mjs",
     "package": "electron-vite build && electron-builder --win nsis --publish never",
-    "verify:package": "node scripts/verify-package.mjs"
+    "verify:package": "node scripts/verify-package.mjs",
+    "audit:screenshot": "node scripts/audit-screenshot-studio.mjs"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",

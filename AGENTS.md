@@ -44,6 +44,7 @@ npm run audit:terminal # 隔离 Electron 验证输入、退出码、危险确认
 npm run audit:ask      # 隔离 Electron 验证回答方法、气泡分析与窄宽布局
 npm run audit:contrast # 全岛像素级对比度审计（2 主题 × 11 分区，硬失败线 3.0）
 npm run audit:recording # 隔离实例真录一段：容器/扩展名/时长/应用内播放断言
+npm run audit:screenshot # 隔离实例跑通截图工坊批量美化（含成品像素比对）
 npm run bench:recording # 导出基准：直通封装 vs 软件编码 vs 各硬件编码器
 ```
 
@@ -109,7 +110,7 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 23. **滚动长截图（拼接引擎）**：`logic/scroll-capture.ts` 是纯逻辑（行指纹 + 多条探测带求众数），被 `scripts/test-scroll-capture.ts` 直接用 node 加载，所以**它不能有运行时 import**；需要 DOM/媒体流的抓帧会话拆在 `logic/scroll-capture-session.ts`（只被组件引用）。三条实测结论：① 探测带必须取**上半部**（滚过半屏时只有靠上的带子仍在重叠区，摊到下半部会把"滚了半屏以上"判成 0）；② 置信度按**能投票的带子**算（否则大位移只剩一条带子可匹配时被误判不可信）；③ `skipped` 只在"位移 0 且置信度低"时计数——"匹配上但没动"是用户停手，两回事。测试图必须带**行号相关的高频细节**：纯渐变在 8 位降采样后相邻行完全相同，位移会被测成差一行。
 24. **截图入口是应用内框选叠层（`#snip`）**：点"截图工坊"或 `Ctrl+Alt+S` 弹自己的叠层（拖动选区、显示 DIP + 实际物理像素、回车确认、Esc/右键取消、点一下不拖即取消），确认后**主进程先隐藏叠层再请渲染层抓原生帧并按选区裁剪**——顺序不能反，否则暗底与选框会被拍进画面。选区是 DIP、抓到的帧是物理像素，换算必须用叠层自己那份 `scaleFactor`（不要用 `devicePixelRatio` 猜，多屏不同缩放时会错）。Windows 的 `ms-screenclip:` 只在叠层创建失败时兜底。新增浮窗类能力照 `openSticky` 范式，但记得补两件便利贴漏掉的事：纳入 `setAgenticWindowsTopmost` 托管、在 `onDisplayChange` 里重定位（钉屏截图已做）。
 25. **指针/按键采集只在录制期间**（`src/main/mouse-hook.ts`，uiohook-napi 的 N-API 预编译包）：录屏时那块屏本来就在被逐像素记录，所以鼠标点击不引入新的隐私面；停止录制即卸载钩子。键盘**只取 `NAVIGATION_KEYS`（方向键/Enter/Tab/Esc…）与修饰键组合的标签**（`Ctrl+S` 这类，给导出期角标用），**可打印字符一个都不采**——所以角标永远不可能包含用户打出的文字，这条边界是硬约束，改动这个文件时必须保住。原生模块加载失败要静默降级（fail-open）。打包必须 `npmRebuild: false`——electron-builder 默认会用 node-gyp 从源码重编原生模块，本机没有构建链会直接打包失败（本项目只用 N-API 预编译包，跳过 rebuild 是正确选择）。
-26. **审计实例可以免弹窗导出**：原生保存框没法用 CDP 关掉，导出链路就永远测不到。`showOwnedSaveDialog` 在 `AIISLAND_ALLOW_AUDIT_INSTANCE=1` + `AIISLAND_AUDIT_USER_DATA` + `AIISLAND_AUDIT_EXPORT_DIR` 三者同时就位时直接落到指定目录（正常运行时一个都不会有）。审计要用这个目录，记得先 `mkdir`——目录不存在时导出会失败，而失败信息曾经被静默吞掉（见约束 11）。
+26. **审计实例可以免弹窗导出**：原生对话框没法用 CDP 关掉，否则那些链路在自动化里永远测不到。统一门槛是 `isAuditInstance()`（`AIISLAND_ALLOW_AUDIT_INSTANCE=1` + `AIISLAND_AUDIT_USER_DATA`，正常运行时两边都不成立），在这之上按用途分别开口：`AIISLAND_AUDIT_EXPORT_DIR` 让**保存框**（`showOwnedSaveDialog`）与**快存/批量落盘**（`save-image-quick`，否则每跑一次审计就往用户真实的"图片"文件夹里丢文件）直接落到指定目录；`AIISLAND_AUDIT_OPEN_PATHS`（`;` 分隔）充当**打开框**的选择结果，批量美化那条链路才谈得上端到端可验证。审计要用导出目录记得先 `mkdir`——目录不存在时导出会失败，而失败信息曾经被静默吞掉（见约束 11）。另有 `AIISLAND_AUDIT_PLACEHOLDER_SOURCES=1`：让 `recording-sources` 交一张**现画的示意画面**、窗口标题换成中性名——README 截图会进公开仓库，而"录制来源"那格预览拍的正是运行机器的桌面。
 27. **审计断言失败先怀疑审计侧**：这个项目已经栽过两次"脚本自己瞎了、看起来像产品坏了"——① 审计在主屏铺的活动窗口让 Chromium 在 150% 缩放下把采集帧报成 DIP 尺寸（1706×1066 的假回退）；② `audit-recording-container.mjs` 探测视频轨时假定视频是 `#0:0`，改成带 `.*$` 的通配写法又漏了 `m` 标志（JS 里不带 `m` 的 `$` **只匹配整个输入的末尾**，中间那行永远匹配不到）。所以：能按行找就别用跨行正则，别假设流/字段顺序，**动手改产品之前先用隔离脚本复现一遍真实数据**——两次都是隔离复现才证明产品是好的。
 
 ## 数据与持久化

@@ -416,6 +416,7 @@ npm run build           # electron-vite 三端生产构建
 npm run audit:ask       # 隔离 Electron 验证问答方法与气泡分析交互
 npm run audit:contrast  # 全岛像素级对比度审计（2 主题 × 11 分区）
 npm run audit:recording # 隔离实例真录一段，验证容器/元数据与应用内播放
+npm run audit:screenshot # 隔离实例跑通截图工坊批量美化（含成品像素比对）
 npm run bench:recording # 录屏导出基准：直通封装 / 软件编码 / 各硬件编码器
 npm run audit:terminal  # 隔离 Electron 验证真实 ConPTY 交互与恢复
 npm run package         # 构建 NSIS 安装包到 dist/

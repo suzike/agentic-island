@@ -179,6 +179,9 @@ const child = spawn(electron, [root, `--remote-debugging-port=${port}`, `--user-
     AIISLAND_SKIP_HOOKS: '1',
     AIISLAND_ALLOW_AUDIT_INSTANCE: '1',
     AIISLAND_AUDIT_USER_DATA: profile,
+    // README 截图会进公开仓库，而"录制来源"那一格预览拍的正是运行这台机器的桌面：
+    // 让主进程交一张现画的示意画面，别把真实屏幕（和窗口标题）带进文档
+    AIISLAND_AUDIT_PLACEHOLDER_SOURCES: '1',
     AIISLAND_BRIDGE_FILE: join(profile, 'bridge.json')
   },
   stdio: 'ignore',

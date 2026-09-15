@@ -105,10 +105,18 @@ async function withNativeDialog<T>(open: () => Promise<T>): Promise<T> {
 }
 
 function showOwnedOpenDialog(options: Electron.OpenDialogOptions): Promise<Electron.OpenDialogReturnValue> {
+  const auditPaths = auditOpenPaths()
+  if (auditPaths.length) return Promise.resolve({ canceled: false, filePaths: auditPaths })
   return withNativeDialog(() => win && !win.isDestroyed()
     ? dialog.showOpenDialog(win, options)
     : dialog.showOpenDialog(options))
 }
+
+/**
+ * 审计实例的最低门槛：显式放行 + 隔离 userData。所有审计专用旁路都先过这里，正常运行时两边都不成立。
+ */
+const isAuditInstance = (): boolean =>
+  process.env['AIISLAND_ALLOW_AUDIT_INSTANCE'] === '1' && Boolean(process.env['AIISLAND_AUDIT_USER_DATA']?.trim())
 
 /**
  * 审计实例（隔离 userData + 显式放行 + 指定导出目录）里免弹窗直接落盘。
@@ -116,10 +124,51 @@ function showOwnedOpenDialog(options: Electron.OpenDialogOptions): Promise<Elect
  * 原生保存框没法用 CDP 关掉，否则"导出"这条端到端链路在自动化里永远测不到——而这条链路恰好
  * 被"文件写成功但内容不对"坑过两次。三个环境变量缺一不可，正常运行时一个都不会有。
  */
-const auditExportDir = (): string => {
-  if (process.env['AIISLAND_ALLOW_AUDIT_INSTANCE'] !== '1') return ''
-  if (!process.env['AIISLAND_AUDIT_USER_DATA']?.trim()) return ''
-  return process.env['AIISLAND_AUDIT_EXPORT_DIR']?.trim() || ''
+const auditExportDir = (): string => (isAuditInstance() ? process.env['AIISLAND_AUDIT_EXPORT_DIR']?.trim() || '' : '')
+
+/**
+ * 审计实例里用环境变量充当"用户在原生文件框里选了哪些文件"。
+ *
+ * 原生打开框同样没法用 CDP 关掉，批量美化因此是最后一条只有人工点击才能走通的链路。
+ * 与保存框同一道闸（放行标记 + 隔离 userData + 显式给出路径），正常运行时一个都不会有。
+ */
+const auditOpenPaths = (): string[] => isAuditInstance()
+  ? (process.env['AIISLAND_AUDIT_OPEN_PATHS'] || '').split(';').map((item) => item.trim()).filter(Boolean)
+  : []
+
+/**
+ * 文档截图专用：合成一张"演示画面"缩略图，替代真实的屏幕/窗口像素。
+ *
+ * README 的截图会进公开仓库，而"录制来源"那一格预览拍的正是**运行这台机器的桌面**。开着这个开关，
+ * 主进程不再把真实缩略图交给渲染层，而是现画一张明显是示意用的图（桌面底 + 居中窗口 + 任务栏），
+ * 窗口标题也一并换成中性名。只在放行的审计实例里、且显式设置 `AIISLAND_AUDIT_PLACEHOLDER_SOURCES=1`
+ * 时生效——正常运行时这个变量不存在，采集行为一个字都不变。
+ */
+const auditPlaceholderSources = (): boolean =>
+  isAuditInstance() && process.env['AIISLAND_AUDIT_PLACEHOLDER_SOURCES'] === '1'
+
+const placeholderSourceThumbnail = (width: number, height: number): Electron.NativeImage => {
+  // createFromBitmap 在 Windows 上吃 BGRA 原始像素；这里全部现画，不含任何真实屏幕数据
+  const pixels = Buffer.alloc(width * height * 4)
+  const rect = (x0: number, y0: number, w: number, h: number, r: number, g: number, b: number): void => {
+    for (let y = Math.max(0, y0); y < Math.min(height, y0 + h); y += 1) {
+      for (let x = Math.max(0, x0); x < Math.min(width, x0 + w); x += 1) {
+        const index = (y * width + x) * 4
+        pixels[index] = b
+        pixels[index + 1] = g
+        pixels[index + 2] = r
+        pixels[index + 3] = 255
+      }
+    }
+  }
+  for (let y = 0; y < height; y += 1) {
+    const shade = 30 + Math.round((y / height) * 14)
+    rect(0, y, width, 1, shade + 4, shade + 2, shade)
+  }
+  rect(Math.round(width * 0.16), Math.round(height * 0.14), Math.round(width * 0.68), Math.round(height * 0.6), 58, 56, 54)
+  rect(Math.round(width * 0.16), Math.round(height * 0.14), Math.round(width * 0.68), Math.round(height * 0.07), 76, 73, 70)
+  rect(0, height - Math.max(6, Math.round(height * 0.06)), width, Math.max(6, Math.round(height * 0.06)), 22, 22, 24)
+  return nativeImage.createFromBitmap(pixels, { width, height })
 }
 
 function showOwnedSaveDialog(options: Electron.SaveDialogOptions): Promise<Electron.SaveDialogReturnValue> {
@@ -1303,7 +1352,8 @@ function wireIpc(): void {
     try {
       if (!validImageData(dataUrl)) return { ok: false, error: '图片数据无效或超过 160MB' }
       const ext = format === 'jpeg' || format === 'jpg' ? 'jpg' : format === 'webp' ? 'webp' : 'png'
-      const dir = join(app.getPath('pictures'), 'Agentic-Island')
+      // 审计实例里落到隔离导出目录：否则跑一次批量/快存就往用户真实的"图片"文件夹里丢文件
+      const dir = auditExportDir() || join(app.getPath('pictures'), 'Agentic-Island')
       await mkdir(dir, { recursive: true })
       const target = join(dir, `${safeName(name, 'screenshot')}.${ext}`)
       const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64')
@@ -1340,6 +1390,7 @@ function wireIpc(): void {
 
   ipcMain.handle('recording-sources', async () => {
     try {
+      const placeholder = auditPlaceholderSources()
       const displayList = screen.getAllDisplays().sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y)
       const displays = new Map(displayList.map((display) => [String(display.id), display]))
       const sources = await desktopCapturer.getSources({
@@ -1355,14 +1406,16 @@ function wireIpc(): void {
       }).map((source, sourceOrder) => {
         const display = displays.get(source.display_id)
         const kind: RecordingSource['kind'] = source.id.startsWith('screen:') ? 'screen' : 'window'
-        const thumbnail = source.thumbnail.isEmpty() ? '' : source.thumbnail.toDataURL()
+        const thumbnailImage = placeholder ? placeholderSourceThumbnail(360, 203) : source.thumbnail
+        const thumbnail = thumbnailImage.isEmpty() ? '' : thumbnailImage.toDataURL()
         const displayIndex = display ? displayList.findIndex((item) => item.id === display.id) : -1
         const physicalWidth = display ? Math.max(2, Math.round(display.bounds.width * display.scaleFactor)) : 0
         const physicalHeight = display ? Math.max(2, Math.round(display.bounds.height * display.scaleFactor)) : 0
         const nativeSize = display ? { width: physicalWidth - (physicalWidth % 2), height: physicalHeight - (physicalHeight % 2) } : undefined
         return {
           id: source.id,
-          name: source.name,
+          // 占位模式下窗口标题也算个人信息（文档标题、聊天对象名都在里面），一并换成中性名
+          name: placeholder && kind === 'window' ? `示例窗口 ${sourceOrder + 1}` : source.name,
           kind,
           displayId: source.display_id || undefined,
           thumbnail,
@@ -1370,7 +1423,7 @@ function wireIpc(): void {
           available: Boolean(thumbnail),
           unavailableReason: thumbnail ? undefined : (kind === 'window' ? '窗口可能已最小化、关闭或禁止捕获' : '显示器画面暂不可用'),
           displayLabel: kind === 'screen' && displayIndex >= 0 ? `${display?.id === screen.getPrimaryDisplay().id ? '主显示器' : `显示器 ${displayIndex + 1}`} · ${nativeSize?.width}×${nativeSize?.height}` : undefined,
-          aspectRatio: source.thumbnail.isEmpty() ? undefined : source.thumbnail.getAspectRatio(),
+          aspectRatio: thumbnailImage.isEmpty() ? undefined : thumbnailImage.getAspectRatio(),
           bounds: kind === 'screen' && display ? { ...display.bounds } : undefined,
           scaleFactor: kind === 'screen' ? display?.scaleFactor : undefined,
           displayIndex: kind === 'screen' && displayIndex >= 0 ? displayIndex : undefined,
