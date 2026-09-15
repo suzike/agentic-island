@@ -71,11 +71,16 @@ try {
   const probeFile = (path) => {
     const info = spawnSync(ffmpeg, ['-hide_banner', '-i', path], { encoding: 'utf8', windowsHide: true })
     const text = `${info.stderr}${info.stdout}`
+    // 不要假设视频是 #0:0：MP4 按首包时间排流序，原始采集的文件里音频可能排在前面。
+    // 也别用"跨行正则"去找它——按行找含 "Video: " 的那行最稳（也不需要处理行尾差异）。
+    const videoLine = text.split(String.fromCharCode(10)).find((line) => line.indexOf('Stream #') >= 0 && line.indexOf('Video: ') > 0) || ''
+    const sizeMatch = /, (\d{2,5})x(\d{2,5})/.exec(videoLine)
+    const fpsMatch = /(\d+(?:\.\d+)?) fps/.exec(videoLine)
     return {
       duration: /Duration: ([^\s,]+)/.exec(text)?.[1] || 'N/A',
-      video: /Stream #0:0.*/.exec(text)?.[0]?.trim() || '',
-      fps: Number(/Video:.*?(\d+(?:\.\d+)?) fps/.exec(text)?.[1] || 0),
-      size: /Video:.*?, (\d{3,5})x(\d{3,5})/.exec(text)?.slice(1).join('x') || ''
+      video: videoLine.trim(),
+      fps: Number(fpsMatch?.[1] || 0),
+      size: sizeMatch ? `${sizeMatch[1]}x${sizeMatch[2]}` : ''
     }
   }
   /** 录一段并返回新产出的素材文件（多次录制要能分别归属）。 */
@@ -271,6 +276,7 @@ try {
   if (activityChild.exitCode === null) spawnSync('taskkill.exe', ['/pid', String(activityChild.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
   const rawInfo = probeFile(rawFile)
   console.log(`  帧率对照：合成 ${compositeFps}fps → 原始 ${rawInfo.fps}fps（尺寸 ${compositeSize} → ${rawInfo.size}）`)
+  console.log('  原始采集视频轨:', rawInfo.video.slice(0, 140))
   assert.match(rawInfo.video, /Video: h264/, '原始采集同样应是 H.264')
   assert.notEqual(rawInfo.duration, 'N/A', '原始采集的容器也必须带可用时长')
   assert.ok(compositeFps > 0, '应测得合成模式的帧率作为对照')

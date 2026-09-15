@@ -98,17 +98,29 @@ const num = (value: number): string => {
  * 生成以帧序 `in` 为自变量的分段线性表达式：`in` 落在第 k 段就按该段两端线性插值。
  * 段数与 `waypoints` 一致，末段之后保持终值（`zoompan` 的 `in` 不会超出帧数，属于兜底）。
  */
-function piecewiseLinearExpression(track: RecordingMotionTrack, waypoints: number[], pick: (index: number) => number): string {
+function piecewiseLinearExpression(
+  track: RecordingMotionTrack,
+  waypoints: number[],
+  pick: (index: number) => number,
+  axis: 'frames' | 'seconds' = 'frames'
+): string {
   const frames = track.frames
   if (waypoints.length < 2) return num(pick(waypoints[0] || 0))
+  // 时间轴变量必须按**目标滤镜**选：zoompan 里只有 `in`（帧序，实测没有 t），
+  // 而 overlay 里只有 `t`（实测没有 in，用 in 会报表达式求值失败）。两边航点算法一致，只是换元。
+  const fps = Math.max(1, Math.round(track.fps) || 30)
+  const clock = (index: number): number => (axis === 'seconds' ? Number((index / fps).toFixed(4)) : index)
+  const variable = axis === 'seconds' ? 't' : 'in'
   let expression = num(pick(waypoints[waypoints.length - 1]))
   for (let index = waypoints.length - 2; index >= 0; index -= 1) {
-    const start = waypoints[index]
-    const end = waypoints[index + 1]
-    const from = pick(start)
-    const to = pick(end)
+    const startFrame = waypoints[index]
+    const endFrame = waypoints[index + 1]
+    const start = clock(startFrame)
+    const end = clock(endFrame)
+    const from = pick(startFrame)
+    const to = pick(endFrame)
     const slope = end === start ? 0 : (to - from) / (end - start)
-    expression = `if(lt(in,${end}),${num(from)}+${num(slope)}*(in-${start}),${expression})`
+    expression = `if(lt(${variable},${num(end)}),${num(from)}+${num(slope)}*(${variable}-${num(start)}),${expression})`
   }
   return expression
 }
@@ -200,6 +212,44 @@ export function buildRecordingMotionCropFilter(crop: { x: number; y: number; wid
   const x = Math.max(0, Math.min(1 - width, crop.x))
   const y = Math.max(0, Math.min(1 - height, crop.y))
   return `crop=trunc(iw*${width.toFixed(4)}/2)*2:trunc(ih*${height.toFixed(4)}/2)*2:trunc(iw*${x.toFixed(4)}/2)*2:trunc(ih*${y.toFixed(4)}/2)*2`
+}
+
+/**
+ * 导出期光标光晕：把一枚"软光斑"按光标轨迹叠到画面上。
+ *
+ * 为什么这次可以用表达式（而细光环/轨迹不行）：光晕是个**又大又软**的圆（直径占画面 6%–24%），
+ * 折线航点在拐点处"切角"带来的偏差最多十来个像素，落在这么平滑的渐变上根本看不出来；
+ * 细光环同样的偏差就会很显眼。所以这里直接复用给 zoompan 建好的那套航点压缩。
+ *
+ * 只返回表达式与尺寸，不碰滤镜串联细节（那属于 `buildRecordingFfmpegArgs` 的职责）。
+ * 时间轴与 zoompan 一样只能用**帧序**（`overlay` 的表达式里 `t` 可用，但为了与运镜同一套航点
+ * 编译逻辑保持一致，这里也用 `in`）。
+ */
+export interface RecordingGlowPlan {
+  x: string
+  y: string
+  /** 光斑边长占成片宽度的比例 */
+  size: number
+}
+export function buildRecordingGlowPlan(
+  path: Array<{ x: number; y: number }>,
+  fps: number,
+  size: number
+): RecordingGlowPlan | null {
+  const points = (path || []).filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y))
+  if (points.length < 2) return null
+  // 复用运镜那套：把路径当成"缩放恒为 1 的相机路径"来压航点，保证两处的时间轴语义一致
+  const track: RecordingMotionTrack = { fps, frames: points.map((point) => ({ x: Math.max(0, Math.min(1, point.x)), y: Math.max(0, Math.min(1, point.y)), zoom: 1 })) }
+  const waypoints = simplifyRecordingMotion(track)
+  if (waypoints.length < 2) return null
+  const centerX = piecewiseLinearExpression(track, waypoints, (index) => track.frames[index].x, 'seconds')
+  const centerY = piecewiseLinearExpression(track, waypoints, (index) => track.frames[index].y, 'seconds')
+  // 光斑以自身中心对齐光标：左上角 = 中心 − 半径；两边都钳住，避免光斑被画幅裁掉一半
+  return {
+    x: `max(0,min(main_w-overlay_w,(${centerX})*main_w-overlay_w/2))`,
+    y: `max(0,min(main_h-overlay_h,(${centerY})*main_h-overlay_h/2))`,
+    size: Math.max(0.04, Math.min(0.4, size))
+  }
 }
 
 /** 质量档 → CRF（导出侧与编码器选择都要用同一张表，避免两处漂移）。 */
@@ -405,6 +455,9 @@ export function buildRecordingFfmpegArgs(
   const cutEnd = singleRange ? singleRange.endMs : trimEnd
   const common = [
     '-y', '-hide_banner', '-nostats', '-progress', 'pipe:1', '-i', inputPath,
+    // 光斑 PNG 必须是第 2 路输入（索引 1），滤镜链里的 [1:v] 就指着它。
+    // 字幕若也在，顺序会自动往后排——所以光斑要排在字幕之前，索引才稳定。
+    ...(request.glow?.filePath ? ['-i', request.glow.filePath] : []),
     ...(request.subtitleFilePath && request.format !== 'gif' && request.format !== 'mp3' ? ['-i', request.subtitleFilePath] : []),
     ...(!hasSegmentFilter && cutStart > 0 ? ['-ss', (cutStart / 1000).toFixed(3)] : []),
     ...(!hasSegmentFilter && (cutStart > 0 || cutEnd < request.durationMs) ? ['-t', ((cutEnd - cutStart) / 1000).toFixed(3)] : []),
@@ -485,6 +538,28 @@ export function buildRecordingFfmpegArgs(
   if (denoise > 0) videoFilters.push(`hqdn3d=${denoise.toFixed(2)}:${denoise.toFixed(2)}:${(denoise * 1.5).toFixed(2)}:${(denoise * 1.5).toFixed(2)}`)
   const sharpen = Math.max(0, Math.min(2, Number(edit.sharpen) || 0))
   if (sharpen > 0) videoFilters.push(`unsharp=5:5:${sharpen.toFixed(2)}:5:5:0`)
+  // 导出期按键角标：每个角标是一个**时间窗**（不是跟随路径），所以 drawtext 的 enable 就够用。
+  // 数量设上限：几十个还只是装饰，几百个会让滤镜链长度与可读性一起崩。
+  const badges = (request.badges || []).slice(0, 40)
+  if (badges.length && request.format !== 'gif' && request.format !== 'mp3') {
+    const fontFile = (process.env['AIISLAND_BADGE_FONT'] || '').split('\\').join('/')
+    const fontArg = fontFile ? `:fontfile='${fontFile}'` : ''
+    for (const badge of badges) {
+      const at = Math.max(0, Number(badge.t) || 0) / 1000
+      // 标签只可能是 Ctrl+S / Enter 这类 ASCII，仍做一次过滤：冒号、单引号与逗号会破坏滤镜语法
+      const text = String(badge.label || '').replace(/[^\x20-\x7E]/g, '').replace(/[:',]/g, '')
+      if (!text) continue
+      // 位置直接用像素：角标每枚是**常数**，不需要表达式（而且 drawtext 的表达式里带 max/min 与逗号
+      // 很容易踩引号/转义的坑，实测报 "Failed to parse expression"）。留 8px 边距并钳进画幅。
+      const frameWidth = Math.max(2, Math.round(Number(request.outputWidth) || request.width))
+      const frameHeight = Math.max(2, Math.round(Number(request.outputHeight) || request.height))
+      const badgeX = Math.max(8, Math.min(frameWidth - 120, Math.round(Math.max(0, Math.min(1, badge.x)) * frameWidth) - 40))
+      const badgeY = Math.max(8, Math.min(frameHeight - 40, Math.round(Math.max(0, Math.min(1, badge.y)) * frameHeight) + 18))
+      const posX = String(badgeX)
+      const posY = String(badgeY)
+      videoFilters.push(`drawtext=text='${text}'${fontArg}:fontsize=h/28:fontcolor=white:box=1:boxcolor=0x000000AA:boxborderw=8:x=${posX}:y=${posY}:enable='between(t,${at.toFixed(3)},${(at + 0.9).toFixed(3)})'`)
+    }
+  }
   if (request.format !== 'gif' && request.format !== 'mp3') {
     const outputWidth = Math.max(2, Math.min(7680, Math.round(Number(request.outputWidth) || request.width)))
     const outputHeight = Math.max(2, Math.min(4320, Math.round(Number(request.outputHeight) || request.height)))
@@ -522,20 +597,42 @@ export function buildRecordingFfmpegArgs(
     }
     return [...common, '-vn', '-map', '0:a:0', ...(audioFilters.length ? ['-af', audioFilters.join(',')] : []), '-c:a', 'libmp3lame', '-b:a', bitrate, outputPath]
   }
+  // 导出期光晕需要**第二路输入**（光斑 PNG），所以只能用 filter_complex 把 base 与 glow 两路叠起来。
+  // 叠完视频就"定型"了：后面的收尾逻辑不能再给它套一层 [vout]（否则标签重复）。
+  let videoFinalized = false
+  if (request.glow?.filePath) {
+    const glowPlan = request.glow?.filePath
+      ? buildRecordingGlowPlan(request.glow.path, Math.max(1, Math.round(request.glow.fps) || request.fps), request.glow.size)
+      : null
+    if (glowPlan) {
+      const outputWidth = Math.max(2, Math.min(7680, Math.round(Number(request.outputWidth) || request.width)))
+      const glowPixels = Math.max(8, Math.round(outputWidth * glowPlan.size))
+      graph.push(`[1:v]scale=${glowPixels}:${glowPixels}[glow]`)
+      graph.push(`[${videoSource}]${videoFilters.length ? videoFilters.join(',') : 'null'}[glowbase]`)
+      graph.push(`[glowbase][glow]overlay=x='${glowPlan.x}':y='${glowPlan.y}':eval=frame:format=auto[vout]`)
+      videoSource = 'vout'
+      videoFilters.length = 0
+      videoFinalized = true
+    }
+  }
+
   const graphParts = [...graph]
-  if (videoFilters.length || includeAudio) {
+  if (videoFinalized) {
+    // 视频已由光晕阶段定型为 [vout]，这里只补音频链
+    if (includeAudio) graphParts.push(`[${audioSource}]${audioFilters.length ? audioFilters.join(',') : 'anull'}[aout]`)
+  } else if (videoFilters.length || includeAudio) {
     if (graph.length || audioFilters.length) {
       graphParts.push(`[${videoSource}]${videoFilters.length ? videoFilters.join(',') : 'null'}[vout]`)
       if (includeAudio) graphParts.push(`[${audioSource}]${audioFilters.length ? audioFilters.join(',') : 'anull'}[aout]`)
     }
   }
   // 没有分段裁剪/音轨滤镜时仍走简洁的 -vf 路径（保持既有行为，滤镜图只在需要时出现）
-  const complex = graph.length > 0 || audioFilters.length > 0
+  const complex = graph.length > 0 || audioFilters.length > 0 || videoFinalized
   const filterArgs = complex
     ? ['-filter_complex', graphParts.join(';'), '-map', '[vout]', ...(includeAudio ? ['-map', '[aout]'] : ['-an'])]
     : [...(videoFilters.length ? ['-vf', videoFilters.join(',')] : []), ...(includeAudio ? ['-map', '0:v:0', '-map', '0:a:0?'] : ['-an'])]
   const subtitleArgs = request.subtitleFilePath
-    ? ['-map', '1:0', '-c:s', request.format === 'mp4' ? 'mov_text' : 'webvtt', '-metadata:s:s:0', `language=${request.subtitle?.language === 'en' ? 'eng' : request.subtitle?.language === 'zh' ? 'zho' : 'und'}`]
+    ? ['-map', request.glow?.filePath ? '2:0' : '1:0', '-c:s', request.format === 'mp4' ? 'mov_text' : 'webvtt', '-metadata:s:s:0', `language=${request.subtitle?.language === 'en' ? 'eng' : request.subtitle?.language === 'zh' ? 'zho' : 'und'}`]
     : []
   if (request.format === 'gif') {
     const fps = Math.max(8, Math.min(24, Number(request.outputFps) || request.fps || 15))
@@ -607,6 +704,8 @@ export function recordingExportStrategy(
 ): 'copy' | 'remux' | 'encode' {
   const format = request.format
   if (format !== 'mp4' && format !== 'webm') return 'encode'
+  // 导出期光晕（或运镜）必须重新渲染画面，不能拷流/直接封装
+  if (request.glow?.filePath) return 'encode'
   // 导出期运镜必须重新渲染画面（zoompan 滤镜），不能拷流
   if (request.motion?.frames?.length) return 'encode'
   const trimStart = Number(request.trimStartMs) || 0

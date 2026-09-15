@@ -190,6 +190,94 @@ export async function cropDataUrlToRegion(dataUrl: string, region: ScreenshotSni
   return canvas.toDataURL('image/png')
 }
 
+/**
+ * 文字卡片的排版：把一段文字按可用宽度折行，并算出画布尺寸（纯逻辑，测量函数由调用方注入）。
+ *
+ * 为什么把 measure 注入进来：真正量文字宽度必须用 canvas 的 measureText（依赖 DOM），
+ * 而"怎么折行、折多少行、画布多大"是可以离线验证的纯计算。分开之后，边界情况（超长单词、
+ * 空行、行数上限、极小字号）都能用假测量函数穷举，不必起浏览器。
+ */
+export interface TextCardMetrics {
+  fontSize: number
+  lineHeight: number
+  padding: number
+  maxLines: number
+  maxWidth: number
+}
+
+export interface TextCardLayout {
+  lines: string[]
+  width: number
+  height: number
+  /** 被行数上限截断（界面要如实提示"已截断"） */
+  truncated: boolean
+}
+
+export function wrapTextLines(text: string, maxWidth: number, measure: (line: string) => number, maxLines = 200): { lines: string[]; truncated: boolean } {
+  const normalized = String(text ?? '').replace(/\r\n?/g, String.fromCharCode(10))
+  const sourceLines = normalized.split(String.fromCharCode(10))
+  const lines: string[] = []
+  let truncated = false
+  for (const raw of sourceLines) {
+    if (lines.length >= maxLines) { truncated = true; break }
+    // 空行保留（用户用它分段）
+    if (!raw.trim()) { lines.push(''); continue }
+    let current = ''
+    // 先按空白切词；单个词自身超宽时按字符硬切，保证**任何输入都不溢出画布**
+    for (const token of raw.split(/(\s+)/)) {
+      if (!token) continue
+      if (measure(current + token) <= maxWidth) { current += token; continue }
+      if (current.trim()) {
+        lines.push(current.replace(/\s+$/, ''))
+        current = ''
+        if (lines.length >= maxLines) { truncated = true; break }
+      }
+      let piece = token.replace(/^\s+/, '')
+      while (measure(piece) > maxWidth && piece.length > 1) {
+        let cut = piece.length - 1
+        while (cut > 1 && measure(piece.slice(0, cut)) > maxWidth) cut -= 1
+        lines.push(piece.slice(0, cut))
+        if (lines.length >= maxLines) { truncated = true; break }
+        piece = piece.slice(cut)
+      }
+      if (truncated) break
+      current = piece
+    }
+    if (truncated) break
+    if (current) lines.push(current.replace(/\s+$/, ''))
+  }
+  return { lines, truncated }
+}
+
+/** 由折行结果与排版参数算画布尺寸（宽度取最宽一行 + 两侧内边距）。 */
+export function textCardLayout(text: string, metrics: TextCardMetrics, measure: (line: string) => number): TextCardLayout {
+  const fontSize = Math.max(8, Math.min(200, Math.round(metrics.fontSize) || 32))
+  const lineHeight = Math.max(1, Math.min(3, metrics.lineHeight || 1.45)) * fontSize
+  const padding = Math.max(0, Math.min(400, Math.round(metrics.padding) || 48))
+  const maxWidth = Math.max(fontSize * 2, Math.min(4000, Math.round(metrics.maxWidth) || 960))
+  const maxLines = Math.max(1, Math.min(400, Math.round(metrics.maxLines) || 120))
+  const { lines, truncated } = wrapTextLines(text, maxWidth, measure, maxLines)
+  const contentWidth = lines.reduce((widest, line) => Math.max(widest, measure(line)), fontSize)
+  const width = Math.max(2, Math.round(contentWidth + padding * 2))
+  const height = Math.max(2, Math.round(lines.length * lineHeight + padding * 2))
+  return { lines, width, height, truncated }
+}
+
+/** 标尺刻度：给定像素长度与期望步长，算出可读的刻度位置与标签（纯逻辑）。 */
+export function rulerTicks(length: number, targetStep: number, max = 400): Array<{ at: number; label: number }> {
+  const total = Math.max(0, Math.floor(length))
+  if (!total) return []
+  // 步长吸附到 1/2/5/10/20/50/100... 这类"人看得顺"的值
+  const raw = Math.max(1, targetStep)
+  const magnitude = 10 ** Math.floor(Math.log10(raw))
+  const normalized = raw / magnitude
+  const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+  const step = Math.max(1, nice * magnitude)
+  const ticks: Array<{ at: number; label: number }> = []
+  for (let at = 0; at <= total && ticks.length < max; at += step) ticks.push({ at, label: at })
+  return ticks
+}
+
 export function exportDimensions(width: number, height: number, scale: number): { width: number; height: number; pixels: number } {
   const outWidth = Math.max(1, Math.round(width * scale))
   const outHeight = Math.max(1, Math.round(height * scale))

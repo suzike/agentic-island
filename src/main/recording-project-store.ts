@@ -62,6 +62,7 @@ export class RecordingProjectStore {
         if (!Array.isArray(project.cursorTrack)) project.cursorTrack = []
         if (!Array.isArray(project.clickTrack)) project.clickTrack = []
         if (!Array.isArray(project.motionKeyframes)) project.motionKeyframes = []
+        if (!Array.isArray(project.keyTrack)) project.keyTrack = []
         if (typeof project.exportMotionReady !== 'boolean') project.exportMotionReady = false
         this.projects.set(project.id, project)
       } catch { /* ignore damaged project files without blocking app startup */ }
@@ -103,6 +104,12 @@ export class RecordingProjectStore {
       },
       cursorTrack: normalizeCursorTrack(input.cursorTrack, durationMs),
       clickTrack: normalizeCursorTrack(input.clickTrack, durationMs),
+      // 按键角标：只存"快捷键与导航键"的标签，不含任何正文内容
+      keyTrack: (input.keyTrack || [])
+        .slice(0, 20_000)
+        .map((item) => ({ t: clamp(item.t, 0, durationMs), label: safeText(item.label, 24) }))
+        .filter((item) => item.label)
+        .sort((a, b) => a.t - b.t),
       // 运镜点是人工编辑的结果，按素材时间归一化后原样保留（数量本来就只有几十个）
       motionKeyframes: (input.motionKeyframes || [])
         .slice(0, 500)

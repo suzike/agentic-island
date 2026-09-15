@@ -730,6 +730,34 @@ export function recordingMotionFrameTimes(
   return times
 }
 
+/**
+ * 按成片帧序取出光标位置，供导出期光晕使用（与运镜共用同一套时间映射）。
+ * 与 `recordingMotionFrames` 的区别：这里**不做平滑也不缩放**——光斑是叠在画面上的标记，
+ * 应该忠实跟着光标走，平滑留给表达式那边的航点压缩去做。
+ */
+export function recordingCursorPath(
+  samples: RecordingCursorSample[],
+  segments: Array<{ startMs: number; endMs: number }>,
+  options: { fps: number; speed?: number }
+): Array<{ x: number; y: number }> {
+  const sorted = [...(samples || [])].filter((sample) => Number.isFinite(sample?.x) && Number.isFinite(sample?.y)).sort((a, b) => a.t - b.t)
+  if (!sorted.length) return []
+  const times = recordingMotionFrameTimes(segments, options)
+  const path: Array<{ x: number; y: number }> = []
+  let cursor = 0
+  for (const sourceMs of times) {
+    while (cursor + 1 < sorted.length && sorted[cursor + 1].t <= sourceMs) cursor += 1
+    const previous = sorted[cursor]
+    const next = sorted[cursor + 1]
+    const ratio = next && next.t > previous.t ? Math.max(0, Math.min(1, (sourceMs - previous.t) / (next.t - previous.t))) : 0
+    path.push({
+      x: Number((previous.x + ((next?.x ?? previous.x) - previous.x) * ratio).toFixed(4)),
+      y: Number((previous.y + ((next?.y ?? previous.y) - previous.y) * ratio).toFixed(4))
+    })
+  }
+  return path
+}
+
 /** 导出期运镜的系数与录音期保持一致的默认值，供工坊与测试共用。 */
 export const RECORDING_MOTION_MAX_ZOOM = 1.6
 

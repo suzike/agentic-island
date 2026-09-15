@@ -49,11 +49,14 @@ assert.equal(calls.includes('top:true'), false, '销毁后不得再操作窗口'
 
 const mainSource = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8')
 assert.equal((mainSource.match(/dialog\.show(?:Open|Save)Dialog/g) || []).length, 4, '原生文件对话框只能在两个统一包装器中调用')
-assert.equal((mainSource.match(/showOwnedOpenDialog\(/g) || []).length, 7, 'Markdown、终端目录/工作区、知识库与截图工坊的打开入口必须接入统一包装器')
+assert.equal((mainSource.match(/showOwnedOpenDialog\(/g) || []).length, 8, 'Markdown、终端目录/工作区、知识库、截图工坊与批量美化的打开入口必须接入统一包装器')
 assert.equal((mainSource.match(/showOwnedSaveDialog\(/g) || []).length, 7, 'Markdown、PDF、文本、录屏、图片和终端工作区保存入口必须接入统一包装器')
 assert.match(mainSource, /ipcMain\.handle\('pick-directory',[\s\S]*?showOwnedOpenDialog\([\s\S]*?properties:\s*\['openDirectory'/, 'PowerShell 工作目录必须使用可确认选择的系统目录对话框')
 assert.equal((mainSource.match(/shell\.(?:openExternal|openPath)\(/g) || []).length, 2, '外部网页和路径只能在统一让位包装器中调用')
-assert.match(mainSource, /(?:async )?function openScreenshot\([^)]*\): (?:void|Promise<void>) \{[\s\S]*?yieldToExternalApp\(\)/, '系统截图界面打开前必须让位')
+// 应用内框选叠层是自家窗口，不需要让位；只有退回 Windows 截图工具那条路才必须让位并降低层级。
+// 所以把保证绑在真正会拉起外部界面的函数上，而不是笼统绑在 openScreenshot 上。
+assert.match(mainSource, /(?:async )?function openScreenshotWindowsTool\([^)]*\): (?:void|Promise<void>) \{[\s\S]*?yieldToExternalApp\(\)/, '退回系统截图工具时必须先让位')
+assert.match(mainSource, /if \(openSnipOverlay\(target, mode\)\) return[\s\S]{0,40}openScreenshotWindowsTool\(target\)/, '应用内框选是主路径，系统工具只作兜底')
 assert.match(mainSource, /const nextRelease = externalYield\?\.suspendTopmost\(\)/, '系统框选期间必须持续降低灵动岛层级')
 assert.match(mainSource, /screenshotPoller\.stop\(\)[\s\S]*?screenshotPoller\.start\(baseline\)/, '重复截图必须替换旧轮询，不能静默返回')
 

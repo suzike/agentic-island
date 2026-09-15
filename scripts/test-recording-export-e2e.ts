@@ -225,6 +225,71 @@ try {
   const reversedLuma = frameLuma(reversedFile)
   assert.ok(reversedLuma.at(-1)! < reversedLuma[0] - 40, `反向运镜应从右侧扫到左侧（${reversedLuma[0]} → ${reversedLuma.at(-1)}）`)
   console.log(`  人工运镜点: 正向 ${editedLuma[0]} → ${editedLuma.at(-1)}；反向 ${reversedLuma[0]} → ${reversedLuma.at(-1)}`)
+  // 导出期光标光晕：必须有**第二路输入**（光斑 PNG）并真的叠上去。
+  // 用横向渐变素材 + 光斑固定放在左侧 → 成片平均亮度应比不叠光晕时更高（光斑是亮的）。
+  const glowPng = join(root, 'glow.png')
+  // 光斑必须是**带 alpha 衰减**的：边缘透明、中心亮。
+  // 全不透明的黑底光斑叠上去是"盖住"而不是"加光"，平均亮度不会变（第一版测试素材就是这样，白跑一轮）。
+  const falloff = 'exp(-4*((X-128)^2+(Y-128)^2)/(128*128))'
+  const glowGenerated = spawnSync(ffmpeg, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=256x256', '-frames:v', '1', '-vf', `format=rgba,geq=r='255*${falloff}':g='255*${falloff}':b='200*${falloff}':a='255*${falloff}'`, glowPng], { windowsHide: true, encoding: 'utf8' })
+  assert.equal(glowGenerated.status, 0, glowGenerated.stderr || '生成光斑图失败')
+  const glowPath = Array.from({ length: 90 }, () => ({ x: 0.25, y: 0.5 }))
+  const glowFile = join(root, 'motion-glow.mp4')
+  await startRecordingFfmpeg(ffmpeg, rampSource, glowFile, {
+    ...motionBase,
+    jobId: 'e2e-glow',
+    glow: { filePath: glowPng, path: glowPath, fps: 30, size: 0.3 }
+  }, () => {}).done
+  const glowLuma = frameLuma(glowFile)
+  const plainLuma = frameLuma(controlFile) // 同一素材、同一请求但不叠光晕
+  assert.ok(glowLuma.length > 60, `光晕导出应解出足够帧（实测 ${glowLuma.length}）`)
+  const glowMean = glowLuma.reduce((sum, value) => sum + value, 0) / glowLuma.length
+  const plainMean = plainLuma.reduce((sum, value) => sum + value, 0) / plainLuma.length
+  // 光斑只占画面约 5.6% 面积（30% 宽的正方形）且 alpha 由中心衰减到 0，所以整帧均值只抬几个灰阶，
+  // 断言按这个量级来（第一版拍了个 +20，属于凭空猜的阈值）。
+  assert.ok(glowMean > plainMean + 1.5, `叠了光斑的成片应更亮（光晕 ${glowMean.toFixed(1)} vs 无光晕 ${plainMean.toFixed(1)}）`)
+  // 位置才是关键：光斑中心处的局部亮度应显著高于同高度的右侧
+  const patchLuma = (file: string, x: number, y: number) => {
+    const dump = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', '1', '-i', file, '-frames:v', '1', '-vf', `crop=48:48:${x}:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { windowsHide: true, maxBuffer: 1 << 22 })
+    return Number((dump.stdout as Buffer)[0])
+  }
+  // 注意别跨位置比：素材本身是横向渐变（右亮左暗），拿"光斑中心 vs 右侧"比会被素材自身差异淹没
+  // （第一版就是这么误判的）。正确做法是**同一位置**在"有/无光晕"两份成片之间比。
+  const glowCenter = patchLuma(glowFile, 136, 156)   // x=0.25×640-24, y=0.5×360-24
+  const baseCenter = patchLuma(controlFile, 136, 156)
+  assert.ok(glowCenter > baseCenter + 40, `光斑位置应被显著提亮（有光晕 ${glowCenter} vs 无光晕 ${baseCenter}）`)
+  // 光斑没扫到的地方必须基本不变：证明叠加是**局部**的，不是整帧加亮
+  const glowFar = patchLuma(glowFile, 480, 156)
+  const baseFar = patchLuma(controlFile, 480, 156)
+  assert.ok(Math.abs(glowFar - baseFar) < 8, `远离光斑的位置不应被影响（${baseFar} → ${glowFar}）`)
+
+  // 导出期按键角标：drawtext 的时间窗应真的画上东西（同一位置、同一帧率，只差一串角标）
+  const badgeFile = join(root, 'motion-badge.mp4')
+  await startRecordingFfmpeg(ffmpeg, rampSource, badgeFile, {
+    ...motionBase,
+    jobId: 'e2e-badge',
+    badges: [{ t: 1_000, label: 'Ctrl+S', x: 0.2, y: 0.5 }]
+  }, () => {}).done
+  const badgeLuma = frameLuma(badgeFile)
+  assert.ok(badgeLuma.length > 60, `角标导出应解出足够帧（实测 ${badgeLuma.length}）`)
+  // 角标是 12.8px 小字 + **半透明暗底**，压成 1x1 的均值只差 1 个灰阶（第一版据此误判"没画上"）。
+  // 改用**逐像素最大差**：白色字形压在暗背景上，差值极大；编码噪声只有个位数。
+  const badgeRegion = (file: string, at: string): number[] => {
+    const dump = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', at, '-i', file, '-frames:v', '1', '-vf', 'crop=220:90:30:150', '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { windowsHide: true, maxBuffer: 1 << 22 })
+    return [...(dump.stdout as Buffer)]
+  }
+  const maxDiff = (a: number[], b: number[]): number => {
+    let worst = 0
+    for (let index = 0; index < Math.min(a.length, b.length); index += 1) worst = Math.max(worst, Math.abs(a[index] - b[index]))
+    return worst
+  }
+  const inWindow = maxDiff(badgeRegion(badgeFile, '1.2'), badgeRegion(controlFile, '1.2'))
+  const outOfWindow = maxDiff(badgeRegion(badgeFile, '2.5'), badgeRegion(controlFile, '2.5'))
+  assert.ok(inWindow > 60, `时间窗内角标区域应出现强差异（逐像素最大差 ${inWindow}；白字压暗底应远大于编码噪声）`)
+  assert.ok(outOfWindow < 20, `时间窗之外角标区域应基本无差异（逐像素最大差 ${outOfWindow}）`)
+  const badgeMean = badgeLuma.reduce((sum, value) => sum + value, 0) / badgeLuma.length
+  console.log(`  按键角标: 角标区域逐像素最大差 窗内 ${inWindow} / 窗外 ${outOfWindow}（编码噪声量级）`)
+  console.log(`  导出期光晕: 整帧均值 ${plainMean.toFixed(1)} → ${glowMean.toFixed(1)}；光斑处 ${baseCenter} → ${glowCenter}（远端 ${baseFar} → ${glowFar}）`)
   console.log('recording export e2e tests passed')
 } finally {
   await rm(root, { recursive: true, force: true })

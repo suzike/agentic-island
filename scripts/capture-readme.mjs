@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +10,8 @@ const outputDir = process.env.AIISLAND_CAPTURE_DIR || join(root, 'screenshots')
 const captureOnly = process.env.AIISLAND_CAPTURE_ONLY || ''
 const profile = await mkdtemp(join(tmpdir(), 'agentic-island-docs-'))
 const port = 9337
+// 截图文件名带版本后缀（README 引用同一批名字）：从 package.json 派生，发版时不会再漏改
+const versionTag = 'v' + JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version.split('.').join('')
 
 const now = Date.now()
 const day = 86_400_000
@@ -280,18 +282,18 @@ try {
   }
 
   if (captureOnly === 'terminal') {
-    await capture('终端', 'terminal-v0617.png')
+    await capture('终端', `terminal-${versionTag}.png`)
   } else {
-    await capture('问答', 'ask-v0617.png')
+    await capture('问答', `ask-${versionTag}.png`)
   }
   if (!captureOnly) {
-    await capture('快捷', 'shortcuts-v0617.png')
-    await capture('待办', 'todos-v0617.png')
-    await capture('灵感便签', 'notes-v0617.png')
-    await capture('资讯', 'news-v0617.png')
-    await capture('复盘', 'review-v0617.png')
-    await capture('设置', 'settings-v0617.png')
-    await capture('终端', 'terminal-v0617.png')
+    await capture('快捷', `shortcuts-${versionTag}.png`)
+    await capture('待办', `todos-${versionTag}.png`)
+    await capture('灵感便签', `notes-${versionTag}.png`)
+    await capture('资讯', `news-${versionTag}.png`)
+    await capture('复盘', `review-${versionTag}.png`)
+    await capture('设置', `settings-${versionTag}.png`)
+    await capture('终端', `terminal-${versionTag}.png`)
 
     await evaluate(`(() => {
       const button = [...document.querySelectorAll('[title]')].find((item) => item.title?.includes('录屏工坊'))
@@ -310,8 +312,8 @@ try {
       format: 'png', fromSurface: true, captureBeyondViewport: false,
       clip: { ...recordingRect, scale: 1 }
     })
-    await writeFile(join(outputDir, 'recording-v0617.png'), Buffer.from(recordingShot.data, 'base64'))
-    process.stdout.write('captured recording-v0617.png\n')
+    await writeFile(join(outputDir, `recording-${versionTag}.png`), Buffer.from(recordingShot.data, 'base64'))
+    process.stdout.write(`captured recording-${versionTag}.png\n`)
   }
 } finally {
   try {

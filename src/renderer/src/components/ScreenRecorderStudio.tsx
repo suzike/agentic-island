@@ -10,7 +10,7 @@ import { RecordingNeuralStyle } from '../logic/recording-neural-style'
 import type { NeuralStyleStatus } from '../logic/recording-neural-style'
 import { deleteRecordingAvatar, loadRecordingAvatar, saveRecordingAvatar } from '../logic/recording-avatar'
 import { formatBytes } from '../logic/screenshot'
-import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, recordingOutputSize, remapRecordingMotionFrames, recordingRawCaptureSize, recordingRawModeBlockers, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
+import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingCursorPath, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, remapRecordingMotionFrames, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
 import type { RecordingAnimePalette, RecordingAspect, RecordingCaptureMode, RecordingClickSample, RecordingMotion, RecordingMotionKeyframe, RecordingResolution } from '../logic/recording'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
@@ -309,6 +309,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [transcriptSegments, setTranscriptSegments] = useState<RecordingTranscriptSegment[]>([])
   const [cursorTrack, setCursorTrack] = useState<RecordingCursorSample[]>([])
   const [clickTrack, setClickTrack] = useState<RecordingClickSample[]>([])
+  const [keyTrack, setKeyTrack] = useState<Array<{ t: number; label: string }>>([])
   // 人工编辑过的运镜点（为空＝按轨迹自动运镜）
   const [motionKeyframes, setMotionKeyframes] = useState<RecordingMotionKeyframe[]>([])
   const [idleTrimPlan, setIdleTrimPlan] = useState<{ cutMs: number; keepMs: number; segments: RecordingEditSegment[] } | null>(null)
@@ -318,6 +319,11 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   // 导出画幅必须由导出页自己决定、默认"跟随素材"：若沿用采集页的画面比例，用户为下一段录制
   // 改了竖屏，回头导出既有 16:9 素材就会被莫名其妙地重新裁一次。
   const [exportAspect, setExportAspect] = useState<RecordingAspect>('source')
+  // 导出期光标光晕（细光环做不到，见 logic 里的说明）
+  const [exportGlowEnabled, setExportGlowEnabled] = useState(false)
+  const [glowSize, setGlowSize] = useState(0.12)
+  // 导出期按键角标（只含快捷键/导航键的标签）
+  const [exportBadgesEnabled, setExportBadgesEnabled] = useState(false)
   // 导出期运镜必须有自己的档位：能走这条路的素材，录制时运镜一定是"关闭"（否则画面里已烤进运镜），
   // 所以不能借用采集页的档位——那会永远得到一条 zoom=1 的平路，开关等于没接。
   const [exportMotionMode, setExportMotionMode] = useState<RecordingMotion>('gentle')
@@ -379,6 +385,8 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const cursorSamplesRef = useRef<RecordingCursorSample[]>([])
   // 点击事件（事后无法补录）：剪除空白用它区分“发呆”与“盯着看并且点了”，导出期涟漪也依赖它
   const clickSamplesRef = useRef<RecordingClickSample[]>([])
+  // 按键角标（只含快捷键/导航键，绝不含可打印字符）
+  const keySamplesRef = useRef<Array<{ t: number; label: string }>>([])
   const cursorLogTimerRef = useRef(0)
   const cursorLogAtRef = useRef(0)
   const cursorLogPendingRef = useRef(false)
@@ -443,6 +451,12 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
       const at = currentElapsed()
       void island.recordingCursor().then((cursor) => {
         // 点击随同一次轮询一起取回；暂停期间的点击不记（时间轴不推进，记了会落到错位置）
+        if (cursor.keys?.length && statusRef.current !== 'paused') {
+          for (const key of cursor.keys) {
+            if (keySamplesRef.current.length >= MAX_CURSOR_SAMPLES) break
+            keySamplesRef.current.push({ t: Math.round(at), label: String(key.label || '').slice(0, 24) })
+          }
+        }
         if (cursor.clicks?.length && statusRef.current !== 'paused') {
           for (const click of cursor.clicks) {
             if (clickSamplesRef.current.length >= MAX_CURSOR_SAMPLES) break
@@ -1279,6 +1293,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
         setTimeline((items) => [...items, { at: finalElapsed, type: 'end', label: stopReason || '录制完成' }])
         setCursorTrack([...cursorSamplesRef.current])
         setClickTrack([...clickSamplesRef.current])
+        setKeyTrack([...keySamplesRef.current])
         if (stopReason) flash(stopReason)
       }
       startAtRef.current = performance.now(); pausedAtRef.current = 0; pausedTotalRef.current = 0; elapsedRef.current = 0; frameCaptureAtRef.current = 0; lastAutoMarkerAtRef.current = 0; stopReasonRef.current = ''
@@ -1338,6 +1353,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     setTimeline(project.timeline.map((item) => ({ ...item }))); setTranscriptSegments(project.transcript.segments.map((item) => ({ ...item })))
     setCursorTrack((project.cursorTrack || []).map((item) => ({ ...item }))); cursorSamplesRef.current = (project.cursorTrack || []).map((item) => ({ ...item }))
     setClickTrack((project.clickTrack || []).map((item) => ({ ...item }))); clickSamplesRef.current = (project.clickTrack || []).map((item) => ({ ...item }))
+    setKeyTrack((project.keyTrack || []).map((item) => ({ ...item }))); keySamplesRef.current = (project.keyTrack || []).map((item) => ({ ...item }))
     setMotionKeyframes((project.motionKeyframes || []).map((item) => ({ ...item })))
     setExportMotionReady(Boolean(project.exportMotionReady)); setExportMotionEnabled(Boolean(project.exportMotionReady) && (project.cursorTrack || []).length > 0)
     setTranscriptModel(project.transcript.model); setTranscriptLanguage(project.transcript.language)
@@ -1382,7 +1398,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     if (previewIdRef.current) { island.releaseRecordingPreview(previewIdRef.current); previewIdRef.current = '' }
     projectSaveTokenRef.current++
     recordingSessionIdRef.current = ''; setRecordingSessionId(''); projectIdRef.current = ''; setProjectId(''); setProjectSaveState('idle')
-    setRecordingBlob(null); setRecordingUrl(''); updateStatus('idle'); setElapsed(0); setRecordedBytes(0); recordedBytesRef.current = 0; stopReasonRef.current = ''; setTimeline([]); setKeyframes([]); setTranscriptSegments([]); setCursorTrack([]); cursorSamplesRef.current = []; setClickTrack([]); clickSamplesRef.current = []; setMotionKeyframes([]); setIdleTrimPlan(null); setExportMotionReady(false); setExportMotionEnabled(false); setEditSegments([]); setActiveSegmentId(''); setEditHistory([]); setEditFuture([]); setRecordingHasAudio(false); setExportProgress(null); setPanel('capture')
+    setRecordingBlob(null); setRecordingUrl(''); updateStatus('idle'); setElapsed(0); setRecordedBytes(0); recordedBytesRef.current = 0; stopReasonRef.current = ''; setTimeline([]); setKeyframes([]); setTranscriptSegments([]); setCursorTrack([]); cursorSamplesRef.current = []; setClickTrack([]); clickSamplesRef.current = []; setKeyTrack([]); keySamplesRef.current = []; setMotionKeyframes([]); setIdleTrimPlan(null); setExportMotionReady(false); setExportMotionEnabled(false); setEditSegments([]); setActiveSegmentId(''); setEditHistory([]); setEditFuture([]); setRecordingHasAudio(false); setExportProgress(null); setPanel('capture')
   }
 
   const seekPreview = (ms: number): void => {
@@ -1463,6 +1479,25 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
    * 是实测发生过的（隔离审计里合成光标 8.2s 被剪掉 6.2s）；破坏性操作先让人看到数字。
    */
   // ── 运镜点编辑（导出期运镜的人工控制）──
+  /** 生成一枚"软光斑"用于导出期叠在光标上（径向渐变 + 轻微色偏，观感接近录制期实时光晕）。 */
+  const buildGlowDataUrl = (fraction: number): string => {
+    const size = 256
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')!
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
+    // 中心偏暖白、外圈透明：与录制期的鼠标焦点光晕同色系
+    gradient.addColorStop(0, 'rgba(255,238,196,0.92)')
+    gradient.addColorStop(0.35, 'rgba(255,226,164,0.42)')
+    gradient.addColorStop(0.72, 'rgba(255,214,140,0.14)')
+    gradient.addColorStop(1, 'rgba(255,210,130,0)')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, size, size)
+    void fraction
+    return canvas.toDataURL('image/png')
+  }
+
   /** 由光标轨迹抽出可编辑的运镜点；没有轨迹或没在推近时给出空列表并提示。 */
   const deriveMotionKeyframes = (): void => {
     if (!cursorTrack.length) { flash('这次录制没有光标轨迹，无法生成运镜点（窗口来源或旧工程不采集轨迹）'); return }
@@ -1658,6 +1693,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     transcript: { model: transcriptModel, language: transcriptLanguage, segments: transcriptSegments.map((item) => ({ ...item })) },
     cursorTrack: cursorTrack.map((item) => ({ ...item })),
     clickTrack: clickTrack.map((item) => ({ ...item })),
+    keyTrack: keyTrack.map((item) => ({ ...item })),
     motionKeyframes: motionKeyframes.map((item) => ({ ...item })),
     exportMotionReady,
     workspace: { timelineZoom, timelineSnap, videoTrackLocked, markerTrackLocked, aiEditMode },
@@ -1695,7 +1731,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     setProjectSaveState('saving')
     const timer = window.setTimeout(() => { void persistRecordingProject(false) }, 1000)
     return () => window.clearTimeout(timer)
-  }, [status, recordingSessionId, recordingName, elapsed, recordingSize.width, recordingSize.height, fps, recordingHasAudio, editSegments, editSettings, playbackRate, timeline, transcriptModel, transcriptLanguage, transcriptSegments, cursorTrack, clickTrack, motionKeyframes, exportMotionReady, timelineZoom, timelineSnap, videoTrackLocked, markerTrackLocked, aiEditMode, aiResults])
+  }, [status, recordingSessionId, recordingName, elapsed, recordingSize.width, recordingSize.height, fps, recordingHasAudio, editSegments, editSettings, playbackRate, timeline, transcriptModel, transcriptLanguage, transcriptSegments, cursorTrack, clickTrack, keyTrack, motionKeyframes, exportMotionReady, timelineZoom, timelineSnap, videoTrackLocked, markerTrackLocked, aiEditMode, aiResults])
 
   const openRecordingProject = async (summary: RecordingProjectSummary): Promise<void> => {
     const sessionsResult: Awaited<ReturnType<typeof island.listRecordingSessions>> = await island.listRecordingSessions().catch(() => ({ ok: false }))
@@ -1758,6 +1794,13 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     const motionPath = motionKeyframes.length
       ? recordingMotionFramesFromKeyframes(motionKeyframes, keptSegments, { fps: outputFps, strength: motionStrength, maxZoom, speed: playbackRate })
       : recordingMotionFrames(cursorTrack, keptSegments, { fps: outputFps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate })
+    // 导出期光标光晕：光斑是"又大又软"的圆，可用折线航点表达式跟随；细光环做不到（需逐帧精确跟踪）
+    const glowPath = exportGlowEnabled && cursorTrack.length && (format === 'mp4' || format === 'webm')
+      ? recordingCursorPath(cursorTrack, keptSegments, { fps: outputFps, speed: playbackRate })
+      : []
+    const glow = glowPath.length >= 2
+      ? { pngDataUrl: buildGlowDataUrl(glowSize), path: glowPath, fps: outputFps, size: glowSize }
+      : null
     const motion = exportMotionEnabled && exportMotionReady && motionPath.length && (format === 'mp4' || format === 'webm')
       ? { fps: outputFps, frames: remapRecordingMotionFrames(motionPath, motionCrop), crop: motionCrop || undefined }
       : null
@@ -1769,7 +1812,24 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
       subtitle: { mode: format === 'mp4' || format === 'webm' ? exportSubtitleMode : 'none' as const, language: transcriptLanguage, segments: transcriptSegments },
       edit: { ...editSettings, speed: playbackRate, segments: editSegments },
       fit: fitMode,
-      motion
+      motion,
+      glow,
+      badges: exportBadgesEnabled && keyTrack.length
+        ? (() => {
+            // 角标位置取"那一刻光标在哪"，时间按剪辑段与速度映射到成片时间轴
+            const times = recordingMotionFrameTimes(keptSegments, { fps: outputFps, speed: playbackRate })
+            const path = recordingCursorPath(cursorTrack, keptSegments, { fps: outputFps, speed: playbackRate })
+            const findIndex = (sourceMs: number): number => {
+              let best = 0
+              for (let index = 0; index < times.length; index += 1) if (times[index] <= sourceMs) best = index
+              return best
+            }
+            return keyTrack.slice(0, 40).map((key) => {
+              const point = path[findIndex(key.t)] || { x: 0.5, y: 0.5 }
+              return { t: key.t, label: key.label, x: point.x, y: point.y }
+            })
+          })()
+        : null
     }
     // 导出链路的任何异常都必须变成一句人话。此前这里没有 try/catch：只要主进程那次 invoke
     // 拒绝（保存框/落盘/探测任何一环），await 直接抛出、被 `void exportRecording()` 吞掉，
@@ -2564,6 +2624,13 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                   {format !== 'mp3' && <><div style={labelStyle}>输出画面</div><div style={controlRow}><Segmented value={exportResolution} onChange={setExportResolution} style={{ flex: 1 }} options={[{ key: 'source', label: '源分辨率' }, { key: '1080p', label: '1080p' }, { key: '720p', label: '720p' }]} /><Segmented value={exportFps} onChange={setExportFps} style={{ flex: 1 }} options={[{ key: 'source', label: `${fps}fps` }, { key: '30', label: '30' }, { key: '24', label: '24' }, { key: '15', label: '15' }]} /></div><div style={controlRow}><span style={{ ...text.faint(), width: 46 }}>画布</span><Segmented value={exportAspect} onChange={setExportAspect} style={{ flex: 1 }} options={[{ key: 'source', label: '跟随素材' }, { key: '16:9', label: '横屏' }, { key: '9:16', label: '竖屏' }, { key: '1:1', label: '方形' }]} /></div>{exportAspect !== 'source' && Math.abs(recordingSize.width / Math.max(1, recordingSize.height) - (exportAspect === '16:9' ? 16 / 9 : exportAspect === '9:16' ? 9 / 16 : 1)) > 0.01 && <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>素材画幅与目标不同：按采集页的"适配方式"重组画面（完整显示＝补黑边，铺满＝裁切）。</div>}</>}
                   {(format === 'mp4' || format === 'webm') && <div style={{ ...surface.inset(), padding: '8px 9px', display: 'flex', flexDirection: 'column', gap: 7 }}>
                     <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><MousePointer2 size={12} />导出期运镜</span><Switch on={exportMotionEnabled && exportMotionReady} onChange={(on) => { if (!exportMotionReady) { flash('这段素材录制时已把运镜合成进画面，导出期再套一层会变成双重运镜'); return } setExportMotionEnabled(on) }} /></div>
+                    <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><MousePointer2 size={12} />导出期光标光晕</span><Switch on={exportGlowEnabled} onChange={setExportGlowEnabled} /></div>
+                    <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><Type size={12} />导出期按键角标</span><Switch on={exportBadgesEnabled} onChange={setExportBadgesEnabled} /></div>
+                    {exportBadgesEnabled && <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>{keyTrack.length ? `按录制期采到的 ${keyTrack.length} 个快捷键/导航键在光标处打角标（最多 40 个）。只记录 Ctrl+S、Enter 这类按键，不记录你打的任何文字。` : '这次录制没有采到快捷键（需要录制期间的键盘活动；窗口来源或旧工程不采集）。'}</div>}
+                    {exportGlowEnabled && <>
+                      <div style={controlRow}><span style={{ ...text.faint(), width: 46 }}>光斑</span><Slider min={0.06} max={0.3} step={0.01} value={glowSize} onChange={setGlowSize} style={{ flex: 1 }} /><span style={{ ...text.num(9), width: 34, textAlign: 'right' }}>{Math.round(glowSize * 100)}%</span></div>
+                      <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>把一枚软光斑按录制期采到的光标轨迹叠到成片上（{cursorTrack.length} 个轨迹点）。光斑大而软，所以能用折线航点跟随；细光环需要逐帧精确跟踪，那要等应用内离线渲染。开启后需重编码。</div>
+                    </>}
                     {exportMotionEnabled && exportMotionReady && <Segmented value={exportMotionMode} onChange={(value) => setExportMotionMode(value as RecordingMotion)} options={[{ key: 'gentle', label: '柔和聚焦' }, { key: 'dynamic', label: '动态跟随' }]} />}
                     <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>{exportMotionReady ? `按录制期采到的 ${cursorTrack.length} 个光标轨迹点重建跟随运镜，跟随速度与最大放大沿用"运镜"页的 ${Math.round(motionStrength * 100)}% / ${maxZoom.toFixed(2)}×：改完重导出即可，不必重录。开启后需重编码。` : '录制时运镜是开着的，画面里已经带着当时的推近与平移。想事后改运镜，请先在"运镜"页把跟随关掉再录一段。'}</div>
                   </div>}

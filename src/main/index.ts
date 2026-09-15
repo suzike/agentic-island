@@ -1,8 +1,8 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, safeStorage, screen, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
-import { copyFile, mkdir, mkdtemp, open, readFile, rm, writeFile } from 'fs/promises'
+import { copyFile, mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { basename, join } from 'path'
+import { basename, extname, join } from 'path'
 import { pathToFileURL } from 'url'
 import ffmpegStatic from 'ffmpeg-static'
 import { AgentsStore } from './agents-store'
@@ -38,7 +38,8 @@ import { initUpdater } from './updater'
 import { setApprovalPolicy, approvalSessionAllow, setApprovalAuditSink, policyAutoDecision, clearSessionAllows } from './approval-policy'
 import { createExternalYieldController, type ExternalYieldController } from './external-yield'
 import { createScreenshotPoller } from './screenshot-poller'
-import { drainMouseClicks, startMouseClickLog, stopMouseClickLog } from './mouse-hook'
+import { recognizeTextLocal } from './local-ocr'
+import { drainKeyStrokes, drainMouseClicks, startMouseClickLog, stopMouseClickLog } from './mouse-hook'
 import { buildRecordingRemuxArgs, createEncoderPicker, crfFor, probeRecordingOutput, recordingExportStrategy, recordingExportVerdict, type VideoEncoder, recordingExportSubtitleSegments, recordingHasEdits, startRecordingFfmpeg, startRecordingFfmpegWithArgs } from './recording-export'
 import { sniffRecordingContainer } from '../shared/recording-format'
 import { RecordingSessionStore } from './recording-session-store'
@@ -1251,6 +1252,34 @@ function wireIpc(): void {
   ipcMain.handle('llm-list-models', (_e, cfg: LlmRequestConfig) => llmListModels(cfg))
   // 截图工坊：渲染层主动触发框选截图（复用 ms-screenclip 流程，事件仍走 screenshot-captured）
   // 钉屏截图：渲染层把合成好的图交过来，主进程负责贴到屏幕上
+  // 批量美化：一次多选，主进程读成 dataUrl 交给渲染层统一套用当前观感
+  // 本地离线 OCR（Windows 自带引擎，不出网、不新增依赖）
+  ipcMain.handle('ocr-image-local', (_e, dataUrl: string) => recognizeTextLocal(typeof dataUrl === 'string' ? dataUrl : ''))
+  ipcMain.handle('select-images-batch', async () => {
+    try {
+      const picked = await showOwnedOpenDialog({
+        title: '批量美化：选择图片',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
+      })
+      if (picked.canceled || !picked.filePaths.length) return { ok: false, error: '没有选择图片' }
+      const files = picked.filePaths.slice(0, 50)
+      const images: Array<{ name: string; dataUrl: string }> = []
+      for (const file of files) {
+        const info = await stat(file).catch(() => null)
+        // 单张超过 160MB 直接跳过（与图片 IPC 的上限一致），不要让一张巨图把内存吃满
+        if (!info || info.size > 160_000_000) continue
+        const ext = extname(file).toLowerCase()
+        const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png'
+        const bytes = await readFile(file)
+        images.push({ name: basename(file, ext), dataUrl: `data:${mime};base64,${bytes.toString('base64')}` })
+      }
+      if (!images.length) return { ok: false, error: '所选图片都过大或无法读取' }
+      return { ok: true, images }
+    } catch (error) {
+      return { ok: false, error: String(error instanceof Error ? error.message : error) }
+    }
+  })
   ipcMain.handle('pin-screenshot', (_e, input: { dataUrl?: string; name?: string; width?: number; height?: number }) => {
     const dataUrl = typeof input?.dataUrl === 'string' ? input.dataUrl : ''
     if (!validImageData(dataUrl)) return { ok: false, error: '图片数据无效或超过 160MB' }
@@ -1366,8 +1395,9 @@ function wireIpc(): void {
       displayId: String(display.id),
       bounds: { ...display.bounds },
       scaleFactor: display.scaleFactor,
-      // 顺带取走累积的点击：渲染层本来就在 80ms 轮询光标，不为点击再加一条 IPC
-      clicks: drainMouseClicks()
+      // 顺带取走累积的点击与按键：渲染层本来就在 80ms 轮询光标，不额外加 IPC
+      clicks: drainMouseClicks(),
+      keys: drainKeyStrokes()
     }
   })
   // 点击采集只跟随录制生命周期：开始录制时装钩子，停止时卸载（平时完全不监听）
@@ -1496,6 +1526,18 @@ const verifyRecordingOutput = async (ffmpegPath: string, outputPath: string, req
         outputFps: Math.max(1, Math.min(120, Number(rawRequest.outputFps) || Number(rawRequest.fps) || 30)),
         subtitleFilePath: undefined
       }
+      // 导出期光晕：把渲染层给的光斑 PNG 落到临时文件，再把路径交给纯函数式的参数拼装
+      if (request.glow?.pngDataUrl) {
+        const comma = request.glow.pngDataUrl.indexOf(',')
+        if (comma > 0) {
+          if (!exportTempDir) exportTempDir = await mkdtemp(join(tmpdir(), 'agentic-island-glow-'))
+          const glowFile = join(exportTempDir, 'cursor-glow.png')
+          await writeFile(glowFile, Buffer.from(request.glow.pngDataUrl.slice(comma + 1), 'base64'))
+          request.glow = { ...request.glow, filePath: glowFile, pngDataUrl: undefined }
+        } else {
+          request.glow = null
+        }
+      }
       if (format === 'mp3' && !request.hasAudio) return { ok: false, error: '该录制没有音轨，无法导出 MP3' }
       const label = format === 'gif' ? 'GIF 动图' : format === 'mp4' ? 'MP4 视频' : format === 'mp3' ? 'MP3 音频' : 'WebM 视频'
       const save = await showOwnedSaveDialog({
@@ -1534,7 +1576,7 @@ const verifyRecordingOutput = async (ffmpegPath: string, outputPath: string, req
         sendProgress('done', 1, '原始录制已保存')
         return { ok: true, path: outputPath }
       }
-      if (strategy === 'remux') {
+      if (strategy === 'remux' && !request.glow?.filePath) {
         const executable = app.isPackaged ? String(ffmpegStatic || '').replace('app.asar', 'app.asar.unpacked') : String(ffmpegStatic || '')
         if (!executable) return { ok: false, error: '内置 FFmpeg 不可用，请改用原始 WebM 导出' }
         sendProgress('encoding', 0.1, '无剪辑 · 直接封装（画质无损）')

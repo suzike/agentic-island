@@ -4,13 +4,13 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, Languages, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Pin, Pipette, Redo2, RotateCcw, RotateCw, Save, ScanLine, ScanText, Scissors, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, Video, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
+import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, Languages, Layers, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Pin, Pipette, Redo2, RotateCcw, RotateCw, Ruler, Save, ScanLine, ScanText, Scissors, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, Video, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
 import type { LucideIcon } from '../ui/icons'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accentText, accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 import { island } from '../bridge'
-import { SCREENSHOT_QUICK_DIR, captureScreenNative, clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, sanitizeScreenshotName, screenshotLoupeRect, screenshotPixelHex } from '../logic/screenshot'
+import { SCREENSHOT_QUICK_DIR, captureScreenNative, clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, rulerTicks, sanitizeScreenshotName, screenshotLoupeRect, screenshotPixelHex, textCardLayout } from '../logic/screenshot'
 import type { Point as Pt, Rect, ScreenshotFormat } from '../logic/screenshot'
 import { ScreenRecorderStudio } from './ScreenRecorderStudio'
 import type { LlmRequestConfig } from '../../../shared/protocol'
@@ -680,6 +680,35 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
   }
 
   /** 滚动长截图：拉起框选叠层（滚动模式），用户滚到底后自动拼成一张长图。 */
+  // ── 文字卡片：把一段文字按当前边框/背景渲染成图，之后照常进同一套设计/标注/导出管线 ──
+  const [rulerOn, setRulerOn] = useState(false)
+  const [batchBusy, setBatchBusy] = useState('')
+  const [cardOpen, setCardOpen] = useState(false)
+  const [cardText, setCardText] = useState('')
+  const [cardFontSize, setCardFontSize] = useState(34)
+  const [cardMaxWidth, setCardMaxWidth] = useState(760)
+  const makeTextCard = (): void => {
+    const source = cardText.trim()
+    if (!source) { flash('先写点文字'); return }
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')!
+    const font = `${cardFontSize}px "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace`
+    ctx.font = font
+    const layout = textCardLayout(source, { fontSize: cardFontSize, lineHeight: 1.5, padding: 44, maxLines: 200, maxWidth: cardMaxWidth }, (line) => ctx.measureText(line).width)
+    canvas.width = layout.width
+    canvas.height = layout.height
+    const paint = canvas.getContext('2d')!
+    paint.fillStyle = '#ffffff'
+    paint.fillRect(0, 0, canvas.width, canvas.height)
+    paint.font = font
+    paint.fillStyle = '#15171c'
+    paint.textBaseline = 'top'
+    layout.lines.forEach((line, index) => paint.fillText(line, 44, 44 + index * cardFontSize * 1.5))
+    useSource(canvas.toDataURL('image/png'), '文字卡片')
+    setCardOpen(false)
+    flash(layout.truncated ? `已生成文字卡片（内容过长，截断到 ${layout.lines.length} 行）` : `已生成文字卡片 · ${canvas.width}×${canvas.height}`)
+  }
+
   const captureScroll = (): void => {
     void island.triggerScrollCapture('studio')
   }
@@ -709,6 +738,57 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
         flash(`已保存到 ${SCREENSHOT_QUICK_DIR} 并复制到剪贴板`)
       })
   }
+  /** 批量美化：把当前边框/背景/水印套到选中的多张图上，逐张直接落盘（免对话框）。 */
+  const doBatch = (): void => {
+    if (batchBusy) return
+    void (async () => {
+      const picked = await island.selectImagesForBatch().catch(() => ({ ok: false as const, error: '选择图片失败' }))
+      if (!picked.ok || !picked.images?.length) { if (!picked.ok) flash(`✗ ${picked.error || '没有选择图片'}`); return }
+      setBatchBusy(`0/${picked.images.length}`)
+      let done = 0
+      let failed = 0
+      for (const image of picked.images) {
+        try {
+          const decoded = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const el = new Image()
+            el.onload = () => resolve(el)
+            el.onerror = () => reject(new Error('图片解码失败'))
+            el.src = image.dataUrl
+          })
+          const rendered = renderForSource(decoded)
+          const saved = await island.saveImageQuick(rendered, `${sanitizeScreenshotName(image.name)}_card`, exportFormat)
+          if (saved.ok) done += 1
+          else failed += 1
+        } catch { failed += 1 }
+        setBatchBusy(`${done + failed}/${picked.images.length}`)
+      }
+      setBatchBusy('')
+      flash(failed ? `批量完成：成功 ${done} 张，失败 ${failed} 张` : `批量完成：${done} 张已存入 ${SCREENSHOT_QUICK_DIR}`)
+    })()
+  }
+
+  /**
+   * 用当前的设计参数渲染**任意一张**图（批量用）。
+   *
+   * 直接借用 `bakeTransform` + `composeBase` 这两个既有函数，而不是为批量另写一套外观——
+   * 否则"批量的样子"和"单张的样子"迟早会漂移。批量不套用单张的标注与草稿（那些是针对当前这张图的）。
+   */
+  const renderForSource = (img: HTMLImageElement, mult = deco.scale, format: ScreenshotFormat = exportFormat, quality = exportQuality): string => {
+    const base = bakeTransform(img, { ...DEFAULT_XFORM })
+    const comp = composeBase(base, frame, bg, deco)
+    if (mult !== 1) {
+      const up = document.createElement('canvas')
+      up.width = comp.canvas.width * mult
+      up.height = comp.canvas.height * mult
+      const uctx = up.getContext('2d')!
+      uctx.imageSmoothingEnabled = true
+      uctx.imageSmoothingQuality = 'high'
+      uctx.drawImage(comp.canvas, 0, 0, up.width, up.height)
+      return up.toDataURL(`image/${format}`, quality)
+    }
+    return comp.canvas.toDataURL(`image/${format}`, quality)
+  }
+
   const doCopy = (): void => {
     void island.copyImage(render(deco.scale, 'png', 1)).then((r) => {
       flash(r.ok ? `✓ 已复制 PNG${deco.scale > 1 ? ` ${deco.scale}x` : ''}` : `✗ ${r.error || '复制失败'}`)
@@ -739,6 +819,20 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
       setAiBusy('')
     })
   }
+  /** 本地离线 OCR：走 Windows 自带引擎。失败时如实说明，并提示云端视觉识别仍可用。 */
+  const runLocalOcr = (): void => {
+    void island.ocrImageLocal(render(1, 'png', 1)).then((r) => {
+      const id = Date.now() + Math.random()
+      if (r.ok && r.text) {
+        setAiResults((prev) => [{ id, label: `本地 OCR（离线 · ${r.language || '系统引擎'}）`, text: r.text! }, ...prev])
+        return
+      }
+      setAiResults((prev) => [{ id, label: '本地 OCR（离线）', text: `${r.error || '识别失败'}
+
+可以改用上面的云端视觉动作（需要已配置视觉模型）。`, err: true }, ...prev])
+    })
+  }
+
   const runAsk = (): void => {
     const q = askInput.trim()
     if (!q) return
@@ -814,7 +908,9 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
     <div onMouseDown={onClose} style={{ position: 'fixed', inset: 0, zIndex: 210, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(8px)', animation: 'ai-fadein .15s ease' }}>
       <motion.div variants={overlayPop} initial="initial" animate="animate" onMouseDown={(e) => e.stopPropagation()} style={{ width: 'min(1000px, 72vw)', height: 'min(680px, 68vh)', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...surface.overlay(), borderRadius: R.panel }}>
         {/* 头 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 52, padding: `0 ${SP.md}px`, borderBottom: `0.5px solid ${hairline(0.1)}` }}>
+        {/* 头：动作按钮变多后允许换行——此前是 nowrap，新增「文字卡片/批量美化/标尺/长截图」后
+            右侧按钮会被挤出面板（截图里「重截」被切掉、标题与左栏叠字）。 */}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7, minHeight: 52, padding: '6px 0', margin: `0 ${SP.md}px`, borderBottom: `0.5px solid ${hairline(0.1)}` }}>
           <div style={{ width: 26, height: 26, borderRadius: R.sm, display: 'grid', placeItems: 'center', background: semBg(accent(), 0.14), color: accentText(), flex: 'none' }}>
             <Camera size={14} strokeWidth={1.75} />
           </div>
@@ -830,6 +926,9 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
           <Button sm variant="ghost" icon={FileImage} onClick={openImage} title="打开本地图片">打开</Button>
           <Button sm variant="ghost" icon={ClipboardPaste} onClick={pasteImage} title="从剪贴板粘贴图片 (Ctrl+V)">粘贴</Button>
           <Button sm variant="ghost" icon={Monitor} onClick={captureDisplay} title="捕获鼠标所在显示器">整屏</Button>
+          <Button sm variant="ghost" icon={Type} onClick={() => setCardOpen((v) => !v)} title="把一段文字直接做成美化卡片（复用当前边框/背景）">文字卡片</Button>
+          <Button sm variant="ghost" icon={Layers} onClick={doBatch} title={`批量：把当前观感套到多张图上，直接存到 ${SCREENSHOT_QUICK_DIR}`}>{batchBusy ? `批量 ${batchBusy}` : '批量美化'}</Button>
+          <Button sm variant="ghost" icon={Ruler} onClick={() => setRulerOn((v) => !v)} title="显示像素标尺与中线参考（只叠加显示，不进成片）">{rulerOn ? '隐藏标尺' : '标尺'}</Button>
           <Button sm variant="ghost" icon={Scissors} onClick={captureScroll} title="滚动长截图：框选区域后滚动，停手即自动拼接">长截图</Button>
           <Button sm variant="ghost" icon={ScanLine} onClick={onRetake} title="重新框选截图">重截</Button>
           <span style={{ flex: 1 }} />
@@ -837,7 +936,32 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
           <IconButton icon={X} onClick={onClose} title="关闭" size={28} />
         </div>
 
-        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+        {cardOpen && (
+        <div style={{ ...surface.inset(), margin: `0 ${SP.md + 4}px ${SP.sm}px`, padding: SP.md, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ ...toolRow, color: ink(2), fontSize: 11.5 }}><Type size={13} />文字卡片<span style={{ ...text.faint(), marginLeft: 6 }}>生成后照常可以加边框、标注、导出</span></div>
+          <textarea
+            value={cardText}
+            onChange={(event) => setCardText(event.target.value)}
+            placeholder={'把代码、命令行、一段话粘进来…'}
+            rows={5}
+            style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', borderRadius: R.sm, border: `0.5px solid ${hairline(0.16)}`, background: surface.inset().background, color: ink(1), padding: '8px 10px', fontFamily: '"Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace', fontSize: 12, lineHeight: 1.5 }}
+          />
+          <div style={toolRow}>
+            <span style={{ ...text.faint(), width: 44 }}>字号</span>
+            <Slider min={14} max={72} step={1} value={cardFontSize} onChange={setCardFontSize} style={{ flex: 1 }} />
+            <span style={{ ...text.num(9), width: 30, textAlign: 'right' }}>{cardFontSize}</span>
+            <span style={{ ...text.faint(), width: 52, marginLeft: 10 }}>最长行宽</span>
+            <Slider min={320} max={1600} step={20} value={cardMaxWidth} onChange={setCardMaxWidth} style={{ flex: 1 }} />
+            <span style={{ ...text.num(9), width: 36, textAlign: 'right' }}>{cardMaxWidth}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Button variant="primary" icon={Sparkles} onClick={makeTextCard}>生成文字卡片</Button>
+            <Button variant="ghost" icon={X} onClick={() => setCardOpen(false)}>收起</Button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           {/* 预览区 */}
           <div className="ai-scroll" style={{ flex: 1, minWidth: 0, minHeight: 300, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 34, background: 'repeating-conic-gradient(rgba(255,255,255,.035) 0% 25%, rgba(0,0,0,.045) 0% 50%) 0 0 / 20px 20px', position: 'relative' }}>
             <div style={{ position: 'relative', maxWidth: zoom === 'fit' ? '100%' : 'none', maxHeight: zoom === 'fit' ? 'calc(68vh - 140px)' : 'none', lineHeight: 0, flex: 'none' }}>
@@ -846,6 +970,29 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
                 style={zoom === 'fit'
                   ? { maxWidth: '100%', maxHeight: 'calc(68vh - 140px)', borderRadius: R.sm, boxShadow: '0 14px 44px rgba(0,0,0,.48)', cursor: drawing ? 'crosshair' : 'default', userSelect: 'none', touchAction: 'none' }
                   : { width: `${Math.max(1, compSize.width * zoom)}px`, maxWidth: 'none', borderRadius: R.sm, boxShadow: '0 14px 44px rgba(0,0,0,.48)', cursor: drawing ? 'crosshair' : 'default', userSelect: 'none', touchAction: 'none' }} />
+              {/* 标尺/参考线：只叠加显示，不进成片（用户量的是画布像素坐标） */}
+              {rulerOn && composedRef.current && (() => {
+                const comp = composedRef.current!
+                const ticksX = rulerTicks(comp.W, Math.max(40, comp.W / 18))
+                const ticksY = rulerTicks(comp.H, Math.max(40, comp.H / 18))
+                return (
+                  <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+                    <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 16, background: 'rgba(14,16,20,.62)', color: '#dbe3ee', fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
+                      {ticksX.map((tick) => (
+                        <span key={tick.at} style={{ position: 'absolute', left: `${(tick.at / comp.W) * 100}%`, top: 1, paddingLeft: 2, borderLeft: '1px solid rgba(219,227,238,.5)' }}>{tick.label}</span>
+                      ))}
+                    </div>
+                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 16, background: 'rgba(14,16,20,.62)', color: '#dbe3ee', fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
+                      {ticksY.map((tick) => (
+                        <span key={tick.at} style={{ position: 'absolute', top: `${(tick.at / comp.H) * 100}%`, left: 1, borderTop: '1px solid rgba(219,227,238,.5)', paddingTop: 1, writingMode: 'vertical-rl' }}>{tick.label}</span>
+                      ))}
+                    </div>
+                    {/* 中线参考 */}
+                    <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 0, borderLeft: '1px dashed rgba(120,190,255,.55)' }} />
+                    <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 0, borderTop: '1px dashed rgba(120,190,255,.55)' }} />
+                  </div>
+                )
+              })()}
               {/* 取色放大镜：放大 9 倍（最近邻，看得清单个像素），旁边给色号与坐标 */}
               {tool === 'probe' && probe && composedRef.current && imgRef.current && (() => {
                 const comp = composedRef.current!
@@ -1062,6 +1209,8 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
                   </div>
                   <Button sm variant="primary" onClick={runAsk} disabled={!llmReady || !askInput.trim() || !!aiBusy}>问</Button>
                 </div>
+                {/* 本地 OCR：不依赖任何模型/网络，直接问操作系统要文字 */}
+                <Button sm variant="tinted" icon={ScanText} onClick={runLocalOcr} title="用 Windows 自带的 OCR 引擎离线识别（不出网、不需要配置模型）">本地识别文字（离线）</Button>
                 {/* 动作矩阵，按分组 */}
                 {['文字', '理解', '数据', '开发', '效率', '安全'].map((grp) => (
                   <div key={grp} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>

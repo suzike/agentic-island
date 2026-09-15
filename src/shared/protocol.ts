@@ -77,8 +77,13 @@ export interface RecordingCursorPoint {
   displayId: string
   bounds: { x: number; y: number; width: number; height: number }
   scaleFactor: number
-  /** 自上次轮询以来累积的鼠标点击（只采集左/右/中键，不监听键盘） */
+  /** 自上次轮询以来累积的鼠标点击 */
   clicks?: Array<{ at: number; x: number; y: number; button: 'left' | 'right' | 'middle' }>
+  /**
+   * 自上次轮询以来累积的**快捷键/导航键**（角标用）。
+   * 可打印字符一律不采集——这里拿到的是 `Ctrl+S`、`Enter` 这类标签，不含任何正文内容。
+   */
+  keys?: Array<{ at: number; label: string }>
 }
 
 export type RecordingExportFormat = 'webm' | 'mp4' | 'gif' | 'mp3'
@@ -139,6 +144,19 @@ export interface RecordingExportRequest {
    * 这条路径压成 FFmpeg 表达式。为 null 时按原样导出（运镜已在录制期合成进画面）。
    */
   motion?: RecordingMotionTrack | null
+  /**
+   * 导出期光标光晕：按成片帧序的光标轨迹 + 光斑尺寸。
+   * 光斑是"又大又软"的圆，所以能用折线航点表达式跟随（细光环不行，那需要逐帧精确跟踪）。
+   *
+   * `pngDataUrl` 是渲染层传来的光斑图，主进程会先落盘成临时文件并把路径写进 `filePath` 再拼参数——
+   * `buildRecordingFfmpegArgs` 是**纯函数**（离线测试重度依赖），不能在里面做文件写入。
+   */
+  glow?: { pngDataUrl?: string; filePath?: string; path: Array<{ x: number; y: number }>; fps: number; size: number } | null
+  /**
+   * 导出期按键角标：`t` 为成片时间轴毫秒，x/y 归一化（角标画在该位置左上角）。
+   * 只可能来自录制期采到的快捷键/导航键，不含可打印字符。
+   */
+  badges?: Array<{ t: number; label: string; x: number; y: number }> | null
 }
 
 /**
@@ -268,6 +286,8 @@ export interface RecordingProjectDocument {
   clickTrack: RecordingCursorSample[]
   /** 用户编辑过的运镜点；为空表示按光标轨迹自动运镜。 */
   motionKeyframes: RecordingMotionKeyframe[]
+  /** 录制期采到的快捷键/导航键（角标用）。与点击同理：事后无法补录。 */
+  keyTrack: Array<{ t: number; label: string }>
   /**
    * 这段素材能不能在导出期重建运镜。
    *
@@ -285,7 +305,7 @@ export interface RecordingProjectDocument {
   }
   aiResults: RecordingProjectAiResult[]
 }
-export type RecordingProjectSaveInput = Omit<RecordingProjectDocument, 'id' | 'createdAt' | 'updatedAt' | 'cursorTrack' | 'clickTrack' | 'motionKeyframes' | 'exportMotionReady'> & { id?: string; cursorTrack?: RecordingCursorSample[]; clickTrack?: RecordingCursorSample[]; motionKeyframes?: RecordingMotionKeyframe[]; exportMotionReady?: boolean }
+export type RecordingProjectSaveInput = Omit<RecordingProjectDocument, 'id' | 'createdAt' | 'updatedAt' | 'cursorTrack' | 'clickTrack' | 'keyTrack' | 'motionKeyframes' | 'exportMotionReady'> & { id?: string; cursorTrack?: RecordingCursorSample[]; clickTrack?: RecordingCursorSample[]; keyTrack?: Array<{ t: number; label: string }>; motionKeyframes?: RecordingMotionKeyframe[]; exportMotionReady?: boolean }
 export interface RecordingProjectSummary {
   id: string
   sessionId: string
@@ -773,6 +793,10 @@ export interface IslandBridgeApi {
   copyImage: (dataUrl: string) => Promise<{ ok: boolean; error?: string }>
   /** 图片存盘（PNG/JPEG/WebP，弹保存框） */
   saveImage: (dataUrl: string, name: string) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
+  /** 本地离线 OCR：走 Windows 自带引擎（不出网、不新增依赖）。 */
+  ocrImageLocal: (dataUrl: string) => Promise<{ ok: boolean; text?: string; language?: string; error?: string }>
+  /** 批量美化：多选图片并直接读成 dataUrl（单张上限 160MB，最多 50 张）。 */
+  selectImagesForBatch: () => Promise<{ ok: boolean; images?: Array<{ name: string; dataUrl: string }>; error?: string }>
   /** 把一张图贴到屏幕最上层（可拖动/缩放/调透明度），返回窗口 id。 */
   pinScreenshot: (input: { dataUrl: string; name?: string; width?: number; height?: number }) => Promise<{ ok: boolean; id?: string; error?: string }>
   closePinnedShot: (id: string) => void
