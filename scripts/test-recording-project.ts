@@ -28,6 +28,10 @@ try {
     },
     timeline: [{ at: 1_000, type: 'marker', label: '介绍' }],
     transcript: { model: 'whisper-1', language: 'zh', segments: [{ startMs: 250, endMs: 1_500, text: '测试字幕' }] },
+    motionKeyframes: [
+      { t: 0, x: 0.5, y: 0.5, zoom: 1 },
+      { t: 3000, x: 0.6, y: 0.4, zoom: 1.6 }
+    ],
     cursorTrack: [
       { t: 0, x: 0.2, y: 0.3, s: 0 },
       { t: 500, x: 0.5, y: 0.4, s: 6_000 },
@@ -46,6 +50,17 @@ try {
   assert.deepEqual(created.cursorTrack[2], { t: 1_200, x: 1, y: 0, s: 50_000 }, '越界坐标钳到边界，速度上限钳到 50000')
   assert.equal(created.cursorTrack[3], undefined, 'NaN 坐标不会混进工程')
   assert.equal(created.cursorTrack[0].t, 0, '轨迹时间戳按录制偏移落盘')
+  // 运镜点：人工编辑的结果要能落盘并规范化（越界缩放钳回、按时间排序、丢弃非法点）
+  assert.equal(created.motionKeyframes.length, 2, '运镜点应落盘')
+  assert.deepEqual(created.motionKeyframes[0], { t: 0, x: 0.5, y: 0.5, zoom: 1 }, '开场锚点原样保留')
+  assert.equal(created.motionKeyframes[1].zoom, 1.6, '合法缩放保留')
+  const normalized = await store.save({
+    ...input,
+    id: created.id,
+    motionKeyframes: [{ t: 5_000, x: 0.9, y: 0.1, zoom: 9 }, { t: 1_000, x: 0.5, y: 0.5, zoom: 1.3 }]
+  })
+  assert.deepEqual(normalized.motionKeyframes.map((point) => point.t), [1_000, 5_000], '运镜点按时间排序')
+  assert.equal(normalized.motionKeyframes[1].zoom, 4, '越界缩放钳到上限 4')
 
   const updated = await store.save({ ...input, id: created.id, name: '教程工程 v2' })
   assert.equal(updated.id, created.id, '更新工程不会创建重复记录')

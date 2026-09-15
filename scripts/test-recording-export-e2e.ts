@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { probeRecordingOutput, recordingExportVerdict, startRecordingFfmpeg } from '../src/main/recording-export.ts'
+import { recordingMotionFramesFromKeyframes } from '../src/renderer/src/logic/recording.ts'
 import type { RecordingExportRequest } from '../src/shared/protocol.ts'
 
 const ffmpeg = join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg.exe')
@@ -200,6 +201,30 @@ try {
   const crossVerdict = recordingExportVerdict({ ...motionBase, outputWidth: 360, outputHeight: 640 }, await probeRecordingOutput(ffmpeg, crossFile))
   assert.equal(crossVerdict.warnings.some((w) => /未生效/.test(w)), false, '跨画幅运镜不应被判为未生效')
   console.log(`  跨画幅运镜: ${crossSize?.[1]}x${crossSize?.[2]}，平均亮度跨幅 ${spread(crossLuma)}`)
+  // 人工编辑的运镜点必须真的改变成片取景。用横向渐变素材 + 两个极端运镜点：
+  // 开头看左边（x=0.15）、结尾看右边（x=0.85），成片的平均亮度应当明显变亮（右边更白）。
+  const editedFile = join(root, 'motion-edited.mp4')
+  const editedKeyframes = [
+    { t: 0, x: 0.15, y: 0.5, zoom: 1.5 },
+    { t: 1_500, x: 0.5, y: 0.5, zoom: 1.5 },
+    { t: 2_900, x: 0.85, y: 0.5, zoom: 1.5 }
+  ]
+  const editedPath = recordingMotionFramesFromKeyframes(editedKeyframes, [{ startMs: 0, endMs: 3_000 }], { fps: 30, strength: 0.5, maxZoom: 1.6 })
+  assert.equal(editedPath.length, 90, `3 秒 30fps 应重建 90 帧（实测 ${editedPath.length}）`)
+  await startRecordingFfmpeg(ffmpeg, rampSource, editedFile, { ...motionBase, jobId: 'e2e-motion-edited', motion: { fps: 30, frames: editedPath } }, () => {}).done
+  const editedLuma = frameLuma(editedFile)
+  assert.ok(editedLuma.length > 60, `应解出足够帧（实测 ${editedLuma.length}）`)
+  assert.ok(editedLuma.at(-1)! > editedLuma[0] + 40, `人工运镜应从左侧扫到右侧（${editedLuma[0]} → ${editedLuma.at(-1)}）`)
+  // 反向对照：同样两个极端点但顺序反过来，成片必须更暗 —— 证明取景真的跟着编辑走，而不是碰巧变亮
+  const reversedPath = recordingMotionFramesFromKeyframes([
+    { t: 0, x: 0.85, y: 0.5, zoom: 1.5 },
+    { t: 2_900, x: 0.15, y: 0.5, zoom: 1.5 }
+  ], [{ startMs: 0, endMs: 3_000 }], { fps: 30, strength: 0.5, maxZoom: 1.6 })
+  const reversedFile = join(root, 'motion-reversed.mp4')
+  await startRecordingFfmpeg(ffmpeg, rampSource, reversedFile, { ...motionBase, jobId: 'e2e-motion-reversed', motion: { fps: 30, frames: reversedPath } }, () => {}).done
+  const reversedLuma = frameLuma(reversedFile)
+  assert.ok(reversedLuma.at(-1)! < reversedLuma[0] - 40, `反向运镜应从右侧扫到左侧（${reversedLuma[0]} → ${reversedLuma.at(-1)}）`)
+  console.log(`  人工运镜点: 正向 ${editedLuma[0]} → ${editedLuma.at(-1)}；反向 ${reversedLuma[0]} → ${reversedLuma.at(-1)}`)
   console.log('recording export e2e tests passed')
 } finally {
   await rm(root, { recursive: true, force: true })

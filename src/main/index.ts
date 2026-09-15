@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, safeStorage, screen, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
-import { copyFile, mkdtemp, open, readFile, rm, writeFile } from 'fs/promises'
+import { copyFile, mkdir, mkdtemp, open, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, join } from 'path'
 import { pathToFileURL } from 'url'
@@ -44,7 +44,7 @@ import { sniffRecordingContainer } from '../shared/recording-format'
 import { RecordingSessionStore } from './recording-session-store'
 import { RecordingProjectStore } from './recording-project-store'
 import { transcribeRecordingFile } from './recording-transcription'
-import type { DecisionMessage, LlmRequestConfig, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
+import type { DecisionMessage, LlmRequestConfig, PinnedShotPayload, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotSnipRegion, ScreenshotTarget, ScrollHudState, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
 import { recordingWindowHandle } from '../shared/recording-source'
 
 // 允许 WebAudio 无需用户手势即可播放（提示音/试听）
@@ -219,6 +219,13 @@ function positionWindow(w: BrowserWindow, force = false): void {
   }, 60)
 }
 
+// 钉屏截图的窗口集合（声明在 onDisplayChange 之前：显示器变化时要遍历它重定位）
+const pinnedShots = new Map<string, BrowserWindow>()
+let snipWin: BrowserWindow | null = null
+let scrollHudWin: BrowserWindow | null = null
+let snipTarget: ScreenshotTarget = 'ask'
+let snipMode: 'snip' | 'scroll' = 'snip'
+
 /** 显示器热插拔 / 分辨率 / DPI 缩放变化：重定位全部岛系窗口（否则岛会偏、不再居中/铺满） */
 function onDisplayChange(): void {
   try {
@@ -226,6 +233,15 @@ function onDisplayChange(): void {
     monitorIndex = Math.min(monitorIndex, Math.max(0, n - 1))
     if (win && !win.isDestroyed()) positionWindow(win, true)
     if (widgetWin && !widgetWin.isDestroyed()) placeWidget(widgetWin)
+    // 钉屏截图也要跟着走：换屏/改分辨率后若留在原坐标，就会跑到不存在的显示器上
+    for (const pinned of pinnedShots.values()) {
+      if (pinned.isDestroyed()) continue
+      const area = targetDisplay().workArea
+      const bounds = pinned.getBounds()
+      const x = Math.min(Math.max(bounds.x, area.x), area.x + Math.max(0, area.width - bounds.width))
+      const y = Math.min(Math.max(bounds.y, area.y), area.y + Math.max(0, area.height - bounds.height))
+      if (x !== bounds.x || y !== bounds.y) pinned.setBounds({ ...bounds, x, y })
+    }
   } catch {
     /* 显示器枚举竞态期忽略 */
   }
@@ -400,7 +416,102 @@ const screenshotPoller = createScreenshotPoller({
   }
 })
 
-async function openScreenshot(target: ScreenshotTarget = 'ask'): Promise<void> {
+/**
+ * 应用内框选叠层（替代 Windows 截图工具）。
+ *
+ * 为什么自己做一个：`ms-screenclip:` 是工坊唯一的入口，**截图工具不可用或被策略禁用时整个工坊进不去**；
+ * 而且它的输出要先落到剪贴板再读回来，多一道中转。自己做还顺手解决了多屏：叠层只覆盖**光标所在那块屏**，
+ * 与抓帧路径（`prepareScreenCapture` 也是按光标挑屏）语义一致。
+ *
+ * 流程：叠层拖出矩形 → 主进程藏叠层 → 请渲染层按区域抓原生帧 → 打开工坊。
+ * 抓图必须在叠层隐藏之后，否则会把自己那层暗底和选框拍进去。
+ */
+function openSnipOverlay(target: ScreenshotTarget, mode: 'snip' | 'scroll' = 'snip'): boolean {
+  if (!win) return false
+  if (snipWin && !snipWin.isDestroyed()) { snipWin.focus(); return true }
+  const display = targetDisplay()
+  const { bounds, scaleFactor } = display
+  const overlay = new BrowserWindow({
+    x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+    frame: false, transparent: true, resizable: false, movable: false, skipTaskbar: true,
+    alwaysOnTop: true, hasShadow: false, fullscreenable: false, enableLargerThanScreen: true,
+    webPreferences: appWebPreferences()
+  })
+  hardenWindow(overlay)
+  overlay.setAlwaysOnTop(true, 'screen-saver')
+  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  loadRenderer(overlay, 'snip')
+  overlay.webContents.on('did-finish-load', () => overlay.webContents.send('snip-config', { displayId: String(display.id), scaleFactor, width: bounds.width, height: bounds.height, mode }))
+  overlay.on('closed', () => { snipWin = null })
+  snipWin = overlay
+  snipWin.focus()
+  snipTarget = target
+  snipMode = mode
+  return true
+}
+
+/**
+ * 滚动截图的进度小窗：一条可点的小药丸，显示已拼接段数与高度，带"完成/取消"。
+ * 为什么不复用框选叠层：叠层必须完全隐藏（否则会被拍进画面），而进度反馈得让用户看得见——
+ * 两个需求冲突，只能分开。窗口放在目标屏顶部居中，不挡住选区。
+ */
+function openScrollHud(): boolean {
+  if (!win) return false
+  if (scrollHudWin && !scrollHudWin.isDestroyed()) { scrollHudWin.show(); return true }
+  const { workArea } = targetDisplay()
+  const width = 320
+  const height = 44
+  const hud = new BrowserWindow({
+    x: workArea.x + Math.round((workArea.width - width) / 2), y: workArea.y + 12,
+    width, height, frame: false, transparent: true, resizable: false, movable: false, skipTaskbar: true,
+    alwaysOnTop: true, hasShadow: false, fullscreenable: false, focusable: false,
+    webPreferences: appWebPreferences()
+  })
+  hardenWindow(hud)
+  hud.setAlwaysOnTop(true, 'screen-saver')
+  hud.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  loadRenderer(hud, 'scrollhud')
+  hud.on('closed', () => { scrollHudWin = null })
+  scrollHudWin = hud
+  return true
+}
+
+function closeScrollHud(): void {
+  if (scrollHudWin && !scrollHudWin.isDestroyed()) scrollHudWin.close()
+  scrollHudWin = null
+}
+
+function updateScrollHud(state: ScrollHudState): void {
+  if (!scrollHudWin || scrollHudWin.isDestroyed()) return
+  scrollHudWin.webContents.send('scroll-hud-state', state)
+}
+
+function closeSnipOverlay(): void {
+  if (snipWin && !snipWin.isDestroyed()) snipWin.close()
+  snipWin = null
+}
+
+/** 框选确认：藏掉叠层（含岛），再请渲染层抓指定区域。 */
+async function completeSnip(region: ScreenshotSnipRegion): Promise<void> {
+  const target = snipTarget
+  closeSnipOverlay()
+  if (!win) return
+  win.hide()
+  // 藏窗要等一拍：透明叠层的退场动画/合成需要一帧，否则暗底会留在抓到的图上
+  await new Promise((r) => setTimeout(r, 180))
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setIgnoreMouseEvents(false)
+  safeSend('screen-capture-requested', { target, region: { ...region, mode: snipMode } })
+}
+
+async function openScreenshot(target: ScreenshotTarget = 'ask', mode: 'snip' | 'scroll' = 'snip'): Promise<void> {
+  if (!win) return
+  // 主路径：应用内框选。创建失败（极端情况）才退回 Windows 截图工具，保证功能不丢。
+  if (openSnipOverlay(target, mode)) return
+  await openScreenshotWindowsTool(target)
+}
+
+async function openScreenshotWindowsTool(target: ScreenshotTarget = 'ask'): Promise<void> {
   if (!win) return
   yieldToExternalApp()
   // 先取得新 hold，再释放旧 hold；重试瞬间不会闪回最高层。
@@ -537,7 +648,7 @@ interface StickyNoteData { id: number; emoji: string; title: string; md: string;
 const stickyWins = new Map<number, BrowserWindow>()
 
 function setAgenticWindowsTopmost(topmost: boolean): void {
-  const windows = [win, widgetWin, ...stickyWins.values()]
+  const windows = [win, widgetWin, ...stickyWins.values(), ...pinnedShots.values()]
   for (const current of windows) {
     if (!current || current.isDestroyed()) continue
     if (topmost) current.setAlwaysOnTop(true, 'screen-saver')
@@ -564,6 +675,43 @@ function openSticky(note: StickyNoteData): void {
   w.on('closed', () => stickyWins.delete(note.id))
   stickyWins.set(note.id, w)
 }
+/**
+ * 钉屏截图：把一张图贴在所有窗口最上层，可拖动、可缩放、可调透明度。
+ *
+ * 与"钉屏便利贴"同一范式（独立小窗 + 推送数据），但补了便利贴漏掉的两件事：
+ * 进入 `setAgenticWindowsTopmost` 托管（否则外部应用抢占时它不会被降层/复原），
+ * 以及显示器变化时重定位（否则拔掉外接屏后它会留在不存在的坐标上）。
+ */
+function openPinnedShot(payload: PinnedShotPayload): void {
+  const exist = pinnedShots.get(payload.id)
+  if (exist && !exist.isDestroyed()) { exist.show(); exist.focus(); return }
+  const { workArea } = targetDisplay()
+  const n = pinnedShots.size
+  // 按图片比例给初始尺寸：最长边不超过工作区的 60%（贴上去看得清，又不会糊满屏）
+  const ratio = payload.width > 0 && payload.height > 0 ? payload.width / payload.height : 16 / 9
+  const maxW = Math.round(workArea.width * 0.6)
+  const maxH = Math.round(workArea.height * 0.6)
+  const width = Math.max(160, Math.min(maxW, Math.round(maxH * ratio)))
+  const height = Math.max(120, Math.round(width / ratio))
+  const w = new BrowserWindow({
+    width, height, frame: false, transparent: true, resizable: true, skipTaskbar: true,
+    alwaysOnTop: true, hasShadow: true, fullscreenable: false, minWidth: 120, minHeight: 80,
+    webPreferences: appWebPreferences()
+  })
+  hardenWindow(w)
+  w.setAlwaysOnTop(true, 'screen-saver')
+  w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  w.setBounds({
+    x: workArea.x + Math.round(workArea.width * 0.18) + (n % 4) * 32,
+    y: workArea.y + Math.round(workArea.height * 0.16) + (n % 5) * 32,
+    width, height
+  })
+  loadRenderer(w, 'pin')
+  w.webContents.on('did-finish-load', () => w.webContents.send('pinned-shot', payload))
+  w.on('closed', () => pinnedShots.delete(payload.id))
+  pinnedShots.set(payload.id, w)
+}
+
 function closeSticky(id: number): void {
   const w = stickyWins.get(id)
   if (w && !w.isDestroyed()) w.close()
@@ -1102,6 +1250,63 @@ function wireIpc(): void {
   ipcMain.handle('llm-test', (_e, cfg: LlmRequestConfig) => llmTest(cfg))
   ipcMain.handle('llm-list-models', (_e, cfg: LlmRequestConfig) => llmListModels(cfg))
   // 截图工坊：渲染层主动触发框选截图（复用 ms-screenclip 流程，事件仍走 screenshot-captured）
+  // 钉屏截图：渲染层把合成好的图交过来，主进程负责贴到屏幕上
+  ipcMain.handle('pin-screenshot', (_e, input: { dataUrl?: string; name?: string; width?: number; height?: number }) => {
+    const dataUrl = typeof input?.dataUrl === 'string' ? input.dataUrl : ''
+    if (!validImageData(dataUrl)) return { ok: false, error: '图片数据无效或超过 160MB' }
+    const id = `pin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    openPinnedShot({
+      id,
+      dataUrl,
+      name: safeName(String(input?.name || ''), 'screenshot'),
+      width: Math.max(0, Math.round(Number(input?.width) || 0)),
+      height: Math.max(0, Math.round(Number(input?.height) || 0))
+    })
+    return { ok: true, id }
+  })
+  ipcMain.on('close-pinned-shot', (_e, id: string) => {
+    const w = pinnedShots.get(String(id || ''))
+    if (w && !w.isDestroyed()) w.close()
+    pinnedShots.delete(String(id || ''))
+  })
+  // 免对话框快速保存：直接写进「图片/Agentic-Island」，省掉每次挑目录
+  ipcMain.handle('save-image-quick', async (_e, dataUrl: string, name: string, format: string) => {
+    try {
+      if (!validImageData(dataUrl)) return { ok: false, error: '图片数据无效或超过 160MB' }
+      const ext = format === 'jpeg' || format === 'jpg' ? 'jpg' : format === 'webp' ? 'webp' : 'png'
+      const dir = join(app.getPath('pictures'), 'Agentic-Island')
+      await mkdir(dir, { recursive: true })
+      const target = join(dir, `${safeName(name, 'screenshot')}.${ext}`)
+      const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64')
+      await writeFile(target, bytes)
+      return { ok: true, path: target }
+    } catch (error) {
+      return { ok: false, error: String(error instanceof Error ? error.message : error) }
+    }
+  })
+  ipcMain.on('snip-complete', (_e, region: ScreenshotSnipRegion) => {
+    void completeSnip({
+      x: Number(region?.x) || 0,
+      y: Number(region?.y) || 0,
+      width: Math.max(0, Number(region?.width) || 0),
+      height: Math.max(0, Number(region?.height) || 0),
+      scaleFactor: Number(region?.scaleFactor) || undefined
+    })
+  })
+  ipcMain.on('snip-cancel', () => { closeSnipOverlay() })
+  // 滚动截图：进度上报（渲染层 → 小窗）与用户动作（小窗 → 渲染层）
+  ipcMain.on('scroll-hud-open', () => { openScrollHud() })
+  ipcMain.on('scroll-hud-update', (_e, state: ScrollHudState) => {
+    // 顺带兜底：渲染层异常退出时不留孤儿窗口
+    if (state?.state === 'done' || state?.state === 'canceled') {
+      updateScrollHud(state)
+      setTimeout(() => closeScrollHud(), 900)
+      return
+    }
+    updateScrollHud(state)
+  })
+  ipcMain.on('scroll-hud-action', (_e, action: 'finish' | 'cancel') => { safeSend('scroll-hud-action', action) })
+  ipcMain.on('trigger-scroll-capture', (_e, target: ScreenshotTarget) => { void openScreenshot(target === 'ask' ? 'ask' : 'studio', 'scroll') })
   ipcMain.on('trigger-screenshot', (_e, target: ScreenshotTarget) => openScreenshot(target === 'studio' ? 'studio' : 'ask'))
 
   ipcMain.handle('recording-sources', async () => {

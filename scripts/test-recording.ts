@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { EncoderRunner } from '../src/main/recording-export.ts'
 import { buildRecordingAspectFilters, buildRecordingFfmpegArgs, buildRecordingMotionCropFilter, buildRecordingMotionFilter, MOTION_MAX_CENTER_TOLERANCE, recordingMotionUsable, parseRecordingOutputProbe, probeRecordingOutput, recordingExportVerdict, buildRecordingRemuxArgs, crfFor, detectHardwareEncoders, hardwareQuantizerForCrf, MAX_MOTION_WAYPOINTS, parseHardwareEncoders, pickFastestEncoder, pickVideoEncoder, recordingExportDurationMs, recordingExportStrategy, recordingExportSubtitleSegments, recordingHasEdits, simplifyRecordingMotion, videoEncoderArgs } from '../src/main/recording-export.ts'
 import { recordingContainerOf, recordingFileExtension, sniffRecordingContainer } from '../src/shared/recording-format.ts'
-import { clampRecordingBarPosition, formatRecordingTime, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrames, remapRecordingMotionFrames, recordingSmoothingAlpha, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
+import { clampRecordingBarPosition, formatRecordingTime, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, remapRecordingMotionFrames, recordingSmoothingAlpha, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
 } from '../src/renderer/src/logic/recording.ts'
 import { recordingSourceLabel, recordingWindowHandle, sameRecordingWindowSource } from '../src/shared/recording-source.ts'
 import type { RecordingExportRequest } from '../src/shared/protocol.ts'
@@ -585,5 +585,57 @@ assert.equal(sparse.length, 2, `一次点击应把 30 秒静止切成两段（�
 assert.ok(sparse.every((range) => range.endMs - range.startMs >= 3_000), '切开后的片段仍要够长')
 // 窗口外的点击（越界时间）不影响判定
 assert.equal(recordingIdleRanges(still(0, 30_000), 30_000, { clicks: [{ t: -5, x: 0, y: 0 }, { t: 99_999, x: 0, y: 0 }] }).length, 1, '越界点击不参与判定')
+
+/* ---------------- 可编辑的运镜点（从自动路径抽点、由点重建路径） ---------------- */
+
+// 一段推近 + 一段静止 + 一段推近：应抽出"开场 + 两个峰值"，而不是逐帧或折线航点那么多
+const keyframeTimes = recordingMotionFrameTimes([{ startMs: 0, endMs: 13_000 }], { fps: 30 })
+assert.equal(keyframeTimes.length, 390, `30fps × 13 秒应有 390 帧时间轴（实测 ${keyframeTimes.length}）`)
+// 一段静止（0-3s）→ 推近（3-7s）→ 静止（7-9s）→ 再推近（9-13s），贴近真实演示的节奏
+const stillFrames = (count: number) => Array.from({ length: count }, () => ({ x: 0.5, y: 0.5, zoom: 1 }))
+const zoomUp = (count: number, peak: number) => Array.from({ length: count }, (_, index) => {
+  const ratio = index / Math.max(1, count - 1)
+  return { x: 0.5, y: 0.5, zoom: 1 + (peak - 1) * Math.sin(ratio * Math.PI) }
+})
+const autoPath = [...stillFrames(90), ...zoomUp(120, 1.5), ...stillFrames(60), ...zoomUp(120, 1.4)]
+const derived = recordingMotionKeyframes(autoPath, keyframeTimes)
+assert.equal(derived.length, 3, `开场锚点 + 两段推近各一个点（实测 ${derived.length}：${JSON.stringify(derived)}）`)
+// 连续 20 秒都在推近（光标一直在动）：必须按最大段长切成一串点，而不是只给一个峰值
+const continuous = Array.from({ length: 600 }, (_, index) => ({ x: 0.5, y: 0.5, zoom: 1.1 + 0.2 * Math.abs(Math.sin(index / 25)) }))
+const continuousTimes = recordingMotionFrameTimes([{ startMs: 0, endMs: 20_000 }], { fps: 30 })
+const continuousPoints = recordingMotionKeyframes(continuous, continuousTimes)
+assert.ok(continuousPoints.length >= 5, `20 秒连续动作应切成多个点（实测 ${continuousPoints.length}）`)
+assert.ok(continuousPoints.length <= 8, `切段不应过碎（实测 ${continuousPoints.length}）`)
+const spacing = continuousPoints.slice(1).map((point, index) => point.t - continuousPoints[index].t)
+assert.ok(Math.max(...spacing) <= 4_100, `相邻点间隔不超过段长上限（实测最大 ${Math.max(...spacing)}ms）`)
+assert.ok(continuousPoints.every((point, index) => index === 0 || point.t > continuousPoints[index - 1].t), '切段后仍按时间递增')
+assert.equal(derived[0].t, 0, '第一个点必须是开场锚点（t=0），否则路径没有起始状态')
+assert.ok(derived[0].zoom === 1, '开场是静止的')
+assert.ok(derived[1].t >= 2_900 && derived[1].t <= 3_400, `第一段推近的起点在 3 秒附近（实测 ${derived[1].t}）`)
+assert.ok(derived[1].zoom >= 1.4, `推近点记的是该段峰值而不是起点（实测 ${derived[1].zoom}）`)
+assert.ok(derived[2].t >= 8_900 && derived[2].t <= 9_400, `第二段推近的起点在 9 秒附近（实测 ${derived[2].t}）`)
+assert.ok(derived.every((point) => point.zoom >= 1 && point.zoom <= 1.6), '缩放必须落在合法区间')
+// 全程不推近时只剩开场那一个点（编辑列表不该凭空长出一堆点）
+assert.equal(recordingMotionKeyframes(Array.from({ length: 300 }, () => ({ x: 0.4, y: 0.4, zoom: 1 })), keyframeTimes).length, 1, '没有推近时只有开场点')
+
+// 由点重建路径：平滑跟随，且不越界；关键帧之间的折角被平滑掉
+const editedKeyframes = [
+  { t: 0, x: 0.2, y: 0.3, zoom: 1 },
+  { t: 4_000, x: 0.8, y: 0.7, zoom: 1.6 },
+  { t: 10_000, x: 0.3, y: 0.5, zoom: 1.1 }
+]
+const rebuilt = recordingMotionFramesFromKeyframes(editedKeyframes, [{ startMs: 0, endMs: 12_000 }], { fps: 30, strength: 0.6, maxZoom: 1.6 })
+assert.equal(rebuilt.length, 360, `重建路径的帧数应与时间轴一致（实测 ${rebuilt.length}）`)
+assert.ok(rebuilt.every((frame) => frame.zoom >= 1 && frame.zoom <= 1.6), '重建后缩放仍在合法区间')
+assert.ok(rebuilt.every((frame) => frame.x >= 0 && frame.x <= 1 && frame.y >= 0 && frame.y <= 1), '重建后中心仍在画面内')
+assert.ok(rebuilt.at(-1)!.zoom < rebuilt[Math.round(rebuilt.length / 3)]!.zoom, '最后一个点的缩放更小，重建路径应随之回落')
+// 平滑的意义：单帧位移不会瞬间跳变（人工点很稀疏时直线插值会在关键帧处折角）
+const biggestJump = rebuilt.slice(1).reduce((worst, frame, index) => Math.max(worst, Math.abs(frame.x - rebuilt[index].x)), 0)
+assert.ok(biggestJump < 0.06, `重建路径不应出现瞬时跳变（实测单帧最大位移 ${biggestJump.toFixed(4)}）`)
+assert.deepEqual(recordingMotionFramesFromKeyframes([], [{ startMs: 0, endMs: 1_000 }], { fps: 30, strength: 0.6, maxZoom: 1.6 }), [], '没有运镜点时不产出路径')
+// 剪辑后：只按保留段出帧，素材时间仍按剪辑后的顺序映射
+const twoSegments = recordingMotionFramesFromKeyframes(editedKeyframes, [{ startMs: 0, endMs: 2_000 }, { startMs: 8_000, endMs: 10_000 }], { fps: 30, strength: 0.6, maxZoom: 1.6 })
+assert.equal(twoSegments.length, 120, `两段各 2 秒 → 120 帧（实测 ${twoSegments.length}）`)
+assert.deepEqual(recordingMotionFrameTimes([{ startMs: 0, endMs: 2_000 }, { startMs: 8_000, endMs: 10_000 }], { fps: 30 }), [...recordingMotionFrameTimes([{ startMs: 0, endMs: 2_000 }], { fps: 30 }), ...recordingMotionFrameTimes([{ startMs: 8_000, endMs: 10_000 }], { fps: 30 })], '帧时间按保留段顺序拼接')
 
 console.log('recording tests passed')

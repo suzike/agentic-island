@@ -61,6 +61,7 @@ export class RecordingProjectStore {
         // v0.6.14 之前的工程没有光标轨迹字段，补成空数组，避免下游到处判 undefined
         if (!Array.isArray(project.cursorTrack)) project.cursorTrack = []
         if (!Array.isArray(project.clickTrack)) project.clickTrack = []
+        if (!Array.isArray(project.motionKeyframes)) project.motionKeyframes = []
         if (typeof project.exportMotionReady !== 'boolean') project.exportMotionReady = false
         this.projects.set(project.id, project)
       } catch { /* ignore damaged project files without blocking app startup */ }
@@ -102,6 +103,16 @@ export class RecordingProjectStore {
       },
       cursorTrack: normalizeCursorTrack(input.cursorTrack, durationMs),
       clickTrack: normalizeCursorTrack(input.clickTrack, durationMs),
+      // 运镜点是人工编辑的结果，按素材时间归一化后原样保留（数量本来就只有几十个）
+      motionKeyframes: (input.motionKeyframes || [])
+        .slice(0, 500)
+        .map((point) => ({
+          t: clamp(point.t, 0, durationMs),
+          x: clamp(point.x, 0, 1, 0.5),
+          y: clamp(point.y, 0, 1, 0.5),
+          zoom: clamp(point.zoom, 1, 4, 1)
+        }))
+        .sort((a, b) => a.t - b.t),
       exportMotionReady: Boolean(input.exportMotionReady),
       workspace: {
         timelineZoom: clamp(input.workspace?.timelineZoom, 0.5, 8, 1),

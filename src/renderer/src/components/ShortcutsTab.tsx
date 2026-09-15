@@ -15,7 +15,7 @@ import { ProjectContextBar } from './ProjectContextBar'
 import { Ico, type LucideIcon } from '../ui/icons'
 import { Button, Chip, EmptyState, IconButton, Input, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop, staggerContainer, staggerItem } from '../ui/motion'
-import { accent, accent2, accentText, fill, FS, hairline, hueAccent, ink, R, sem, semBg, solidInk, SP, surface, text, tintSurface } from '../ui/tokens'
+import { accent, accent2, accentText, fill, FS, gradient, hairline, hueAccent, ink, R, sem, semBg, solidInk, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface Props {
   projects: WorkbenchProject[]
@@ -280,7 +280,9 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
           onClick={() => setGenOpen((v) => !v)}
           title="用大白话描述，AI 帮你搭一条指令"
           variant={genOpen ? 'primary' : 'ghost'}
-          style={genOpen ? undefined : { background: `linear-gradient(180deg, ${accent(0.7, 0.45)}, ${accent2(0.55, 0.35)})`, color: solidInk(), border: `0.5px solid ${accent(0.7, 0.3)}` }}
+          // 用与主按钮同一套配对 token：浅色主题下"中亮渐变 + 近白文字"实测只有 2.79:1（对比度审计硬失败），
+          // 而 gradient.primary() 是亮渐变配**深色**文字（onPrimary），这套是审计通过的
+          style={genOpen ? undefined : { background: gradient.primary(), color: gradient.onPrimary(), border: `0.5px solid ${accent(0.7, 0.3)}` }}
         >AI 造</Button>
         <Button icon={Ico.add} onClick={newShortcut}>新建</Button>
       </div>

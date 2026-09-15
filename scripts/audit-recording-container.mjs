@@ -95,6 +95,9 @@ try {
     if (!barReady) console.log(`[${label}] 界面文案:`, String(await ev(`(document.body.innerText||'').replace(/\s+/g,' ').slice(0,300)`)))
     assert.ok(barReady, `[${label}] 录制未启动`)
     await sleep(seconds * 1000)
+    // 注意：本审计会在主屏铺一个无边框全屏活动窗口（测帧率用）。在 150% 缩放的屏幕上，这会让
+    // Chromium 把采集帧报成 **DIP 尺寸**（实测 1706x1066，而不是物理 2560x1600）。那是审计环境的
+    // 副作用、不是产品回退——不经该窗口录制的成片实测是 2560x1600 原生。所以**不要**在这里断言成片像素尺寸。
     if (process.env.AIISLAND_AUDIT_NO_CLICK !== '1') {
       // 用真实 OS 输入点一下：CDP 的合成事件只进渲染层，装在系统上的鼠标钩子看不到。
       // 点完把光标放回原处（这毕竟是用户的桌面）。失败就跳过——这只是可选能力的验证。

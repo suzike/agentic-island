@@ -6,6 +6,35 @@ export type Backend = 'claude-code' | 'codex'
 export type AgentStatus = 'running' | 'needs_approval' | 'done' | 'waiting'
 
 export type ScreenshotTarget = 'ask' | 'studio'
+/** 钉屏截图窗口的载荷：图片 + 原始像素尺寸（主进程按它算初始窗口比例）。 */
+export interface PinnedShotPayload {
+  id: string
+  dataUrl: string
+  name: string
+  width: number
+  height: number
+}
+
+/** 应用内框选出来的区域（DIP，相对被截显示器左上角）+ 该屏的 DPI 缩放。 */
+export interface ScreenshotSnipRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+  /** 叠层所在显示器的 scaleFactor：抓到的帧是物理像素，裁剪必须按它换算 */
+  scaleFactor?: number
+  /** 框选用途：`snip` 单张（默认），`scroll` 进入滚动长截图 */
+  mode?: 'snip' | 'scroll'
+}
+
+/** 滚动截图的进度状态（小窗显示用）。 */
+export interface ScrollHudState {
+  state: 'capturing' | 'done' | 'canceled'
+  segments: number
+  height: number
+  message?: string
+}
+
 export interface ScreenshotCapture {
   dataUrl: string
   target: ScreenshotTarget
@@ -121,6 +150,14 @@ export interface RecordingMotionFrame {
   y: number
   zoom: number
 }
+/** 人工（可编辑）的运镜点：t 是**素材时间轴**偏移，x/y 归一化，zoom >= 1。 */
+export interface RecordingMotionKeyframe {
+  t: number
+  x: number
+  y: number
+  zoom: number
+}
+
 export interface RecordingMotionTrack {
   frames: RecordingMotionFrame[]
   fps: number
@@ -229,6 +266,8 @@ export interface RecordingProjectDocument {
   cursorTrack: RecordingCursorSample[]
   /** 录制期采到的鼠标点击（只左/右/中键，不监听键盘）。事后无法补录，供剪除空白与导出期效果使用。 */
   clickTrack: RecordingCursorSample[]
+  /** 用户编辑过的运镜点；为空表示按光标轨迹自动运镜。 */
+  motionKeyframes: RecordingMotionKeyframe[]
   /**
    * 这段素材能不能在导出期重建运镜。
    *
@@ -246,7 +285,7 @@ export interface RecordingProjectDocument {
   }
   aiResults: RecordingProjectAiResult[]
 }
-export type RecordingProjectSaveInput = Omit<RecordingProjectDocument, 'id' | 'createdAt' | 'updatedAt' | 'cursorTrack' | 'clickTrack' | 'exportMotionReady'> & { id?: string; cursorTrack?: RecordingCursorSample[]; clickTrack?: RecordingCursorSample[]; exportMotionReady?: boolean }
+export type RecordingProjectSaveInput = Omit<RecordingProjectDocument, 'id' | 'createdAt' | 'updatedAt' | 'cursorTrack' | 'clickTrack' | 'motionKeyframes' | 'exportMotionReady'> & { id?: string; cursorTrack?: RecordingCursorSample[]; clickTrack?: RecordingCursorSample[]; motionKeyframes?: RecordingMotionKeyframe[]; exportMotionReady?: boolean }
 export interface RecordingProjectSummary {
   id: string
   sessionId: string
@@ -734,6 +773,26 @@ export interface IslandBridgeApi {
   copyImage: (dataUrl: string) => Promise<{ ok: boolean; error?: string }>
   /** 图片存盘（PNG/JPEG/WebP，弹保存框） */
   saveImage: (dataUrl: string, name: string) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
+  /** 把一张图贴到屏幕最上层（可拖动/缩放/调透明度），返回窗口 id。 */
+  pinScreenshot: (input: { dataUrl: string; name?: string; width?: number; height?: number }) => Promise<{ ok: boolean; id?: string; error?: string }>
+  closePinnedShot: (id: string) => void
+  /** 拉起框选叠层并进入滚动长截图模式（用户停手后自动拼成一张长图）。 */
+  triggerScrollCapture: (target?: ScreenshotTarget) => void
+  /** 应用内框选：确认/取消（叠层窗口自己调）。 */
+  completeSnip: (region: ScreenshotSnipRegion) => void
+  cancelSnip: () => void
+  onSnipConfig: (cb: (config: { displayId: string; scaleFactor: number; width: number; height: number }) => void) => () => void
+  /** 滚动截图：开进度小窗、上报进度、接收小窗动作、小窗订阅状态。 */
+  openScrollHud: () => void
+  updateScrollHud: (state: ScrollHudState) => void
+  onScrollHudState: (cb: (state: ScrollHudState) => void) => () => void
+  onScrollHudAction: (cb: (action: 'finish' | 'cancel') => void) => () => void
+  /** 小窗上的完成/取消按钮。 */
+  scrollHudAction: (action: 'finish' | 'cancel') => void
+  /** 钉屏窗口接收载荷（浮窗是"主渲染层算、浮窗只显示"的推送模式）。 */
+  onPinnedShot: (cb: (payload: PinnedShotPayload) => void) => () => void
+  /** 免对话框快速保存：直接落到「图片/Agentic-Island」，并在同一次操作里可复制。 */
+  saveImageQuick: (dataUrl: string, name: string, format: string) => Promise<{ ok: boolean; path?: string; error?: string }>
   /** 从本地选择一张图片进入截图工坊 */
   openImageFile: () => Promise<{ ok: boolean; dataUrl?: string; name?: string; error?: string }>
   /** 从系统剪贴板读取图片 */
@@ -750,7 +809,7 @@ export interface IslandBridgeApi {
   /** 截图第二步：还原岛的显示状态（成功失败都要调）。 */
   finishScreenCapture: () => Promise<{ ok: boolean }>
   /** 全局热键请求截图：主进程只转发，抓帧在渲染层。 */
-  onScreenCaptureRequested: (cb: (capture: { target: ScreenshotTarget }) => void) => () => void
+  onScreenCaptureRequested: (cb: (capture: { target: ScreenshotTarget; region?: ScreenshotSnipRegion }) => void) => () => void
   /** 打开本地 Markdown 文件 */
   openMdFile: () => Promise<{ ok: boolean; path?: string; name?: string; content?: string; error?: string }>
   /** 保存 Markdown 到本地（existingPath 为空则弹另存为） */

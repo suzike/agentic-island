@@ -584,6 +584,152 @@ export function remapRecordingMotionFrames(
   }))
 }
 
+/**
+ * 用户可编辑的运镜点（渲染层的编辑模型，落盘时按素材时间轴存）。
+ *
+ * 与"逐帧路径"和"折线航点"都不同：逐帧路径是给渲染用的，航点是给 FFmpeg 表达式用的，
+ * 而运镜点是给**人**看的 —— 要的是"哪几个时刻在推近、推多大"，数量少、语义清楚、可增删调。
+ */
+export interface RecordingMotionKeyframe {
+  /** 素材时间轴上的毫秒偏移（不是成片帧序） */
+  t: number
+  x: number
+  y: number
+  zoom: number
+}
+
+/**
+ * 从自动运镜的逐帧路径里抽出"运镜点"，供人工编辑。
+ *
+ * 抽取规则按"人想改什么"设计，而不是按曲线拟合：一段持续推近只给一个点（取峰值），
+ * 因为用户想调的是"这一段推多大"，不是让曲线更贴合。相邻点至少隔 minGapMs，避免列表碎成十几条。
+ */
+export function recordingMotionKeyframes(
+  frames: RecordingMotionFrame[],
+  frameTimes: number[],
+  options: { minGapMs?: number; activeZoom?: number; maxSegmentMs?: number } = {}
+): RecordingMotionKeyframe[] {
+  const minGapMs = Math.max(200, options.minGapMs ?? 1_500)
+  const maxSegmentMs = Math.max(1_000, options.maxSegmentMs ?? 4_000)
+  const active = Math.max(1.001, options.activeZoom ?? 1.02)
+  // 相差不到这个时长视为同一时刻，只保留一个运镜点
+  const SAME_MOMENT_MS = 400
+  const points: RecordingMotionKeyframe[] = []
+  if (!frames.length) return points
+  const timeAt = (index: number): number => frameTimes[Math.min(index, frameTimes.length - 1)] ?? index * (1000 / 30)
+  points.push({ t: Math.round(timeAt(0)), x: frames[0].x, y: frames[0].y, zoom: frames[0].zoom })
+  let index = 0
+  while (index < frames.length) {
+    // 找一段"高于静止线"的连续区间，取其中缩放最大的一帧作为该段的代表点
+    if (frames[index].zoom <= active) { index += 1; continue }
+    const start = index
+    let peak = index
+    while (index < frames.length && frames[index].zoom > active) {
+      if (frames[index].zoom > frames[peak].zoom) peak = index
+      // 一段连续动作最多跨 maxSegmentMs：光标一直在动时若只给一个峰值，整段 8 分钟录制
+      // 就只剩一个运镜点，"哪一段推多远"完全没法编辑。按上限切段后，长录制会得到一串
+      // 间隔几秒的点，才是可编辑的表示。
+      if (timeAt(index) - timeAt(start) >= maxSegmentMs) { index += 1; break }
+      index += 1
+    }
+    const point: RecordingMotionKeyframe = {
+      t: Math.round(timeAt(start)),
+      x: frames[peak].x,
+      y: frames[peak].y,
+      zoom: Number(frames[peak].zoom.toFixed(4))
+    }
+    const previous = points.at(-1)
+    // 同一"时刻"只能有一个点。判定窗口取 400ms：开场锚点与首个推近起点常只差几十毫秒，
+    // 列表里两行都显示 00:00，用户根本分不出区别。合并成"从这一刻开始推近到较大倍数"。
+    if (previous && point.t - previous.t < SAME_MOMENT_MS) {
+      points[points.length - 1] = point.zoom > previous.zoom ? { ...point, t: previous.t } : previous
+      continue
+    }
+    // 开场锚点（points[0]，取自首帧）永远不被合并掉：路径需要明确的起始状态，
+    // 否则"从 1× 开始推近"这件事在列表里就消失了。
+    if (previous && points.length > 1 && point.t - previous.t < minGapMs) {
+      // 太近就合并：保留缩放更大的那个（用户关心的是"这里推近了多少"）
+      if (point.zoom > previous.zoom) points[points.length - 1] = point
+    } else {
+      points.push(point)
+    }
+  }
+  return points
+}
+
+/**
+ * 由（可能被人工编辑过的）运镜点重建逐帧相机路径。
+ *
+ * 关键帧之间**不是**直线插值，而是按同一套时间常数做指数平滑：人工点很稀疏，
+ * 直线会让镜头在关键帧处出现折角，平滑后才有推近的缓入缓出——观感与自动运镜保持一致。
+ * 时间映射与 `recordingMotionFrames` 相同（按保留段与成片速度把成片帧序换算成素材时间）。
+ */
+export function recordingMotionFramesFromKeyframes(
+  keyframes: RecordingMotionKeyframe[],
+  segments: Array<{ startMs: number; endMs: number }>,
+  options: { fps: number; strength: number; maxZoom: number; speed?: number }
+): RecordingMotionFrame[] {
+  const fps = Math.max(1, Math.min(120, Math.round(options.fps) || 30))
+  const frameMs = 1000 / fps
+  const speed = Math.max(0.1, Math.min(8, options.speed || 1))
+  const maxZoom = Math.max(1, Math.min(4, options.maxZoom || 1))
+  const strength = Math.max(0, Math.min(1, options.strength))
+  const kept = (segments || []).filter((segment) => segment.endMs - segment.startMs >= 1).sort((a, b) => a.startMs - b.startMs)
+  const sorted = [...keyframes].filter((point) => Number.isFinite(point.t)).sort((a, b) => a.t - b.t)
+  if (!kept.length || !sorted.length) return []
+  const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
+  const frames: RecordingMotionFrame[] = []
+  let x = sorted[0].x
+  let y = sorted[0].y
+  let zoom = Math.max(1, Math.min(maxZoom, sorted[0].zoom))
+  const centerAlpha = recordingSmoothingAlpha(frameMs, 0.035 + strength * 0.075, Math.max(1, frameMs))
+  const zoomAlpha = recordingSmoothingAlpha(frameMs, 0.035 + strength * 0.04, Math.max(1, frameMs))
+  for (const segment of kept) {
+    const count = Math.max(1, Math.round((segment.endMs - segment.startMs) / speed / frameMs))
+    for (let index = 0; index < count; index += 1) {
+      const sourceMs = segment.startMs + index * frameMs * speed
+      // 找到包住当前时刻的两个运镜点，线性求目标值，再交给平滑器去"追"
+      let lower = sorted[0]
+      let upper = sorted[sorted.length - 1]
+      for (let cursor = 0; cursor < sorted.length; cursor += 1) {
+        if (sorted[cursor].t <= sourceMs) lower = sorted[cursor]
+        if (sorted[cursor].t >= sourceMs) { upper = sorted[cursor]; break }
+      }
+      const span = upper.t - lower.t
+      const ratio = span > 0 ? clamp01((sourceMs - lower.t) / span) : 1
+      const targetX = clamp01(lower.x + (upper.x - lower.x) * ratio)
+      const targetY = clamp01(lower.y + (upper.y - lower.y) * ratio)
+      const targetZoom = Math.max(1, Math.min(maxZoom, lower.zoom + (upper.zoom - lower.zoom) * ratio))
+      x += (targetX - x) * centerAlpha
+      y += (targetY - y) * centerAlpha
+      zoom += (targetZoom - zoom) * zoomAlpha
+      frames.push({
+        x: Number(clamp01(x).toFixed(4)),
+        y: Number(clamp01(y).toFixed(4)),
+        zoom: Number(Math.max(1, Math.min(maxZoom, zoom)).toFixed(4))
+      })
+    }
+  }
+  return frames
+}
+
+/** 由保留段与帧率算出每一输出帧对应的**素材时间**（供运镜点编辑与预览共用）。 */
+export function recordingMotionFrameTimes(
+  segments: Array<{ startMs: number; endMs: number }>,
+  options: { fps: number; speed?: number }
+): number[] {
+  const fps = Math.max(1, Math.min(120, Math.round(options.fps) || 30))
+  const frameMs = 1000 / fps
+  const speed = Math.max(0.1, Math.min(8, options.speed || 1))
+  const kept = (segments || []).filter((segment) => segment.endMs - segment.startMs >= 1).sort((a, b) => a.startMs - b.startMs)
+  const times: number[] = []
+  for (const segment of kept) {
+    const count = Math.max(1, Math.round((segment.endMs - segment.startMs) / speed / frameMs))
+    for (let index = 0; index < count; index += 1) times.push(segment.startMs + index * frameMs * speed)
+  }
+  return times
+}
+
 /** 导出期运镜的系数与录音期保持一致的默认值，供工坊与测试共用。 */
 export const RECORDING_MOTION_MAX_ZOOM = 1.6
 

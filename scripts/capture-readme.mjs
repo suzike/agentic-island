@@ -280,18 +280,18 @@ try {
   }
 
   if (captureOnly === 'terminal') {
-    await capture('终端', 'terminal-v0616.png')
+    await capture('终端', 'terminal-v0617.png')
   } else {
-    await capture('问答', 'ask-v0616.png')
+    await capture('问答', 'ask-v0617.png')
   }
   if (!captureOnly) {
-    await capture('快捷', 'shortcuts-v0616.png')
-    await capture('待办', 'todos-v0616.png')
-    await capture('灵感便签', 'notes-v0616.png')
-    await capture('资讯', 'news-v0616.png')
-    await capture('复盘', 'review-v0616.png')
-    await capture('设置', 'settings-v0616.png')
-    await capture('终端', 'terminal-v0616.png')
+    await capture('快捷', 'shortcuts-v0617.png')
+    await capture('待办', 'todos-v0617.png')
+    await capture('灵感便签', 'notes-v0617.png')
+    await capture('资讯', 'news-v0617.png')
+    await capture('复盘', 'review-v0617.png')
+    await capture('设置', 'settings-v0617.png')
+    await capture('终端', 'terminal-v0617.png')
 
     await evaluate(`(() => {
       const button = [...document.querySelectorAll('[title]')].find((item) => item.title?.includes('录屏工坊'))
@@ -310,8 +310,8 @@ try {
       format: 'png', fromSurface: true, captureBeyondViewport: false,
       clip: { ...recordingRect, scale: 1 }
     })
-    await writeFile(join(outputDir, 'recording-v0616.png'), Buffer.from(recordingShot.data, 'base64'))
-    process.stdout.write('captured recording-v0616.png\n')
+    await writeFile(join(outputDir, 'recording-v0617.png'), Buffer.from(recordingShot.data, 'base64'))
+    process.stdout.write('captured recording-v0617.png\n')
   }
 } finally {
   try {

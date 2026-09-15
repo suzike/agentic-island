@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ApprovalAuditEntry, DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState, UpdateState } from '../shared/protocol'
+import type { ApprovalAuditEntry, PinnedShotPayload, ScreenshotSnipRegion, ScrollHudState, DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState, UpdateState } from '../shared/protocol'
 
 const api: IslandBridgeApi = {
   getRuntimeInfo: () => ipcRenderer.invoke('runtime-info'),
@@ -83,8 +83,8 @@ const api: IslandBridgeApi = {
     ipcRenderer.on('sticky-data', handler)
     return () => ipcRenderer.removeListener('sticky-data', handler)
   },
-  onScreenCaptureRequested: (cb: (capture: { target: ScreenshotTarget }) => void): (() => void) => {
-    const handler = (_e: unknown, capture: { target: ScreenshotTarget }): void => cb(capture)
+  onScreenCaptureRequested: (cb: (capture: { target: ScreenshotTarget; region?: ScreenshotSnipRegion }) => void): (() => void) => {
+    const handler = (_e: unknown, capture: { target: ScreenshotTarget; region?: ScreenshotSnipRegion }): void => cb(capture)
     ipcRenderer.on('screen-capture-requested', handler)
     return () => ipcRenderer.removeListener('screen-capture-requested', handler)
   },
@@ -124,7 +124,36 @@ const api: IslandBridgeApi = {
   shortcutOpen: (target: string) => ipcRenderer.invoke('shortcut-open', target),
   clipReadText: () => ipcRenderer.invoke('clip-read-text'),
   clipWriteText: (t: string): void => ipcRenderer.send('clip-write-text', t),
+  pinScreenshot: (input: { dataUrl: string; name?: string; width?: number; height?: number }) => ipcRenderer.invoke('pin-screenshot', input),
+  closePinnedShot: (id: string) => ipcRenderer.send('close-pinned-shot', id),
+  saveImageQuick: (dataUrl: string, name: string, format: string) => ipcRenderer.invoke('save-image-quick', dataUrl, name, format),
+  onPinnedShot: (cb: (payload: PinnedShotPayload) => void): (() => void) => {
+    const handler = (_e: unknown, payload: PinnedShotPayload): void => cb(payload)
+    ipcRenderer.on('pinned-shot', handler)
+    return () => ipcRenderer.removeListener('pinned-shot', handler)
+  },
+  completeSnip: (region: ScreenshotSnipRegion) => ipcRenderer.send('snip-complete', region),
+  cancelSnip: () => ipcRenderer.send('snip-cancel'),
+  onSnipConfig: (cb: (config: { displayId: string; scaleFactor: number; width: number; height: number }) => void): (() => void) => {
+    const handler = (_e: unknown, config: { displayId: string; scaleFactor: number; width: number; height: number }): void => cb(config)
+    ipcRenderer.on('snip-config', handler)
+    return () => ipcRenderer.removeListener('snip-config', handler)
+  },
+  openScrollHud: () => ipcRenderer.send('scroll-hud-open'),
+  scrollHudAction: (action: 'finish' | 'cancel') => ipcRenderer.send('scroll-hud-action', action),
+  updateScrollHud: (state: ScrollHudState) => ipcRenderer.send('scroll-hud-update', state),
+  onScrollHudState: (cb: (state: ScrollHudState) => void): (() => void) => {
+    const handler = (_e: unknown, state: ScrollHudState): void => cb(state)
+    ipcRenderer.on('scroll-hud-state', handler)
+    return () => ipcRenderer.removeListener('scroll-hud-state', handler)
+  },
+  onScrollHudAction: (cb: (action: 'finish' | 'cancel') => void): (() => void) => {
+    const handler = (_e: unknown, action: 'finish' | 'cancel'): void => cb(action)
+    ipcRenderer.on('scroll-hud-action', handler)
+    return () => ipcRenderer.removeListener('scroll-hud-action', handler)
+  },
   triggerScreenshot: (target: ScreenshotTarget = 'ask'): void => ipcRenderer.send('trigger-screenshot', target),
+  triggerScrollCapture: (target: ScreenshotTarget = 'studio'): void => ipcRenderer.send('trigger-scroll-capture', target),
   recordingSources: () => ipcRenderer.invoke('recording-sources'),
   recordingCursor: () => ipcRenderer.invoke('recording-cursor'),
   setRecordingClickLog: (active: boolean) => ipcRenderer.invoke('recording-click-log', active),

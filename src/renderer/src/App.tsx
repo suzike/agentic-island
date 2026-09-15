@@ -50,7 +50,8 @@ import { PRESET_SHORTCUTS, type ShortcutDef } from './logic/shortcuts'
 import { migrateProjects, newProject } from './logic/workbench'
 import { synthesisPrompt } from './logic/newsIntel'
 import { island } from './bridge'
-import { captureScreenNative } from './logic/screenshot'
+import { captureScreenNative, cropDataUrlToRegion } from './logic/screenshot'
+import { startScrollCapture } from './logic/scroll-capture-session'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, BellOff, Camera, Check, ChevronDown, Download, Expand, Maximize2, Minimize2, Moon, Pin, Shrink, Timer, Video, Waves, X } from 'lucide-react'
 import { accentText, accent, fill, gradient, hairline, ink } from './ui/tokens'
@@ -942,15 +943,64 @@ export function App(): React.JSX.Element {
     }
   }, [])
 
-  // 全局热键：主进程只转发请求，抓帧在渲染层（媒体流给原生尺寸，见 logic/screenshot 的说明）
-  useEffect(() => island.onScreenCaptureRequested(({ target }) => {
-    void captureScreenNow().then((dataUrl) => {
-      if (!dataUrl) return
+  /**
+   * 滚动截图会话：框选区域 → 起抓帧循环 → 小窗显示进度 → 用户停手（或点完成）→ 拼成一张长图进工坊。
+   * 循环跑在渲染层（媒体流在渲染层），主进程只管窗口与进度转发。
+   */
+  const scrollSessionRef = useRef<{ stop: () => void; finished: Promise<{ dataUrl: string; width: number; height: number; segments: number; skipped: number } | null> } | null>(null)
+  const runScrollCapture = useCallback(async (sourceId: string, region: { x: number; y: number; width: number; height: number }, scaleFactor: number): Promise<void> => {
+    island.openScrollHud()
+    island.updateScrollHud({ state: 'capturing', segments: 0, height: 0 })
+    try {
+      const session = await startScrollCapture(sourceId, {
+        region, scaleFactor,
+        onProgress: ({ segments, height }) => island.updateScrollHud({ state: 'capturing', segments, height })
+      })
+      scrollSessionRef.current = session
+      const result = await session.finished
+      scrollSessionRef.current = null
+      island.finishScreenCapture().catch(() => {})
+      if (!result) {
+        island.updateScrollHud({ state: 'canceled', segments: 0, height: 0, message: '没有抓到内容' })
+        return
+      }
+      island.updateScrollHud({ state: 'done', segments: result.segments, height: result.height, message: `已拼成 ${result.width}×${result.height}` })
       setRevealed(true)
-      if (target === 'studio') { setShotStudioMode('image'); setShotStudio(dataUrl) }
-      else setShotImg(dataUrl)
-    })
-  }), [captureScreenNow])
+      setShotStudioMode('image')
+      setShotStudio(result.dataUrl)
+    } catch {
+      scrollSessionRef.current = null
+      island.updateScrollHud({ state: 'canceled', segments: 0, height: 0, message: '滚动截图启动失败' })
+    }
+  }, [])
+  useEffect(() => island.onScrollHudAction((action) => {
+    if (action === 'cancel') { scrollSessionRef.current?.stop(); return }
+    // "完成"＝停止取样，已拼到的部分照常交付
+    scrollSessionRef.current?.stop()
+  }), [])
+
+  // 全局热键：主进程只转发请求，抓帧在渲染层（媒体流给原生尺寸，见 logic/screenshot 的说明）
+  useEffect(() => island.onScreenCaptureRequested(({ target, region }) => {
+    const isScroll = region?.mode === 'scroll'
+    void (async () => {
+      // 两种情况都先"藏岛 + 挑源"：单张靠它抓一帧；滚动靠它拿采集源 id（随后自己起抓帧循环）
+      const prepared = await island.prepareScreenCapture().catch(() => ({ ok: false, sourceId: undefined as string | undefined, error: '截图准备失败' }))
+      try {
+        if (!prepared.ok || !prepared.sourceId) return
+        if (isScroll && region) { await runScrollCapture(prepared.sourceId, region, region.scaleFactor ?? window.devicePixelRatio ?? 1); return }
+        const dataUrl = await captureScreenNative(prepared.sourceId).catch(() => null)
+        if (!dataUrl) return
+        // 带区域（应用内框选）时按区域裁剪再交给工坊：区域是 DIP、抓到的帧是物理像素，必须按 scaleFactor 换算
+        const framed = region ? await cropDataUrlToRegion(dataUrl, region, region.scaleFactor ?? window.devicePixelRatio ?? 1).catch(() => null) ?? dataUrl : dataUrl
+        setRevealed(true)
+        if (target === 'studio') { setShotStudioMode('image'); setShotStudio(framed) }
+        else setShotImg(framed)
+      } finally {
+        void island.finishScreenCapture().catch(() => {})
+      }
+    })()
+  }), [runScrollCapture])
+
   const shotAsk = useCallback((prompt: string, dataUrl: string): void => {
     setShotImg(null)
     island.capsuleClosed() // 还原点击穿透 + blur（复用同一还原逻辑）

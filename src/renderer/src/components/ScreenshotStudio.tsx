@@ -4,13 +4,13 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, Languages, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Redo2, RotateCcw, RotateCw, Save, ScanLine, ScanText, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, Video, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, Languages, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Pin, Pipette, Redo2, RotateCcw, RotateCw, Save, ScanLine, ScanText, Scissors, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, Video, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
 import type { LucideIcon } from '../ui/icons'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accentText, accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 import { island } from '../bridge'
-import { captureScreenNative, clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, sanitizeScreenshotName } from '../logic/screenshot'
+import { SCREENSHOT_QUICK_DIR, captureScreenNative, clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, sanitizeScreenshotName, screenshotLoupeRect, screenshotPixelHex } from '../logic/screenshot'
 import type { Point as Pt, Rect, ScreenshotFormat } from '../logic/screenshot'
 import { ScreenRecorderStudio } from './ScreenRecorderStudio'
 import type { LlmRequestConfig } from '../../../shared/protocol'
@@ -55,7 +55,7 @@ const BGS: { key: string; label: string; stops: [string, string, string] }[] = [
 const PALETTE = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#00c7be', '#007aff', '#af52de', '#ffffff', '#000000']
 
 // ────────────────────────────── 标注数据模型 ──────────────────────────────
-type Tool = 'none' | 'arrow' | 'rect' | 'ellipse' | 'pen' | 'line' | 'text' | 'mosaic' | 'blur' | 'highlight' | 'number'
+type Tool = 'none' | 'arrow' | 'rect' | 'ellipse' | 'pen' | 'line' | 'text' | 'mosaic' | 'blur' | 'highlight' | 'number' | 'probe'
 interface Anno {
   id: number
   tool: Tool
@@ -409,6 +409,37 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
   const imgRef = useRef<HTMLImageElement | null>(null)
   const originalSourceRef = useRef(dataUrl)
   const [imgLoaded, setImgLoaded] = useState(false)
+  // 取色探针：读**原图**像素（不是合成结果），悬停出放大镜与色值，点击复制色号
+  const [probe, setProbe] = useState<{ x: number; y: number; hex: string; r: number; g: number; b: number } | null>(null)
+  const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  useEffect(() => { sourceCanvasRef.current = null }, [sourceData, sourceVersion])
+  const probeColors = (px: number, py: number): { hex: string; r: number; g: number; b: number; x: number; y: number } | null => {
+    const img = imgRef.current
+    if (!img || !img.naturalWidth) return null
+    const x = Math.max(0, Math.min(img.naturalWidth - 1, Math.round(px)))
+    const y = Math.max(0, Math.min(img.naturalHeight - 1, Math.round(py)))
+    if (!sourceCanvasRef.current || sourceCanvasRef.current.width !== img.naturalWidth || sourceCanvasRef.current.height !== img.naturalHeight) {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight
+      canvas.getContext('2d')!.drawImage(img, 0, 0)
+      sourceCanvasRef.current = canvas
+    }
+    const data = sourceCanvasRef.current.getContext('2d')!.getImageData(x, y, 1, 1).data
+    return { hex: screenshotPixelHex(data[0], data[1], data[2]), r: data[0], g: data[1], b: data[2], x, y }
+  }
+  const probeHover = (event: React.PointerEvent): void => {
+    const point = toCanvasPt(event)
+    if (!point) { setProbe(null); return }
+    setProbe(probeColors(point.x, point.y))
+  }
+  const probeClick = (event: React.PointerEvent): void => {
+    const point = toCanvasPt(event)
+    if (!point) return
+    const colors = probeColors(point.x, point.y)
+    if (!colors) return
+    setProbe(colors)
+    void navigator.clipboard.writeText(colors.hex).then(() => flash(`已复制色号 ${colors.hex}`)).catch(() => flash(`色号 ${colors.hex}（复制失败）`))
+  }
   const composedRef = useRef<Composed | null>(null) // 最近一次合成（含坐标映射）
   const previewRef = useRef<HTMLImageElement | null>(null) // 预览 <img> DOM
   const cropAnchorRef = useRef<Pt | null>(null)
@@ -648,6 +679,11 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
     }
   }
 
+  /** 滚动长截图：拉起框选叠层（滚动模式），用户滚到底后自动拼成一张长图。 */
+  const captureScroll = (): void => {
+    void island.triggerScrollCapture('studio')
+  }
+
   const captureDisplay = (): void => {
     void captureDisplayShot().then((result) => {
       if (result.dataUrl) useSource(result.dataUrl, '整屏截图')
@@ -656,6 +692,23 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
   }
 
   // ── 导出 ──
+  /** 贴到屏幕：把当前合成结果钉在所有窗口最上层（可拖动/调透明度）。 */
+  const doPin = (): void => {
+    const size = exportDimensions(compSize.width || 1, compSize.height || 1, 1)
+    void island.pinScreenshot({ dataUrl: render(1, 'png', 1), name: sourceName, width: size.width, height: size.height })
+      .then((r) => flash(r.ok ? '已贴到屏幕最上层（拖动移动，悬停出工具条）' : `✗ ${r.error || '贴图失败'}`))
+  }
+  /** 零摩擦保存：不弹保存框，直接落到「图片/Agentic-Island」并顺手复制一份到剪贴板。 */
+  const doQuickSave = (): void => {
+    const dataUrl = render(deco.scale, exportFormat, exportQuality)
+    void island.saveImageQuick(dataUrl, `${sanitizeScreenshotName(sourceName)}${deco.scale > 1 ? `_${deco.scale}x` : ''}`, exportFormat)
+      .then((r) => {
+        if (!r.ok) { flash(`✗ ${r.error || '快速保存失败'}`); return }
+        // 同一动作里把图放进剪贴板：绝大多数截图下一步就是粘贴到别处
+        void island.copyImage(dataUrl).catch(() => {})
+        flash(`已保存到 ${SCREENSHOT_QUICK_DIR} 并复制到剪贴板`)
+      })
+  }
   const doCopy = (): void => {
     void island.copyImage(render(deco.scale, 'png', 1)).then((r) => {
       flash(r.ok ? `✓ 已复制 PNG${deco.scale > 1 ? ` ${deco.scale}x` : ''}` : `✗ ${r.error || '复制失败'}`)
@@ -700,6 +753,8 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (textInput) return // 输入时不拦截
+      // Ctrl+Shift+S 为"零摩擦保存"（Ctrl+S 仍是带对话框的另存为）
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); doQuickSave(); return }
       const ae = document.activeElement
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return
       if (e.key === 'Escape') { onClose(); return }
@@ -734,7 +789,8 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
     { key: 'text', icon: Type, label: '文字' },
     { key: 'number', icon: Hash, label: '序号' },
     { key: 'mosaic', icon: Grid, label: '马赛克' },
-    { key: 'blur', icon: Droplets, label: '模糊' }
+    { key: 'blur', icon: Droplets, label: '模糊' },
+    { key: 'probe', icon: Pipette, label: '取色/放大镜' }
   ]
 
   const drawing = tool !== 'none' || cropMode
@@ -774,6 +830,7 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
           <Button sm variant="ghost" icon={FileImage} onClick={openImage} title="打开本地图片">打开</Button>
           <Button sm variant="ghost" icon={ClipboardPaste} onClick={pasteImage} title="从剪贴板粘贴图片 (Ctrl+V)">粘贴</Button>
           <Button sm variant="ghost" icon={Monitor} onClick={captureDisplay} title="捕获鼠标所在显示器">整屏</Button>
+          <Button sm variant="ghost" icon={Scissors} onClick={captureScroll} title="滚动长截图：框选区域后滚动，停手即自动拼接">长截图</Button>
           <Button sm variant="ghost" icon={ScanLine} onClick={onRetake} title="重新框选截图">重截</Button>
           <span style={{ flex: 1 }} />
           {toast && <span style={{ color: sem.calm, fontSize: FS.tiny, fontWeight: 600 }}>{toast}</span>}
@@ -785,10 +842,50 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
           <div className="ai-scroll" style={{ flex: 1, minWidth: 0, minHeight: 300, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 34, background: 'repeating-conic-gradient(rgba(255,255,255,.035) 0% 25%, rgba(0,0,0,.045) 0% 50%) 0 0 / 20px 20px', position: 'relative' }}>
             <div style={{ position: 'relative', maxWidth: zoom === 'fit' ? '100%' : 'none', maxHeight: zoom === 'fit' ? 'calc(68vh - 140px)' : 'none', lineHeight: 0, flex: 'none' }}>
               <img ref={previewRef} src={final} alt="截图预览" draggable={false}
-                onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+                onPointerDown={(event) => (tool === 'probe' ? probeClick(event) : onDown(event))} onPointerMove={(event) => (tool === 'probe' ? probeHover(event) : onMove(event))} onPointerLeave={() => setProbe(null)} onPointerUp={onUp} onPointerCancel={onUp}
                 style={zoom === 'fit'
                   ? { maxWidth: '100%', maxHeight: 'calc(68vh - 140px)', borderRadius: R.sm, boxShadow: '0 14px 44px rgba(0,0,0,.48)', cursor: drawing ? 'crosshair' : 'default', userSelect: 'none', touchAction: 'none' }
                   : { width: `${Math.max(1, compSize.width * zoom)}px`, maxWidth: 'none', borderRadius: R.sm, boxShadow: '0 14px 44px rgba(0,0,0,.48)', cursor: drawing ? 'crosshair' : 'default', userSelect: 'none', touchAction: 'none' }} />
+              {/* 取色放大镜：放大 9 倍（最近邻，看得清单个像素），旁边给色号与坐标 */}
+              {tool === 'probe' && probe && composedRef.current && imgRef.current && (() => {
+                const comp = composedRef.current!
+                const loupe = screenshotLoupeRect(probe.x, probe.y, imgRef.current!.naturalWidth, imgRef.current!.naturalHeight, 15)
+                return (
+                  <div style={{
+                    position: 'absolute', pointerEvents: 'none',
+                    left: `${((comp.imgX + probe.x) / comp.W) * 100}%`, top: `${((comp.imgY + probe.y) / comp.H) * 100}%`,
+                    transform: 'translate(14px, 14px)', zIndex: 5
+                  }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: 8, borderRadius: R.sm, background: 'rgba(18,20,24,.9)', border: `0.5px solid ${hairline(0.2)}`, boxShadow: '0 10px 28px rgba(0,0,0,.5)' }}>
+                      <canvas
+                        width={loupe.size}
+                        height={loupe.size}
+                        ref={(node) => {
+                          if (!node || !imgRef.current) return
+                          const ctx = node.getContext('2d')!
+                          ctx.imageSmoothingEnabled = false
+                          ctx.clearRect(0, 0, loupe.size, loupe.size)
+                          ctx.drawImage(imgRef.current!, loupe.x, loupe.y, loupe.size, loupe.size, 0, 0, loupe.size, loupe.size)
+                          // 标出光标所在的那一格
+                          ctx.strokeStyle = '#ffffff'
+                          ctx.lineWidth = 1
+                          ctx.strokeRect(loupe.markerX + 0.5, loupe.markerY + 0.5, 1, 1)
+                        }}
+                        style={{ width: 132, height: 132, imageRendering: 'pixelated', borderRadius: 4, background: '#000', flex: 'none' }}
+                      />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 96 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ width: 18, height: 18, borderRadius: 4, background: probe.hex, border: `0.5px solid ${hairline(0.3)}`, flex: 'none' }} />
+                          <span style={{ color: '#f2f4f8', fontSize: 12, fontWeight: 650, fontVariantNumeric: 'tabular-nums' }}>{probe.hex}</span>
+                        </div>
+                        <div style={{ color: 'rgba(238,241,246,.72)', fontSize: 10.5, fontVariantNumeric: 'tabular-nums' }}>RGB {probe.r}, {probe.g}, {probe.b}</div>
+                        <div style={{ color: 'rgba(238,241,246,.55)', fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>{probe.x}, {probe.y} px</div>
+                        <div style={{ color: 'rgba(238,241,246,.45)', fontSize: 9.5 }}>点击复制色号</div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
               {/* 裁剪选框叠层（预览像素） */}
               {cropMode && cropSel && composedRef.current && previewRef.current && (
                 <div style={{
@@ -1017,6 +1114,8 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
           <span style={{ flex: 1 }} />
           <Button variant="ghost" icon={MessageSquare} onClick={doAsk} title="把当前图交给截图问答">问 AI</Button>
           <Button variant="ghost" icon={Copy} onClick={doCopy}>复制 PNG</Button>
+          <Button variant="ghost" icon={Pin} onClick={doPin} title="贴到屏幕最上层，可拖动、可调透明度">贴到屏幕</Button>
+          <Button variant="tinted" icon={Zap} onClick={doQuickSave} title={`免对话框直接保存到 ${SCREENSHOT_QUICK_DIR}，并复制到剪贴板（Ctrl+Shift+S）`}>快存</Button>
           <Button variant="primary" icon={Save} onClick={doSave}>保存 {exportFormat === 'jpeg' ? 'JPG' : exportFormat.toUpperCase()}{deco.scale > 1 ? ` ${deco.scale}x` : ''}</Button>
         </div>
       </motion.div>

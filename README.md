@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.6.16](https://img.shields.io/badge/release-v0.6.16-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.16)
+[![Release v0.6.17](https://img.shields.io/badge/release-v0.6.17-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.17)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/terminal-v0616.png" alt="Agentic-Island v0.6.16 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
+<img src="screenshots/terminal-v0617.png" alt="Agentic-Island v0.6.17 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
 
 </div>
 
@@ -34,6 +34,22 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **成果没有沉淀** | 执行记录、情报简报、每日复盘与知识资料成为下一轮工作的上下文 |
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
+
+## v0.6.17 更新概览
+
+上一轮做开源对标的报告里，截图工坊列了一批提升项但一直没落地。这一版把它们补上，并顺手修掉一处浅色主题的对比度硬失败。
+
+- **应用内框选，取代 Windows 截图工具**：点"截图工坊"或 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> 弹应用自己的框选叠层——拖动出矩形、实时显示尺寸（DIP 与**实际物理像素**都给）、回车确认、Esc/右键取消、点一下不拖自动取消。此前工坊的**唯一入口**是系统截图工具，它被策略禁用时整个工坊进不去；现在系统工具只在叠层创建失败时兜底。选中后按选区裁剪，工坊直接拿到裁好的图。
+
+- **滚动长截图**：框选区域后自己往下滚，应用按 260ms 抓帧、用**行指纹**自动对齐并只追加新增的行；**停手约 1.6 秒自动完成**（不用按键），顶部小药丸实时显示进度，也可随时点完成/取消。拼接引擎是纯逻辑、有 22 项离线断言：位移 40/137/260/480px 都被准确测出，拼出的长图与原始高图**逐像素一致**；重复滚动不会重复拼接，两帧无重叠时如实跳过而不是硬拼一张错位图。
+
+- **钉屏截图**：一键把成片贴在所有窗口最上层，可拖动、滚轮调透明度、悬停出工具条（复制/关闭）；贴图跟随显示器变化重定位，也纳入了"外部应用抢占时降层"的窗口托管。
+
+- **取色器 + 放大镜**：新增「取色/放大镜」工具，悬停出 15×15 像素的最近邻放大镜（标出光标所在格），旁边给色号、RGB、源图像素坐标，点击即复制。读的是**原图**像素，不是合成结果。
+
+- **零摩擦保存（Ctrl+Shift+S）**：免对话框直接落到「图片/Agentic-Island」，并在同一次操作里把图放进剪贴板。
+
+- **修掉浅色主题下「AI 造」按钮的对比度硬失败**（实测 2.79:1）：它用了"中亮渐变 + 近白文字"，与设计系统的配对正好相反。改用主按钮同一套配对 token 后回到通过线以上。
 
 ## v0.6.16 更新概览
 
@@ -188,24 +204,24 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v0616.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v0616.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v0617.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v0617.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v0616.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v0616.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v0617.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v0617.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v0616.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v0616.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v0617.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v0617.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/recording-v0616.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜 · 自动剪空白</sub></td>
-<td width="50%" align="center"><img src="screenshots/settings-v0616.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v0617.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜 · 自动剪空白</sub></td>
+<td width="50%" align="center"><img src="screenshots/settings-v0617.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v0616.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v0617.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -234,7 +250,7 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **第二大脑** | 跨便签、问答、复盘、资讯和剪贴板统一检索；支持关键词与向量语义排序 |
 | **本地知识库** | 独立 Embedding 地址/模型/密钥；接入文件夹、文件、网页和问答会话；支持常见源码/文本、PDF、DOCX；回答、完整分支或框选片段可直接沉淀；分块、向量索引、引用问答、Wiki 概览与重建索引 |
 | **Markdown 工作台** | 本地打开/保存；编辑、分栏、阅读模式；查找替换；目录；快照；Zen；PDF/HTML/文本导出；AI 写作工具 |
-| **截图工坊** | 区域截图、无损保存、边框/背景/留白/圆角/阴影、标注、OCR/视觉分析、发送问答 |
+| **截图工坊** | **应用内框选**（含滚动长截图 · 钉屏到桌面）、**取色器 + 放大镜**、**零摩擦保存**、无损保存、边框/背景/留白/圆角/阴影、11 种标注、OCR/视觉分析、发送问答 |
 | **专业录屏工坊** | 显示器/窗口/区域录制；**默认跟随屏幕原生画幅**；画布合成或**原始画面采集**（跳过合成、实测 30fps 原生画质）；鼠标聚焦运镜（录制时实时，或**留到导出期按光标轨迹重建**）；**按轨迹自动剪除发呆/等加载空白**；音频混合；画中画与人物替换；分块落盘与恢复；三轨时间线；真实转写与 AI 粗剪；工程库；MP4/WebM/GIF/MP3、多档压缩、分辨率/帧率和可开关字幕轨 |
 | **屏幕分析** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> 捕获当前屏幕并交给视觉模型分析 |
 | **工程计算** | 多行表达式、变量跨行引用、数学函数、统计与温度换算 |
@@ -305,7 +321,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.6.16.exe
+Agentic-Island-Setup-0.6.17.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。

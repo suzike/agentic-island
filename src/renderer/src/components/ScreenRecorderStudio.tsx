@@ -10,8 +10,8 @@ import { RecordingNeuralStyle } from '../logic/recording-neural-style'
 import type { NeuralStyleStatus } from '../logic/recording-neural-style'
 import { deleteRecordingAvatar, loadRecordingAvatar, saveRecordingAvatar } from '../logic/recording-avatar'
 import { formatBytes } from '../logic/screenshot'
-import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrames, recordingOutputSize, remapRecordingMotionFrames, recordingRawCaptureSize, recordingRawModeBlockers, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
-import type { RecordingAnimePalette, RecordingAspect, RecordingCaptureMode, RecordingClickSample, RecordingMotion, RecordingResolution } from '../logic/recording'
+import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, recordingOutputSize, remapRecordingMotionFrames, recordingRawCaptureSize, recordingRawModeBlockers, recordingPreviewSize, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
+import type { RecordingAnimePalette, RecordingAspect, RecordingCaptureMode, RecordingClickSample, RecordingMotion, RecordingMotionKeyframe, RecordingResolution } from '../logic/recording'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accentText, accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
@@ -309,6 +309,8 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [transcriptSegments, setTranscriptSegments] = useState<RecordingTranscriptSegment[]>([])
   const [cursorTrack, setCursorTrack] = useState<RecordingCursorSample[]>([])
   const [clickTrack, setClickTrack] = useState<RecordingClickSample[]>([])
+  // 人工编辑过的运镜点（为空＝按轨迹自动运镜）
+  const [motionKeyframes, setMotionKeyframes] = useState<RecordingMotionKeyframe[]>([])
   const [idleTrimPlan, setIdleTrimPlan] = useState<{ cutMs: number; keepMs: number; segments: RecordingEditSegment[] } | null>(null)
   // 导出期运镜：素材必须"画面稳定"（录制时运镜关闭）才允许，否则会与烤进画面的运镜叠加
   const [exportMotionReady, setExportMotionReady] = useState(false)
@@ -1336,6 +1338,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     setTimeline(project.timeline.map((item) => ({ ...item }))); setTranscriptSegments(project.transcript.segments.map((item) => ({ ...item })))
     setCursorTrack((project.cursorTrack || []).map((item) => ({ ...item }))); cursorSamplesRef.current = (project.cursorTrack || []).map((item) => ({ ...item }))
     setClickTrack((project.clickTrack || []).map((item) => ({ ...item }))); clickSamplesRef.current = (project.clickTrack || []).map((item) => ({ ...item }))
+    setMotionKeyframes((project.motionKeyframes || []).map((item) => ({ ...item })))
     setExportMotionReady(Boolean(project.exportMotionReady)); setExportMotionEnabled(Boolean(project.exportMotionReady) && (project.cursorTrack || []).length > 0)
     setTranscriptModel(project.transcript.model); setTranscriptLanguage(project.transcript.language)
     setTimelineZoom(project.workspace.timelineZoom); setTimelineSnap(project.workspace.timelineSnap)
@@ -1379,7 +1382,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     if (previewIdRef.current) { island.releaseRecordingPreview(previewIdRef.current); previewIdRef.current = '' }
     projectSaveTokenRef.current++
     recordingSessionIdRef.current = ''; setRecordingSessionId(''); projectIdRef.current = ''; setProjectId(''); setProjectSaveState('idle')
-    setRecordingBlob(null); setRecordingUrl(''); updateStatus('idle'); setElapsed(0); setRecordedBytes(0); recordedBytesRef.current = 0; stopReasonRef.current = ''; setTimeline([]); setKeyframes([]); setTranscriptSegments([]); setCursorTrack([]); cursorSamplesRef.current = []; setClickTrack([]); clickSamplesRef.current = []; setIdleTrimPlan(null); setExportMotionReady(false); setExportMotionEnabled(false); setEditSegments([]); setActiveSegmentId(''); setEditHistory([]); setEditFuture([]); setRecordingHasAudio(false); setExportProgress(null); setPanel('capture')
+    setRecordingBlob(null); setRecordingUrl(''); updateStatus('idle'); setElapsed(0); setRecordedBytes(0); recordedBytesRef.current = 0; stopReasonRef.current = ''; setTimeline([]); setKeyframes([]); setTranscriptSegments([]); setCursorTrack([]); cursorSamplesRef.current = []; setClickTrack([]); clickSamplesRef.current = []; setMotionKeyframes([]); setIdleTrimPlan(null); setExportMotionReady(false); setExportMotionEnabled(false); setEditSegments([]); setActiveSegmentId(''); setEditHistory([]); setEditFuture([]); setRecordingHasAudio(false); setExportProgress(null); setPanel('capture')
   }
 
   const seekPreview = (ms: number): void => {
@@ -1459,6 +1462,37 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
    * 录播放中的视频、共享别人屏幕这类素材，本机光标本来就几乎不动，一次点击就把 8 秒剪成 2 秒
    * 是实测发生过的（隔离审计里合成光标 8.2s 被剪掉 6.2s）；破坏性操作先让人看到数字。
    */
+  // ── 运镜点编辑（导出期运镜的人工控制）──
+  /** 由光标轨迹抽出可编辑的运镜点；没有轨迹或没在推近时给出空列表并提示。 */
+  const deriveMotionKeyframes = (): void => {
+    if (!cursorTrack.length) { flash('这次录制没有光标轨迹，无法生成运镜点（窗口来源或旧工程不采集轨迹）'); return }
+    const segments = editSegments.filter((segment) => segment.enabled !== false)
+    const times = recordingMotionFrameTimes(segments, { fps, speed: playbackRate })
+    const path = recordingMotionFrames(cursorTrack, segments, { fps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate })
+    const points = recordingMotionKeyframes(path, times)
+    if (points.length <= 1) { flash('这段素材没有明显的推近，运镜点只会有一个开场锚点'); }
+    setMotionKeyframes(points)
+    if (points.length > 1) flash(`已生成 ${points.length} 个运镜点，可逐个调倍数或删除`)
+    else setMotionKeyframes(points)
+  }
+  const updateMotionKeyframe = (index: number, patch: Partial<RecordingMotionKeyframe>): void => {
+    setMotionKeyframes((items) => items.map((item, at) => at === index
+      ? { ...item, ...patch, zoom: Math.max(1, Math.min(maxZoom, patch.zoom ?? item.zoom)), x: Math.max(0, Math.min(1, patch.x ?? item.x)), y: Math.max(0, Math.min(1, patch.y ?? item.y)) }
+      : item).sort((a, b) => a.t - b.t))
+  }
+  const removeMotionKeyframe = (index: number): void => {
+    // 开场锚点不允许删：路径需要明确的起始状态
+    if (index === 0) { flash('开场锚点保留，它定义镜头的起始状态'); return }
+    setMotionKeyframes((items) => items.filter((_, at) => at !== index))
+  }
+  const addMotionKeyframeAtHead = (): void => {
+    const at = snapEditPoint(previewMsRef.current)
+    const current = motionKeyframes.find((point) => point.t >= at) || motionKeyframes.at(-1)
+    const point: RecordingMotionKeyframe = { t: Math.round(at), x: current?.x ?? 0.5, y: current?.y ?? 0.5, zoom: current?.zoom ?? Math.min(maxZoom, 1.3) }
+    setMotionKeyframes((items) => [...items, point].sort((a, b) => a.t - b.t))
+    flash(`已在 ${formatRecordingTime(at)} 加一个运镜点`)
+  }
+
   const planIdleTrim = (): void => {
     const total = elapsed
     if (!cursorTrack.length) { flash('这次录制没有光标轨迹，无法判断空白片段（窗口来源或旧工程不采集轨迹）'); return }
@@ -1624,6 +1658,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     transcript: { model: transcriptModel, language: transcriptLanguage, segments: transcriptSegments.map((item) => ({ ...item })) },
     cursorTrack: cursorTrack.map((item) => ({ ...item })),
     clickTrack: clickTrack.map((item) => ({ ...item })),
+    motionKeyframes: motionKeyframes.map((item) => ({ ...item })),
     exportMotionReady,
     workspace: { timelineZoom, timelineSnap, videoTrackLocked, markerTrackLocked, aiEditMode },
     aiResults: aiResults.map((item) => ({ ...item }))
@@ -1660,7 +1695,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     setProjectSaveState('saving')
     const timer = window.setTimeout(() => { void persistRecordingProject(false) }, 1000)
     return () => window.clearTimeout(timer)
-  }, [status, recordingSessionId, recordingName, elapsed, recordingSize.width, recordingSize.height, fps, recordingHasAudio, editSegments, editSettings, playbackRate, timeline, transcriptModel, transcriptLanguage, transcriptSegments, cursorTrack, clickTrack, exportMotionReady, timelineZoom, timelineSnap, videoTrackLocked, markerTrackLocked, aiEditMode, aiResults])
+  }, [status, recordingSessionId, recordingName, elapsed, recordingSize.width, recordingSize.height, fps, recordingHasAudio, editSegments, editSettings, playbackRate, timeline, transcriptModel, transcriptLanguage, transcriptSegments, cursorTrack, clickTrack, motionKeyframes, exportMotionReady, timelineZoom, timelineSnap, videoTrackLocked, markerTrackLocked, aiEditMode, aiResults])
 
   const openRecordingProject = async (summary: RecordingProjectSummary): Promise<void> => {
     const sessionsResult: Awaited<ReturnType<typeof island.listRecordingSessions>> = await island.listRecordingSessions().catch(() => ({ ok: false }))
@@ -1718,12 +1753,13 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     // 轨迹按**成片帧序**重建，主进程只需把它编译成 zoompan 表达式。
     // 跨画幅时先算"铺满"裁切窗口并把路径重映射进去——否则 zoompan 会把画面拉变形
     const motionCrop = recordingMotionCoverCrop(recordingSize.width, recordingSize.height, outputSize.width, outputSize.height)
-    const motion = exportMotionEnabled && exportMotionReady && cursorTrack.length && (format === 'mp4' || format === 'webm')
-      ? {
-          fps: outputFps,
-          frames: remapRecordingMotionFrames(recordingMotionFrames(cursorTrack, editSegments.filter((segment) => segment.enabled !== false), { fps: outputFps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate }), motionCrop),
-          crop: motionCrop || undefined
-        }
+    const keptSegments = editSegments.filter((segment) => segment.enabled !== false)
+    // 人工编辑过运镜点就用它；否则按光标轨迹自动生成
+    const motionPath = motionKeyframes.length
+      ? recordingMotionFramesFromKeyframes(motionKeyframes, keptSegments, { fps: outputFps, strength: motionStrength, maxZoom, speed: playbackRate })
+      : recordingMotionFrames(cursorTrack, keptSegments, { fps: outputFps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate })
+    const motion = exportMotionEnabled && exportMotionReady && motionPath.length && (format === 'mp4' || format === 'webm')
+      ? { fps: outputFps, frames: remapRecordingMotionFrames(motionPath, motionCrop), crop: motionCrop || undefined }
       : null
     const request = {
       jobId, name: recordingName, format, quality: exportQuality, durationMs: elapsed,
@@ -2367,6 +2403,23 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                     <div style={controlRow}><span style={{ ...text.faint(), width: 56 }}>光晕颜色</span>{(['gold', 'blue', 'white'] as const).map((value) => <Chip key={value} active={cursorHaloColor === value} onClick={() => setCursorHaloColor(value)}>{value === 'gold' ? '金色' : value === 'blue' ? '蓝色' : '白色'}</Chip>)}</div>
                     <div style={{ ...controlRow, justifyContent: 'space-between', padding: '5px 0' }}><span style={{ ...controlRow, color: ink(2), fontSize: 11 }}><MousePointer2 size={13} />鼠标轨迹</span><Switch on={cursorTrail} onChange={setCursorTrail} /></div>
                   </>}
+                  <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><Sparkles size={12} />运镜点（导出期使用）</span><span style={{ ...text.num(9), color: motionKeyframes.length ? sem.calm : ink(4) }}>{motionKeyframes.length ? `${motionKeyframes.length} 个` : '自动'}</span></div>
+                    <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>{motionKeyframes.length ? '导出时按这些点重建镜头：每个点表示"从这一刻开始推近到该倍数"。开场锚点定义起始状态不可删；需在导出页打开「导出期运镜」才生效。' : '未编辑时按光标轨迹自动运镜。点下面按钮可抽出运镜点，再逐个调整倍数。'}</div>
+                    {motionKeyframes.map((point, index) => (
+                      <div key={`${point.t}-${index}`} style={{ ...controlRow, gap: 6 }}>
+                        <span style={{ ...text.num(9), width: 46, color: index === 0 ? ink(4) : accentText() }}>{formatRecordingTime(point.t)}</span>
+                        <Slider min={1} max={maxZoom} step={0.02} value={point.zoom} onChange={(value) => updateMotionKeyframe(index, { zoom: value })} style={{ flex: 1 }} />
+                        <span style={{ ...text.num(9), width: 34, textAlign: 'right' }}>{point.zoom.toFixed(2)}×</span>
+                        <IconButton icon={X} title={index === 0 ? '开场锚点不可删' : '删除这个运镜点'} size={22} disabled={index === 0} onClick={() => removeMotionKeyframe(index)} />
+                      </div>
+                    ))}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      <Button sm variant="tinted" icon={Sparkles} disabled={!cursorTrack.length} onClick={deriveMotionKeyframes}>{motionKeyframes.length ? '按轨迹重新生成' : '从轨迹抽运镜点'}</Button>
+                      <Button sm variant="ghost" icon={Plus} disabled={!motionKeyframes.length} onClick={addMotionKeyframeAtHead}>在播放头加点</Button>
+                    </div>
+                    {motionKeyframes.length > 0 && <Button sm variant="ghost" icon={RefreshCw} onClick={() => { setMotionKeyframes([]); flash('已恢复按轨迹自动运镜') }}>恢复自动运镜</Button>}
+                  </div>
                   <div style={{ ...surface.inset(), padding: '11px 12px' }}>
                     <div style={{ color: ink(1), fontSize: 11.5, fontWeight: 650 }}>运镜引擎实时工作</div>
                     <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.65, marginTop: 5 }}>根据鼠标位置、移动速度和显示器边界平滑调整裁剪中心。快速移动时自动减弱放大，停留操作时聚焦内容，避免突跳和晕动。</div>
