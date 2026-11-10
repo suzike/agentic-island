@@ -9,6 +9,7 @@ import { homedir } from 'os'
 const CC_SETTINGS = join(homedir(), '.claude', 'settings.json')
 const CODEX_HOOKS = join(homedir(), '.codex', 'hooks.json')
 const CODEX_CONFIG = join(homedir(), '.codex', 'config.toml')
+const LEGACY_CODEX_PERMISSION = 'agentic-island-permission.mjs'
 
 const NOTIFY_BEGIN = '# >>> agentic-island notify (auto) — 请勿手改'
 const NOTIFY_END = '# <<< agentic-island notify'
@@ -59,7 +60,9 @@ const writeIfChanged = (p: string, content: string): void => {
   writeAtomic(p, content)
 }
 
-const nodeCmd = (script: string, arg: string): string => `node "${script}" ${arg}`
+// 统一正斜杠：同一安装目录在开发/手工接入/应用启动时必须生成完全相同的命令，
+// 否则 Codex 的 hook 信任哈希会变化，升级后 hook 会被判成 modified 并暂停执行。
+const nodeCmd = (script: string, arg: string): string => `node "${script.replace(/\\/g, '/')}" ${arg}`
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -69,7 +72,9 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
  */
 const isOurs = (h: HookCommand, script: string): boolean => {
   if (typeof h.command !== 'string') return false
-  if (h.command.includes(script)) return true
+  if (h.command.includes(LEGACY_CODEX_PERMISSION)) return true
+  const normalizedCommand = h.command.replace(/\\/g, '/')
+  if (normalizedCommand.includes(script.replace(/\\/g, '/'))) return true
   const name = escapeRe(basename(script))
   return new RegExp(`[\\\\/]hooks-bin[\\\\/]${name}(?=["\\s]|$)`, 'i').test(h.command)
 }
@@ -116,8 +121,10 @@ export function installClaudeCode(ccForwardScript: string): void {
   // 覆盖会话全生命周期，实时反映每个 Claude Code 会话：
   ensureHook(hooks, 'SessionStart', undefined, ccForwardScript, 'claude-code SessionStart')
   ensureHook(hooks, 'UserPromptSubmit', undefined, ccForwardScript, 'claude-code UserPromptSubmit')
-  // PreToolUse 是阻塞审批 hook：600s 长超时，避免被默认 60s 杀掉回退原生提示
-  ensureHook(hooks, 'PreToolUse', undefined, ccForwardScript, 'claude-code PreToolUse', 600)
+  // PreToolUse 只上报活动；工具是否执行仍由 Claude Code 自己的权限系统决定。
+  ensureHook(hooks, 'PreToolUse', undefined, ccForwardScript, 'claude-code PreToolUse', 30)
+  // PermissionRequest 只在 Claude Code 真要弹权限提示时触发，是唯一允许阻塞等待用户裁决的入口。
+  ensureHook(hooks, 'PermissionRequest', undefined, ccForwardScript, 'claude-code PermissionRequest', 300)
   ensureHook(hooks, 'Stop', undefined, ccForwardScript, 'claude-code Stop')
   ensureHook(hooks, 'SessionEnd', undefined, ccForwardScript, 'claude-code SessionEnd')
   ensureHook(hooks, 'Notification', undefined, ccForwardScript, 'claude-code Notification')
@@ -140,11 +147,11 @@ export function installCodex(codexForwardScript: string): void {
   backup(CODEX_HOOKS)
   const doc = readJson(CODEX_HOOKS)
   const hooks = ((doc.hooks as Record<string, HookMatcher[]>) ||= {})
-  // Codex 支持的生命周期 matcher（字段细节以真实版本为准）；审批 hook 与 Claude 侧一致给 600s 长超时
+  // PreToolUse 只上报活动；PermissionRequest 才在 Codex 真要弹批准提示时阻塞。
   ensureHook(hooks, 'SessionStart', undefined, codexForwardScript, 'codex SessionStart')
   ensureHook(hooks, 'UserPromptSubmit', undefined, codexForwardScript, 'codex UserPromptSubmit')
-  ensureHook(hooks, 'PermissionRequest', undefined, codexForwardScript, 'codex PermissionRequest', 600)
-  ensureHook(hooks, 'PreToolUse', undefined, codexForwardScript, 'codex PreToolUse', 600)
+  ensureHook(hooks, 'PermissionRequest', undefined, codexForwardScript, 'codex PermissionRequest', 300)
+  ensureHook(hooks, 'PreToolUse', undefined, codexForwardScript, 'codex PreToolUse', 30)
   ensureHook(hooks, 'Stop', undefined, codexForwardScript, 'codex Stop')
   mkdirSync(dirname(CODEX_HOOKS), { recursive: true })
   writeIfChanged(CODEX_HOOKS, JSON.stringify(doc, null, 2))

@@ -52,7 +52,7 @@
 
 ### Claude Code
 
-生命周期 hooks 覆盖 SessionStart、UserPromptSubmit、PreToolUse、Stop、Notification 和 SessionEnd。非只读工具在 PreToolUse 阶段进入阻塞审批，用户裁决通过 HTTP 响应返回。拒绝理由会进入 Agent 上下文，允许其调整方案后继续。
+生命周期 hooks 覆盖 SessionStart、UserPromptSubmit、PreToolUse、PermissionRequest、Stop、Notification 和 SessionEnd。`PreToolUse` 只上报工具活动，不改变 CLI 自身的权限判断；只有 `PermissionRequest`（CLI 真正准备弹授权提示时）才进入阻塞审批。用户裁决通过 HTTP 响应按各 CLI 原生 `decision.behavior` 协议返回，拒绝理由会进入 Agent 上下文，允许其调整方案后继续。
 
 `cc-forward.mjs` 的底线是 fail-open：发现文件不存在、桥不可达、超时或返回异常时，不能锁住 CLI。
 

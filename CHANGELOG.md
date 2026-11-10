@@ -2,7 +2,9 @@
 
 本项目遵循语义化版本。日期使用 Asia/Shanghai。
 
-## [Unreleased]
+## [0.6.19] - 2026-11-10
+
+这一版修的是 Agent 接入的阻塞根因：`PreToolUse` 被误当成审批入口，普通工具调用也会被挂住最长 600 秒。现在工具活动只上报，只有真正出现权限提示时才由岛接管；岛内授权按 Claude Code / Codex 原生协议回传，不再需要到 CLI 再批一次。
 
 ### Added
 
@@ -16,6 +18,11 @@
 
 ### Fixed
 
+- **`PreToolUse` 不再阻塞 Agent**：该事件在每次工具调用前触发，即使 Claude Code / Codex 本来会直接放行。现在只上报活动，不返回权限决定；HTTP 上报最多等 2 秒，桥卡住也快速 fail-open。
+- **审批只发生在真正的 `PermissionRequest`**：只有 CLI 准备弹授权提示时才进入岛。Claude Code 使用 `decision.behavior=allow/deny`；Codex 使用同一套原生 `decision.behavior` 结构，删除会被判失败的旧 `decision/permissionDecision` 顶层字段。
+- **岛内批准真正传到 CLI**：普通授权返回 `behavior=allow`；`ExitPlanMode` 同时回传原始 `updatedInput`，解决批准计划后 Claude Code 仍再次询问的问题。拒绝理由通过 `decision.message` 回传给模型。
+- **清理重复 Codex 权限 hook**：安装器会移除历史遗留的 `agentic-island-permission.mjs` 条目，避免一次授权向岛发送两条请求、弹两张卡。
+- **hook 命令路径固定为正斜杠**：避免应用启动时把手工接入的 `C:/...` 改回 `C:\...`，导致 Codex 的 hook 哈希变化并被标记为 `modified`。
 - **审计实例不再往用户真实的"图片"文件夹写文件**：`save-image-quick`（快存 / 批量美化落盘）之前无视隔离导出目录，跑一次审计就往 `%USERPROFILE%\Pictures\Agentic-Island` 丢文件。现在与保存框走同一道闸。
 
 ## [0.6.18] - 2026-09-15

@@ -32,7 +32,7 @@ const readStdin = () =>
     setTimeout(() => resolve(data), 50)
   })
 
-const postEvent = (bridge, payload) =>
+const postEvent = (bridge, payload, timeoutMs = 10 * 60 * 1000) =>
   new Promise((resolve, reject) => {
     // 附带父进程 PID（= 调用本 hook 的 claude 进程）与入口类型（cli/桌面端）
     const body = JSON.stringify({ ...payload, ppid: process.ppid, entry: process.env.CLAUDE_CODE_ENTRYPOINT || '' })
@@ -57,8 +57,8 @@ const postEvent = (bridge, payload) =>
       }
     )
     req.on('error', reject)
-    // 审批可能耗时数分钟，不设短超时
-    req.setTimeout(10 * 60 * 1000, () => req.destroy(new Error('timeout')))
+    // 只有 PermissionRequest 可以长等；活动上报必须快速 fail-open。
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('timeout')))
     req.write(body)
     req.end()
   })
@@ -115,29 +115,14 @@ async function main() {
     return { command: `${tool}${args && args !== '{}' ? '  ' + args : ''}`, detail: `请求使用工具：${tool}` }
   }
 
-  // ===== 工具审批：灵动岛接管"所有会弹确认的工具"，只读类放行 =====
+  // ===== PreToolUse：只上报活动，不接管权限 =====
+  // PreToolUse 在每次工具调用前都会触发，即使 Claude Code 本来会直接放行。
+  // 在这里阻塞会把正常自动化变成"每个工具都等审批"，所以决策只能放在
+  // PermissionRequest（只有 Claude Code 真要弹权限时才触发）。
   if (eventName === 'PreToolUse') {
     const tool = input.tool_name || ''
-    // 计划审阅：ExitPlanMode 携带 plan 全文 → 岛上作为"实施计划待审阅"审批
-    if (tool === 'ExitPlanMode' || tool === 'exit_plan_mode') {
-      const plan = (input.tool_input && (input.tool_input.plan || input.tool_input.markdown)) || ''
-      let reply
-      try {
-        // 审批阻塞期间并行解析终端句柄（hook 存活、进程链完整，零额外延迟）
-        ;[reply] = await Promise.all([
-          postEvent(bridge, { token: bridge.token, backend, kind: 'permission', sessionId, cwd, tool, command: plan, detail: '📋 待你审阅的实施计划', isPlan: true }),
-          ensureTermInfo(bridge, backend, sessionId, cwd)
-        ])
-      } catch {
-        process.exit(0)
-      }
-      const decision = reply && reply.decision ? reply.decision : 'ask'
-      if (decision === 'allow' || decision === 'deny') {
-        process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: decision === 'allow' ? 'Agentic-Island: 批准计划' : 'Agentic-Island: 继续规划' } }))
-      }
-      process.exit(0)
-    }
-    // Claude 向你提问（AskUserQuestion）：自动放行该提问工具，同时把问题原文推到岛上（等待你回复）
+    // Claude 向你提问（AskUserQuestion）：只把问题原文推到岛上。
+    // 这是交互工具，不是权限请求；答案仍由 Claude Code 自己的提问 UI 收集。
     if (tool === 'AskUserQuestion') {
       const qs = (input.tool_input && input.tool_input.questions) || []
       const text = Array.isArray(qs)
@@ -150,24 +135,31 @@ async function main() {
         report(bridge, { backend, kind: 'notification', sessionId, cwd, detail: text ? `Claude 提问：${text}` : 'Claude 向你提问，等待你的回复…' }),
         ensureTermInfo(bridge, backend, sessionId, cwd)
       ])
-      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: 'Agentic-Island: 提问工具放行' } }))
       process.exit(0)
     }
-    // 只读/无害工具：不拦，只上报活动（与 Claude Code 默认自动放行一致，避免比原生更啰嗦）
-    if (/^(Read|Grep|Glob|LS|NotebookRead|NotebookRead|TodoWrite|TodoRead|Task|TaskOutput|TaskList|TaskGet|BashOutput|KillShell|EnterPlanMode|SlashCommand|Skill|ListMcpResourcesTool|ReadMcpResourceTool)$/.test(tool)) {
-      await report(bridge, { backend, kind: 'activity', sessionId, cwd, tool, detail: activityDetail(tool) })
-      process.exit(0)
-    }
-    // 其余（Bash / Edit / Write / WebFetch / MCP 等）→ 岛上审批（阻塞）
-    // 注意：不再读取 settings.permissions.allow 做静默放行——用户的 allow 列表常含裸工具名
-    // (Bash/Edit/Write…) = "全量放行"，那样会让灵动岛失去审批意义、几乎一切都不再弹。
-    // 灵动岛的定位就是接管审批；要少点确认请用"本会话自动放行只读/安全命令"开关。
+    await report(bridge, { backend, kind: 'activity', sessionId, cwd, tool, detail: activityDetail(tool) })
+    process.exit(0)
+  }
+
+  // ===== PermissionRequest：仅接管 Claude Code 真正准备弹权限提示的请求 =====
+  // 输出协议来自 Claude Code hooks 文档：decision.behavior=allow/deny。
+  // ExitPlanMode 必须回传 updatedInput，否则 Claude Code 不认为该交互工具已被批准。
+  if (eventName === 'PermissionRequest') {
+    const tool = input.tool_name || ''
+    // AskUserQuestion 的答案必须在 Claude Code 原生提问 UI 中收集；这里不抢答。
+    if (tool === 'AskUserQuestion') process.exit(0)
+    const isPlan = tool === 'ExitPlanMode' || tool === 'exit_plan_mode'
+    const plan = isPlan ? (input.tool_input && (input.tool_input.plan || input.tool_input.markdown)) || '' : ''
     const { command, detail } = describeTool(tool, input)
     let reply
     try {
-      // 审批阻塞期间并行解析终端句柄
       ;[reply] = await Promise.all([
-        postEvent(bridge, { token: bridge.token, backend, kind: 'permission', sessionId, cwd, tool, command, detail }),
+        postEvent(bridge, {
+          token: bridge.token, backend, kind: 'permission', sessionId, cwd, tool,
+          command: isPlan ? plan : command,
+          detail: isPlan ? '📋 待你审阅的实施计划' : detail,
+          isPlan
+        }),
         ensureTermInfo(bridge, backend, sessionId, cwd)
       ])
     } catch {
@@ -175,17 +167,16 @@ async function main() {
     }
     const decision = reply && reply.decision ? reply.decision : 'ask'
     const userReason = reply && reply.reason ? String(reply.reason) : ''
-    if (decision === 'allow' || decision === 'deny') {
-      process.stdout.write(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: decision,
-            permissionDecisionReason:
-              decision === 'allow' ? 'Agentic-Island: 用户已允许' : userReason || 'Agentic-Island: 用户已拒绝'
-          }
-        })
-      )
+    if (decision === 'allow') {
+      const permission = { behavior: 'allow', ...(isPlan ? { updatedInput: input.tool_input || {} } : {}) }
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: permission } }))
+    } else if (decision === 'deny') {
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PermissionRequest',
+          decision: { behavior: 'deny', message: userReason || (isPlan ? 'Agentic-Island: 继续规划' : 'Agentic-Island: 用户已拒绝') }
+        }
+      }))
     }
     process.exit(0)
   }
@@ -193,7 +184,7 @@ async function main() {
   // ===== Notification：按类型区分 =====
   if (eventName === 'Notification') {
     const nt = input.notification_type || ''
-    // 权限类由 PreToolUse 审批处理、登录成功无需打扰 —— 都跳过，避免和审批重复或误报"等待"
+    // 权限类由 PermissionRequest 处理、登录成功无需打扰 —— 都跳过，避免和审批重复或误报"等待"
     if (nt === 'permission_prompt' || nt === 'auth_success') process.exit(0)
     // idle_prompt / elicitation_dialog 等 = 真的在等你输入/反问你
     await Promise.all([
@@ -234,7 +225,7 @@ async function main() {
 // 非阻塞上报（失败静默）
 async function report(bridge, payload) {
   try {
-    await postEvent(bridge, { token: bridge.token, ...payload })
+    await postEvent(bridge, { token: bridge.token, ...payload }, 2000)
   } catch {
     /* fail-open */
   }
@@ -280,7 +271,7 @@ async function ensureTermInfo(bridge, backend, sessionId, cwd) {
     if (cached && Date.now() - cached.ts < 600000) {
       if (cached.tok === tok) return // 本轮岛已知晓，无需重报
       if (cached.hwnd) {
-        await postEvent(bridge, { token: bridge.token, backend, kind: 'terminfo', sessionId, cwd, termHwnd: cached.hwnd })
+        await postEvent(bridge, { token: bridge.token, backend, kind: 'terminfo', sessionId, cwd, termHwnd: cached.hwnd }, 2000)
       }
       try { writeFileSync(cacheFile, JSON.stringify({ ...cached, tok })) } catch { /* */ }
       return
@@ -289,7 +280,7 @@ async function ensureTermInfo(bridge, backend, sessionId, cwd) {
     const hwnd = await resolveHwnd(process.ppid)
     try { writeFileSync(cacheFile, JSON.stringify({ hwnd, ts: Date.now(), tok })) } catch { /* */ }
     if (hwnd) {
-      await postEvent(bridge, { token: bridge.token, backend, kind: 'terminfo', sessionId, cwd, termHwnd: hwnd })
+      await postEvent(bridge, { token: bridge.token, backend, kind: 'terminfo', sessionId, cwd, termHwnd: hwnd }, 2000)
     }
   } catch {
     /* fail-open */

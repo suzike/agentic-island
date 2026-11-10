@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.6.18](https://img.shields.io/badge/release-v0.6.18-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.18)
+[![Release v0.6.19](https://img.shields.io/badge/release-v0.6.19-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.6.19)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/terminal-v0618.png" alt="Agentic-Island v0.6.18 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
+<img src="screenshots/terminal-v0619.png" alt="Agentic-Island v0.6.19 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
 
 </div>
 
@@ -34,6 +34,18 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **成果没有沉淀** | 执行记录、情报简报、每日复盘与知识资料成为下一轮工作的上下文 |
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
+
+## v0.6.19 更新概览
+
+这一版修掉 Agent 接入里最影响可用性的一个问题：**岛把“每次工具调用”误当成“需要人审批”**，导致 Claude Code / Codex 原本会自动执行的 Bash、MCP、编辑工具也被 `PreToolUse` 挂住，最长等到 600 秒，实际把自动化卡死。
+
+- **`PreToolUse` 不再阻塞**：它现在只上报活动，不改变 CLI 自己的权限判断。普通工具调用由 Claude Code / Codex 自己决定是否执行；活动上报最多等 2 秒，桥卡住也会 fail-open，不再出现“每个工具都等 5 分钟”。
+- **`PermissionRequest` 才是唯一审批入口**：只有 CLI 真正准备弹授权提示时才进入岛，普通调用不会弹窗。Claude Code 使用 `decision.behavior=allow/deny`，Codex 使用同一套原生协议，不再回传会被判失败的旧字段。
+- **岛内批准会真正生效**：普通授权返回 `behavior=allow`；`ExitPlanMode` 额外回传 `updatedInput`，解决“在岛上批准计划后，Claude Code 还让我再批一次”的协议缺口。拒绝理由走 `decision.message` 回传给 Agent。
+- **清理重复权限 hook**：接入时会移除历史上遗留的 `agentic-island-permission.mjs` 条目，避免同一次 Codex 授权向岛发两条请求、弹两张卡。
+- **路径格式稳定**：hook 命令统一写成正斜杠，避免应用重启把 `C:\...` 改回 `C:/...` 后触发 Codex 的 hook 哈希变化与重新信任。
+
+真实验证：本机 Codex CLI 已确认全局 hook 处于 `trusted`，工具调用只产生 `PreToolUse` 活动、不再等待 600 秒；桥“接受连接但不响应”时 2.1 秒内 fail-open；Claude 侧以真实 hook 协议 + 离线回归覆盖 allow/deny、计划 `updatedInput`、2 秒超时与安装器幂等。
 
 ## v0.6.18 更新概览
 
@@ -224,24 +236,24 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v0618.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v0618.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v0619.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v0619.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v0618.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v0618.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v0619.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v0619.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v0618.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v0618.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v0619.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v0619.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/recording-v0618.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
-<td width="50%" align="center"><img src="screenshots/settings-v0618.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v0619.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
+<td width="50%" align="center"><img src="screenshots/settings-v0619.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v0618.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v0619.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -317,7 +329,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 
 <div align="center"><img src="docs/agent-channel.svg" alt="Claude Code 与 Codex 接入和审批闭环" width="1100"/></div>
 
-- Claude Code 通过生命周期 hooks 进入本地桥，`PreToolUse` 可阻塞到用户裁决。
+- Claude Code 通过生命周期 hooks 进入本地桥：`PreToolUse` 只上报活动，`PermissionRequest` 才在真正需要授权时阻塞到用户裁决。
 - 转发器读取 `~/.agentic-island/bridge.json` 中的随机端口与 token；岛未运行时 fail-open。
 - Codex 以 rollout 日志跟随为稳定监控主路；桌面端 hooks 可提供审批，CLI 日志跟随不伪造审批能力。
 - 拒绝理由会返回 Agent，形成可继续调整方案的 steer 闭环。
@@ -341,7 +353,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.6.18.exe
+Agentic-Island-Setup-0.6.19.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。
@@ -369,6 +381,8 @@ npm run dev
 在「设置」中可配置 OpenAI 兼容 `/chat/completions` 端点，也可选择 `Claude` 直连 Anthropic 原生 `/v1/messages`。当前内置 OpenAI GPT-5.6 Sol/Terra/Luna 与 Claude Sonnet 5、Opus 4.8、Fable 5、Haiku 4.5；DeepSeek V4、Kimi Code 和 Kimi 开放平台保持各自协议参数。Kimi For Coding 会员密钥请选择 `Kimi Code`（`https://api.kimi.com/coding/v1`，固定 `kimi-for-coding`、`kimi-for-coding-highspeed`、`k3`）；Moonshot AI 开放平台密钥请选择 `Kimi 开放平台`（`https://api.moonshot.cn/v1`）。每个供应商和账号的模型、Base URL、API Key 独立保存，支持发现模型的供应商可通过 `/models` 获取账号实际目录；误填完整 Chat Completions/Messages 地址会自动归一。知识库另有独立 Embedding 连接，不随问答模型切换。所有 API Key 经 Electron `safeStorage` 使用 Windows DPAPI 加密。
 
 本地 Agent 问答和快捷工作流需要系统中可直接调用 `claude` 或 `codex` CLI，并继承它们本身的登录状态、技能、MCP 和项目说明文件。
+
+Codex 首次接入或在 hook 定义变化后，会要求通过 `/hooks` 信任新增 hook；这是 Codex 自身的安全机制。信任后，命令审批只在 Codex 真正弹出授权时由岛接管。
 
 ### 日历
 
@@ -426,7 +440,7 @@ npm run demo:plan       # 向运行中的应用注入计划审阅演示
 npm run probe           # hooks 接入诊断与事件跟踪
 ```
 
-`npm test` 当前顺序执行 42 个离线脚本，自动排除 `test-real-claude.ts`。覆盖 Agent 生命周期、审批闭环与审批策略、Codex 跟随、外部让位、日历、待办、快捷、终端工作区/项目扫描、Markdown、便签、资讯、复盘、供应商模型配置迁移、回答与分析方法目录、DeepSeek/Kimi/Anthropic 请求协议、录屏合成/会话/工程/FFmpeg 导出、截图轮询与滚动拼接排版、主题、向量、知识链接、RSS 解析、知识库纯逻辑、附件外置、定时自动化调度、番茄钟、SRS、工程计算和工作台迁移。`npm run audit:ask` 与 `npm run audit:terminal` 分别启动隔离 Electron 验证问答交互和真实 ConPTY 交互。真实 Claude CLI 与云供应商账号连通测试需在已登录或持有有效密钥的环境中单独运行。
+`npm test` 当前顺序执行 42 个离线脚本，自动排除 `test-real-claude.ts`。覆盖 Agent 生命周期、`PreToolUse` 零阻塞、`PermissionRequest` allow/deny 与计划 `updatedInput`、审批策略、Codex 跟随、外部让位、日历、待办、快捷、终端工作区/项目扫描、Markdown、便签、资讯、复盘、供应商模型配置迁移、回答与分析方法目录、DeepSeek/Kimi/Anthropic 请求协议、录屏合成/会话/工程/FFmpeg 导出、截图轮询与滚动拼接排版、主题、向量、知识链接、RSS 解析、知识库纯逻辑、附件外置、定时自动化调度、番茄钟、SRS、工程计算和工作台迁移。`npm run audit:ask` 与 `npm run audit:terminal` 分别启动隔离 Electron 验证问答交互和真实 ConPTY 交互。真实 Claude CLI 与云供应商账号连通测试需在已登录或持有有效密钥的环境中单独运行。
 
 `.github/workflows/release.yml` 提供可重复的 Windows Release 门禁：在 GitHub Windows runner 上重新安装依赖、执行类型检查和全部离线测试、生成 NSIS 安装包与 SHA-256，并上传到指定草稿 Release 后发布。
 

@@ -27,7 +27,7 @@ const readStdin = () =>
     setTimeout(() => resolve(data), 50)
   })
 
-const postEvent = (bridge, payload) =>
+const postEvent = (bridge, payload, timeoutMs = 10 * 60 * 1000) =>
   new Promise((resolve, reject) => {
     const body = JSON.stringify({ ...payload, ppid: process.ppid })
     const req = request(
@@ -51,7 +51,8 @@ const postEvent = (bridge, payload) =>
       }
     )
     req.on('error', reject)
-    req.setTimeout(10 * 60 * 1000, () => req.destroy(new Error('timeout')))
+    // 只有 PermissionRequest 可以长等；PreToolUse 活动上报必须快速 fail-open。
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('timeout')))
     req.write(body)
     req.end()
   })
@@ -93,15 +94,21 @@ async function main() {
   const tool = input.tool_name || (command ? 'command' : '')
   trace(`${eventName} tool=${tool || '-'} sess=${String(sessionId).slice(0, 8)} cwd=${String(cwd).slice(-30)}`)
 
-  // 纯只读工具：不拦，只上报活动
-  if (eventName === 'PreToolUse' && /^(Read|Grep|Glob|LS|NotebookRead)$/.test(tool)) {
-    try { await postEvent(bridge, { token: bridge.token, backend, kind: 'activity', sessionId, cwd, tool, detail: '正在检索/读取…' }) } catch { /* */ }
+  // PreToolUse 每次工具调用都会触发，即使 Codex 本来会直接执行；
+  // 在这里阻塞会把所有自动化变成逐工具审批。只上报活动，不返回决定。
+  if (eventName === 'PreToolUse') {
+    const detail = command ? `正在执行：${command}` : `正在使用工具：${tool || 'command'}`
+    try { await postEvent(bridge, { token: bridge.token, backend, kind: 'activity', sessionId, cwd, tool, detail }, 2000) } catch { /* */ }
     process.exit(0)
   }
 
-  // 需要审批：PermissionRequest，或任意 PreToolUse（非只读）→ 阻塞等裁决
-  if (eventName === 'PermissionRequest' || eventName === 'PreToolUse') {
-    const detail = command ? `请求执行命令：${command}` : `请求使用工具：${tool || 'command'}`
+  // PermissionRequest 只在 Codex 真正准备弹批准提示时触发（命令升级、网络审批等）。
+  // 输出必须严格使用 Codex hooks 文档的 decision.behavior 结构；回传其它旧字段会被判为失败。
+  if (eventName === 'PermissionRequest') {
+    const description = input && input.tool_input && typeof input.tool_input.description === 'string'
+      ? input.tool_input.description.trim()
+      : ''
+    const detail = description || (command ? `请求执行命令：${command}` : `请求使用工具：${tool || 'command'}`)
     let reply
     try {
       reply = await postEvent(bridge, {
@@ -114,17 +121,10 @@ async function main() {
     const decision = reply && reply.decision ? reply.decision : 'ask'
     const userReason = reply && reply.reason ? String(reply.reason) : ''
     if (decision === 'allow' || decision === 'deny') {
-      const approved = decision === 'allow'
-      const reason = approved ? 'Agentic-Island: 用户已允许' : userReason || 'Agentic-Island: 用户已拒绝'
-      process.stdout.write(
-        JSON.stringify({
-          decision: approved ? 'approved' : 'denied',
-          reason,
-          permissionDecision: decision,
-          permissionDecisionReason: reason,
-          hookSpecificOutput: { hookEventName: 'PermissionRequest', permissionDecision: decision, permissionDecisionReason: reason }
-        })
-      )
+      const hookDecision = decision === 'allow'
+        ? { behavior: 'allow' }
+        : { behavior: 'deny', message: userReason || 'Agentic-Island: 用户已拒绝' }
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: hookDecision } }))
     }
     process.exit(0)
   }
@@ -136,10 +136,10 @@ async function main() {
   else if (eventName === 'UserPromptSubmit') { kind = 'prompt'; detail = '对话中 · 正在处理你的消息…' }
   else if (eventName === 'Stop') { kind = 'stop'; detail = input.last_assistant_message || input['last-assistant-message'] || '本轮完成 · 待命中…' }
   else if (eventName === 'SessionEnd') { kind = 'end'; detail = '会话已结束' }
-  else if (eventName === 'PreToolUse' || eventName === 'PostToolUse') { kind = 'activity'; detail = '正在工作…' }
+  else if (eventName === 'PostToolUse') { kind = 'activity'; detail = '正在工作…' }
 
   try {
-    await postEvent(bridge, { token: bridge.token, backend, kind, sessionId, cwd, detail })
+    await postEvent(bridge, { token: bridge.token, backend, kind, sessionId, cwd, detail }, 2000)
   } catch {
     /* fail-open */
   }

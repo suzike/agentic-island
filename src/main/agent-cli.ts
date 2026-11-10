@@ -1,6 +1,6 @@
 // 本地 Agent CLI 桥（流式）：把问答直接交给本机 Claude Code / Codex 的无头模式，逐行解析 JSONL 事件流，
 // 归一化为 think/text/tool/result 事件推给渲染层——思考过程、工具/技能/MCP 步骤、最终回复全部实时可见，
-// 与终端里工作方式一致（审批也照常走岛的 PreToolUse hook 阻塞审批流）。
+// 与终端里工作方式一致（审批也照常走岛的 PermissionRequest hook 阻塞审批流）。
 // Windows 约束：.cmd 垫片经 cmd.exe /d /s /c 调起；提示词一律走 stdin，杜绝引号转义。
 //   claude: `claude -p --output-format stream-json --verbose --include-partial-messages [-c]`
 //     - stream_event(text_delta/thinking_delta) → 逐 token 流式

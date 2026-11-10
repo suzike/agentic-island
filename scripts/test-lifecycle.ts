@@ -4,6 +4,7 @@
 
 import { spawn } from 'child_process'
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'fs'
+import { createServer } from 'http'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { AgentsStore } from '../src/main/agents-store.ts'
@@ -18,25 +19,48 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 let failed = false
 const check = (cond: boolean, msg: string): void => { console.log((cond ? '  ✓ ' : '  ✗ ') + msg); if (!cond) failed = true }
 
-async function fire(script: string, evt: string, input: object): Promise<void> {
-  const child = spawn('node', [script, 'claude-code', evt], { stdio: ['pipe', 'ignore', 'ignore'] })
-  child.stdin.write(JSON.stringify(input))
-  child.stdin.end()
-  await new Promise((res) => child.on('close', res))
+async function runForwarder(
+  script: string,
+  backend: string,
+  evt: string,
+  input: object,
+  timeoutMs = 15000
+): Promise<{ stdout: string; ms: number }> {
+  const started = Date.now()
+  return new Promise((resolve, reject) => {
+    const child = spawn('node', [script, backend, evt], { stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (c) => (stdout += c))
+    child.stderr.on('data', (c) => (stderr += c))
+    const timer = setTimeout(() => {
+      child.kill()
+      reject(new Error(`${evt} 超过 ${timeoutMs}ms 仍未返回；stderr=${stderr.trim()}`))
+    }, timeoutMs)
+    child.on('close', () => {
+      clearTimeout(timer)
+      resolve({ stdout, ms: Date.now() - started })
+    })
+    child.stdin.write(JSON.stringify(input))
+    child.stdin.end()
+  })
 }
+
+const fire = (script: string, evt: string, input: object, timeoutMs = 15000) =>
+  runForwarder(script, 'claude-code', evt, input, timeoutMs)
+
+const fireCodex = (script: string, evt: string, input: object, timeoutMs = 15000) =>
+  runForwarder(script, 'codex', evt, input, timeoutMs)
 
 async function partA(): Promise<void> {
   console.log('A) 会话全生命周期实时上报：')
   const store = new AgentsStore()
   const bridge = new BridgeServer(store, undefined, TEST_BRIDGE_FILE)
   await bridge.start()
-  // 自动放行任何待审批（模拟用户点允许）
-  store.on('change', () => {
-    for (const a of store.snapshot().agents) if (a.status === 'needs_approval' && a.requestId) store.decide(a.requestId, 'allow')
-  })
   const script = join(process.cwd(), 'src', 'hooks-bin', 'cc-forward.mjs')
   const cwd = process.cwd()
   const detail = (): string => store.snapshot().agents[0]?.detail || ''
+  const pending = () => store.snapshot().agents.find((a) => a.status === 'needs_approval')
 
   await fire(script, 'SessionStart', { cwd, session_id: 's' }); await sleep(120)
   check(detail().includes('会话已开始'), `SessionStart → "${detail()}"`)
@@ -44,39 +68,80 @@ async function partA(): Promise<void> {
   await fire(script, 'UserPromptSubmit', { cwd, session_id: 's' }); await sleep(120)
   check(detail().includes('对话中'), `UserPromptSubmit → "${detail()}"`)
 
-  // 只读工具 → 不拦，只上报活动
-  await fire(script, 'PreToolUse', { cwd, session_id: 's', tool_name: 'Read' }); await sleep(120)
-  check(detail().includes('读取文件'), `PreToolUse(Read) 只读→活动 → "${detail()}"`)
+  // PreToolUse 不论工具类型都必须立即返回：它只是活动上报，不是权限请求。
+  for (const [tool, toolInput, expect] of [
+    ['Read', { file_path: 'a.ts' }, '读取文件'],
+    ['Edit', { file_path: 'a.ts' }, '编辑文件'],
+    ['mcp__filesystem__list_directory', { path: 'C:/x' }, 'list_directory'],
+    ['Bash', { command: 'ls -la' }, '运行命令']
+  ] as const) {
+    const result = await fire(script, 'PreToolUse', { cwd, session_id: 's', tool_name: tool, tool_input: toolInput })
+    check(result.ms < 2000 && !pending(), `PreToolUse(${tool}) 不阻塞（${result.ms}ms）`)
+    check(detail().includes(expect), `PreToolUse(${tool}) 只上报活动 → "${detail()}"`)
+  }
 
-  // Edit（非只读）→ 岛上审批（自动放行）
-  await fire(script, 'PreToolUse', { cwd, session_id: 's', tool_name: 'Edit', tool_input: { file_path: 'a.ts' } }); await sleep(120)
-  check(store.snapshot().agents[0]?.status === 'running' && detail().includes('已允许'), `PreToolUse(Edit) 非只读→审批放行 → "${detail()}"`)
+  // 真正需要权限时，PermissionRequest 才阻塞，并回传 Claude Code 原生 decision 结构。
+  {
+    const p = fire(script, 'PermissionRequest', {
+      cwd, session_id: 's', tool_name: 'Edit', tool_input: { file_path: 'a.ts' }
+    })
+    await sleep(300)
+    const card = pending()
+    check(!!card?.requestId && (card?.command || '').includes('a.ts'), `PermissionRequest(Edit) → 待审批卡`)
+    store.decide(card!.requestId!, 'allow')
+    const result = await p
+    const out = JSON.parse(result.stdout.trim())
+    check(out?.hookSpecificOutput?.decision?.behavior === 'allow', `PermissionRequest(Edit) 回传 behavior=allow`)
+    check(!('permissionDecision' in (out?.hookSpecificOutput || {})), 'PermissionRequest 不再回传错误的 permissionDecision 字段')
+    check(detail().includes('已允许'), `PermissionRequest(Edit) 裁决后 → "${detail()}"`)
+  }
 
-  // MCP 工具 → 岛上审批（自动放行）—— 正是截图里 list_directory 的场景
-  await fire(script, 'PreToolUse', { cwd, session_id: 's', tool_name: 'mcp__filesystem__list_directory', tool_input: { path: 'C:/x' } }); await sleep(120)
-  check(store.snapshot().agents[0]?.status === 'running' && detail().includes('已允许'), `PreToolUse(MCP) 非只读→审批放行 → "${detail()}"`)
-
-  // Bash → 审批（自动放行）
-  await fire(script, 'PreToolUse', { cwd, session_id: 's', tool_name: 'Bash', tool_input: { command: 'ls -la' } }); await sleep(120)
-  check(store.snapshot().agents[0]?.status === 'running', `PreToolUse(Bash) 审批放行后 → running`)
+  // deny 的理由必须走 decision.message，Claude Code 会把它作为拒绝原因反馈给模型。
+  {
+    const p = fire(script, 'PermissionRequest', {
+      cwd, session_id: 's', tool_name: 'Bash', tool_input: { command: 'rm -rf dist' }
+    })
+    await sleep(300)
+    const card = pending()
+    store.decide(card!.requestId!, 'deny', '只清理 dist/.cache')
+    const result = await p
+    const decision = JSON.parse(result.stdout.trim())?.hookSpecificOutput?.decision
+    check(decision?.behavior === 'deny' && decision?.message === '只清理 dist/.cache', `PermissionRequest deny 理由已回传`)
+  }
 
   // Notification（Agent 反问/等你输入）→ 醒目的"等待你回复"态
   await fire(script, 'Notification', { cwd, session_id: 's', message: '还需要你补充目标数据库的连接串' }); await sleep(120)
   check(store.snapshot().agents[0]?.status === 'waiting' && detail().includes('数据库'), `Notification → 等待回复 → "${detail()}"`)
 
-  // ExitPlanMode（Plan 模式提交计划）→ 岛上"实施计划待审阅"（自动放行）
-  await fire(script, 'PreToolUse', { cwd, session_id: 's', tool_name: 'ExitPlanMode', tool_input: { plan: '## 计划\n1. 重构 X\n2. 补测试' } }); await sleep(150)
+  // ExitPlanMode 的审批必须带 updatedInput，否则 Claude Code 仍会再次询问计划。
+  const planText = '## 计划\n1. 重构 X\n2. 补测试'
   {
-    const a = store.snapshot().agents[0]
-    check(a?.status === 'running', `ExitPlanMode → 计划审阅（放行后 running）`)
+    const p = fire(script, 'PermissionRequest', {
+      cwd, session_id: 's', tool_name: 'ExitPlanMode', tool_input: { plan: planText }
+    })
+    await sleep(300)
+    const card = pending()
+    check(card?.isPlan === true, 'PermissionRequest(ExitPlanMode) → 计划审阅卡')
+    store.decide(card!.requestId!, 'allow')
+    const result = await p
+    const decision = JSON.parse(result.stdout.trim())?.hookSpecificOutput?.decision
+    check(decision?.behavior === 'allow' && decision?.updatedInput?.plan === planText, '计划批准回传 updatedInput，授权可被 Claude Code 直接采用')
+    check(store.snapshot().agents[0]?.status === 'running', 'ExitPlanMode 批准后回到 running')
   }
 
   // 权限类通知（permission_prompt）应被跳过（由 PreToolUse 审批处理），不误报"等待"
   await fire(script, 'Notification', { cwd, session_id: 's', message: 'Claude needs your permission', notification_type: 'permission_prompt' }); await sleep(120)
   check(store.snapshot().agents[0]?.status !== 'waiting', `permission_prompt 通知被跳过（状态未变 waiting）`)
 
-  // AskUserQuestion（Claude 向你提问）→ 自动放行 + 岛上"等待回复"带问题原文
-  await fire(script, 'PreToolUse', { cwd, session_id: 's', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: '选哪个数据库？', options: [{ label: 'Postgres' }, { label: 'SQLite' }] }] } }); await sleep(150)
+  // AskUserQuestion：岛上只提示问题，不代答、不阻塞原生提问 UI。
+  {
+    const result = await fire(script, 'PreToolUse', {
+      cwd, session_id: 's', tool_name: 'AskUserQuestion',
+      tool_input: { questions: [{ question: '选哪个数据库？', options: [{ label: 'Postgres' }, { label: 'SQLite' }] }] }
+    })
+    check(result.ms < 2000 && !result.stdout.trim(), 'AskUserQuestion 不返回伪批准，交还原生提问 UI')
+  }
+  await sleep(150)
   check(store.snapshot().agents[0]?.status === 'waiting' && detail().includes('选哪个数据库'), `AskUserQuestion → 等待回复带问题原文 → "${detail().slice(0, 50)}"`)
 
   // 每轮结束 = 等待用户回复 → 立即弹岛（不等 CC 迟到的 idle 通知）
@@ -116,23 +181,54 @@ async function partB(): Promise<void> {
     }
   }))
 
-  inst.installClaudeCode('C:/app/cc-forward.mjs')
-  inst.installClaudeCode('C:/app/cc-forward.mjs') // 二次安装应幂等
+  inst.installClaudeCode('C:\\app\\cc-forward.mjs')
+  inst.installClaudeCode('C:\\app\\cc-forward.mjs') // 二次安装应幂等
 
   const settings = JSON.parse(readFileSync(join(ccPath, 'settings.json'), 'utf8'))
   const events = Object.keys(settings.hooks || {})
-  check(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop', 'SessionEnd', 'Notification'].every((e) => events.includes(e)), `覆盖事件：${events.join(', ')}`)
+  check(
+    ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest', 'Stop', 'SessionEnd', 'Notification'].every((e) => events.includes(e)),
+    `覆盖事件：${events.join(', ')}`
+  )
   check(settings.model === 'opus', '保留了用户已有的 model 配置（合并不覆盖）')
   const stopHooks = settings.hooks.Stop.flatMap((m: { hooks: { command: string }[] }) => m.hooks.map((h) => h.command))
   check(stopHooks.some((c: string) => c.includes('echo user-own')), '保留了用户已有的 Stop hook')
   const ourPre = settings.hooks.PreToolUse.flatMap((m: { hooks: { command: string }[] }) => m.hooks).filter((h: { command: string }) => h.command.includes('cc-forward.mjs'))
   check(ourPre.length === 1, `PreToolUse 幂等（我方条目数=${ourPre.length}，应为 1）`)
   check(ourPre[0]?.command.includes('C:/app/cc-forward.mjs'), '重新接入会清理迁移前的失效脚本路径')
+  check(ourPre[0]?.timeout === 30, `PreToolUse 短超时（${ourPre[0]?.timeout}s，不再占住 600s）`)
+  const ourPermission = settings.hooks.PermissionRequest.flatMap((m: { hooks: { command: string; timeout?: number }[] }) => m.hooks).filter((h: { command: string }) => h.command.includes('cc-forward.mjs'))
+  check(ourPermission.length === 1 && ourPermission[0]?.timeout === 300, `PermissionRequest 接管真实权限弹窗（条目=${ourPermission.length}，超时=${ourPermission[0]?.timeout}s）`)
   check(existsSync(join(ccPath, 'settings.json.aiisland.bak')), '生成了备份文件')
 
-  // Codex notify（Windows 用）：config.toml 追加 notify，不覆盖用户已有内容
+  // Codex：PreToolUse 也必须短超时且不承担审批，PermissionRequest 才允许等待用户。
+  // 同时清理 7 月遗留的 agentic-island-permission.mjs，避免同一次授权弹两张卡。
   const cxDir = join(home, '.codex')
   fs.mkdirSync(cxDir, { recursive: true })
+  writeFileSync(join(cxDir, 'hooks.json'), JSON.stringify({
+    hooks: {
+      PermissionRequest: [{
+        hooks: [
+          { type: 'command', command: 'node "C:/Users/old/.codex/hooks/agentic-island-permission.mjs" codex PermissionRequest', timeout: 125 },
+          { type: 'command', command: 'echo user-codex-own' }
+        ]
+      }]
+    }
+  }))
+  inst.installCodex('C:\\app\\codex-forward.mjs')
+  inst.installCodex('C:\\app\\codex-forward.mjs')
+  const codexHooks = JSON.parse(readFileSync(join(home, '.codex', 'hooks.json'), 'utf8'))
+  const codexPre = codexHooks.hooks.PreToolUse.flatMap((m: { hooks: { command: string; timeout?: number }[] }) => m.hooks)
+    .filter((h: { command: string }) => h.command.includes('codex-forward.mjs'))
+  const codexPermission = codexHooks.hooks.PermissionRequest.flatMap((m: { hooks: { command: string; timeout?: number }[] }) => m.hooks)
+    .filter((h: { command: string }) => h.command.includes('codex-forward.mjs'))
+  check(codexPre.length === 1 && codexPre[0]?.timeout === 30, `Codex PreToolUse 短超时（${codexPre[0]?.timeout}s）`)
+  check(codexPermission.length === 1 && codexPermission[0]?.timeout === 300, `Codex PermissionRequest 独立接管（${codexPermission[0]?.timeout}s）`)
+  const codexPermissionAll = codexHooks.hooks.PermissionRequest.flatMap((m: { hooks: { command: string }[] }) => m.hooks)
+  check(!codexPermissionAll.some((h: { command: string }) => h.command.includes('agentic-island-permission.mjs')), '清理遗留 Codex 权限 hook，避免重复弹窗')
+  check(codexPermissionAll.some((h: { command: string }) => h.command.includes('user-codex-own')), '保留用户自己的 Codex hook')
+
+  // Codex notify（Windows 用）：config.toml 追加 notify，不覆盖用户已有内容
   writeFileSync(join(cxDir, 'config.toml'), 'model = "gpt-5-codex"\napproval_policy = "on-request"\n')
   inst.installCodexNotify('C:/app/codex-notify.mjs')
   inst.installCodexNotify('C:/app/codex-notify.mjs') // 幂等
@@ -145,11 +241,89 @@ async function partB(): Promise<void> {
   check(!toml2.includes('codex-notify.mjs') && toml2.includes('model = "gpt-5-codex"'), 'Codex notify 可卸载还原且不动用户内容')
 }
 
+async function partC(): Promise<void> {
+  console.log('C) Codex hook：PreToolUse 只上报，PermissionRequest 才接管：')
+  const store = new AgentsStore()
+  const bridge = new BridgeServer(store, undefined, TEST_BRIDGE_FILE)
+  await bridge.start()
+  const script = join(process.cwd(), 'src', 'hooks-bin', 'codex-forward.mjs')
+  const cwd = process.cwd()
+  const pending = () => store.snapshot().agents.find((a) => a.status === 'needs_approval')
+
+  {
+    const result = await fireCodex(script, 'PreToolUse', {
+      cwd, session_id: 'codex-s', tool_name: 'Bash', tool_input: { command: 'echo codex-ok' }
+    })
+    check(result.ms < 2000 && !result.stdout.trim() && !pending(), `Codex PreToolUse 不阻塞（${result.ms}ms）`)
+    check((store.snapshot().agents[0]?.detail || '').includes('正在执行'), `Codex PreToolUse 只上报活动`)
+  }
+
+  {
+    const p = fireCodex(script, 'PermissionRequest', {
+      cwd, session_id: 'codex-s', tool_name: 'Bash', tool_input: { command: 'echo needs-approval', description: 'run echo' }
+    })
+    await sleep(300)
+    const card = pending()
+    check(!!card?.requestId && (card?.detail || '').includes('run echo'), 'Codex PermissionRequest → 待审批卡')
+    store.decide(card!.requestId!, 'allow')
+    const result = await p
+    const out = JSON.parse(result.stdout.trim())
+    check(out?.hookSpecificOutput?.decision?.behavior === 'allow', 'Codex PermissionRequest 回传 behavior=allow')
+    check(!('decision' in out) && !('permissionDecision' in out), 'Codex 不再回传旧版 decision/permissionDecision 顶层字段')
+  }
+
+  {
+    const p = fireCodex(script, 'PermissionRequest', {
+      cwd, session_id: 'codex-s', tool_name: 'apply_patch', tool_input: { command: '*** Begin Patch' }
+    })
+    await sleep(300)
+    const card = pending()
+    store.decide(card!.requestId!, 'deny', '不要改这个文件')
+    const result = await p
+    const decision = JSON.parse(result.stdout.trim())?.hookSpecificOutput?.decision
+    check(decision?.behavior === 'deny' && decision?.message === '不要改这个文件', 'Codex PermissionRequest deny 理由已回传')
+  }
+
+  bridge.stop()
+}
+
+async function partD(): Promise<void> {
+  console.log('D) 桥接受连接但卡住时，PreToolUse 仍快速 fail-open：')
+  const server = createServer(() => {
+    // 故意不响应：模拟岛进程卡死但端口仍接受连接。
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('no hanging bridge port')
+  const bridgeFile = join(mkdtempSync(join(tmpdir(), 'aiisland-hang-')), 'bridge.json')
+  writeFileSync(bridgeFile, JSON.stringify({ port: address.port, token: 'hang-token' }))
+
+  const script = join(process.cwd(), 'src', 'hooks-bin', 'cc-forward.mjs')
+  const started = Date.now()
+  const child = spawn('node', [script, 'claude-code', 'PreToolUse'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, AIISLAND_BRIDGE_FILE: bridgeFile }
+  })
+  let stdout = ''
+  child.stdout.on('data', (c) => (stdout += c))
+  const timer = setTimeout(() => child.kill(), 6000)
+  child.stdin.write(JSON.stringify({ cwd: process.cwd(), session_id: 'hang', tool_name: 'Bash', tool_input: { command: 'echo hi' } }))
+  child.stdin.end()
+  const code: number = await new Promise((resolve) => child.on('close', resolve))
+  clearTimeout(timer)
+  const elapsed = Date.now() - started
+  check(code === 0 && elapsed < 4000 && !stdout.trim(), `活动上报 2s 超时后放行（${elapsed}ms）`)
+  server.closeAllConnections?.()
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+}
+
 async function run(): Promise<void> {
   await partA()
   await partB()
+  await partC()
+  await partD()
   if (failed) { console.error('\n❌ 有断言未通过'); process.exit(1) }
-  console.log('\n✅ 全局常驻实时接入验证通过：全生命周期实时上报 + 全局幂等合并安装')
+  console.log('\n✅ 全局接入验证通过：PreToolUse 零阻塞 + PermissionRequest 裁决回传 + 幂等安装')
   process.exit(0)
 }
 run().catch((e) => { console.error('异常', e); process.exit(1) })

@@ -186,7 +186,7 @@ const forwarderPath = (name: string): string => {
 }
 
 // 全局接入：
-// - Claude Code：hooks（PreToolUse 阻塞审批 + 生命周期），全功能。
+// - Claude Code：hooks（PreToolUse 活动上报 + PermissionRequest 阻塞审批 + 生命周期），全功能。
 // - Codex：双通道——① rollout 日志跟随（CodexTail，实时监控+完成，永远可靠）；
 //   ② hooks（实测：桌面端会触发审批/事件，CLI 不触发）→ 有则获得审批能力，没有也不影响 ①。
 //   notify 在 Windows 被 OpenAI computer-use 独占，不安装。

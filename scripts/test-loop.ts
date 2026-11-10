@@ -25,13 +25,30 @@ async function run(): Promise<void> {
   const payload = JSON.stringify({
     session_id: 'test-sess',
     cwd: process.cwd(),
-    hook_event_name: 'PreToolUse',
+    hook_event_name: 'PermissionRequest',
     tool_name: 'Bash',
     tool_input: { command: 'rm -rf dist/ && npm run build' }
   })
 
-  // 启动真实转发脚本，喂入 PreToolUse
-  const child = spawn('node', [script, 'claude-code', 'PreToolUse'], { stdio: ['pipe', 'pipe', 'pipe'] })
+  // ===== 场景 0：PreToolUse 只是活动上报，必须立即返回且不产生待审批 =====
+  {
+    const started = Date.now()
+    const probe = spawn('node', [script, 'claude-code', 'PreToolUse'], { stdio: ['pipe', 'pipe', 'pipe'] })
+    let probeOut = ''
+    probe.stdout.on('data', (c) => (probeOut += c))
+    probe.stdin.write(JSON.stringify({ session_id: 'probe', cwd: process.cwd(), tool_name: 'Bash', tool_input: { command: 'echo hi' } }))
+    probe.stdin.end()
+    const code: number = await new Promise((resolve) => probe.on('close', resolve))
+    const elapsed = Date.now() - started
+    if (code !== 0 || elapsed > 2000 || probeOut.trim() || store.snapshot().agents.some((a) => a.status === 'needs_approval')) {
+      console.error(`❌ PreToolUse 不应阻塞或产生审批：code=${code} elapsed=${elapsed}ms out=${probeOut}`)
+      process.exit(1)
+    }
+    console.log(`[forwarder] ✓ PreToolUse 非阻塞（${elapsed}ms，无决定、无审批卡）`)
+  }
+
+  // 启动真实转发脚本，喂入 PermissionRequest（Claude Code 真正准备弹权限时才会触发）
+  const child = spawn('node', [script, 'claude-code', 'PermissionRequest'], { stdio: ['pipe', 'pipe', 'pipe'] })
   let stdout = ''
   child.stdout.on('data', (c) => (stdout += c))
   child.stdin.write(payload)
@@ -61,9 +78,13 @@ async function run(): Promise<void> {
   console.log(`[forwarder] 退出码 ${code}，输出：${stdout.trim()}`)
 
   const parsed = JSON.parse(stdout.trim())
-  const decision = parsed?.hookSpecificOutput?.permissionDecision
-  if (decision !== 'allow') {
-    console.error(`❌ 决定回传错误，期望 allow，实际 ${decision}`)
+  const decision = parsed?.hookSpecificOutput?.decision
+  if (decision?.behavior !== 'allow') {
+    console.error(`❌ 决定回传错误，期望 decision.behavior=allow，实际 ${JSON.stringify(decision)}`)
+    process.exit(1)
+  }
+  if ('permissionDecision' in (parsed?.hookSpecificOutput || {})) {
+    console.error('❌ PermissionRequest 不应回传 permissionDecision（该字段属于 PreToolUse）')
     process.exit(1)
   }
 
@@ -73,7 +94,7 @@ async function run(): Promise<void> {
   console.log(`[island] 裁决后状态：${after?.status} · ${after?.detail}`)
 
   // ===== 场景 2：deny + 接力理由 → 理由必须回传为 permissionDecisionReason =====
-  const child2 = spawn('node', [script, 'claude-code', 'PreToolUse'], { stdio: ['pipe', 'pipe', 'pipe'] })
+  const child2 = spawn('node', [script, 'claude-code', 'PermissionRequest'], { stdio: ['pipe', 'pipe', 'pipe'] })
   let out2 = ''
   child2.stdout.on('data', (c) => (out2 += c))
   child2.stdin.write(JSON.stringify({ session_id: 's2', cwd: process.cwd(), tool_name: 'Bash', tool_input: { command: 'rm -rf /' } }))
@@ -85,8 +106,8 @@ async function run(): Promise<void> {
   await new Promise((resolve) => child2.on('close', resolve))
   const parsed2 = JSON.parse(out2.trim())
   console.log('[forwarder2] 输出:', out2.trim())
-  if (parsed2?.hookSpecificOutput?.permissionDecision !== 'deny' || parsed2?.hookSpecificOutput?.permissionDecisionReason !== steerMsg) {
-    console.error('❌ 接力理由未正确回传为 deny 理由')
+  if (parsed2?.hookSpecificOutput?.decision?.behavior !== 'deny' || parsed2?.hookSpecificOutput?.decision?.message !== steerMsg) {
+    console.error('❌ 接力理由未正确回传为 decision.message')
     process.exit(1)
   }
   console.log('[island] ✓ 用户接力理由已作为 deny 理由回传给 CLI')
@@ -111,7 +132,7 @@ async function run(): Promise<void> {
   console.log('[island] ✓ Stop 事件已补齐卡片：model=claude-sonnet-4-5 · 上下文 15504 tok')
 
   bridge.stop()
-  console.log('\n✅ M1 + 接力 steer 验证通过：审批裁决与"拒绝并说明理由"双向回传全链路成立')
+  console.log('\n✅ M1 + 接力 steer 验证通过：PreToolUse 零阻塞，PermissionRequest 裁决与拒绝理由双向回传成立')
   process.exit(0)
 }
 
