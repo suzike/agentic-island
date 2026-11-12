@@ -9,6 +9,7 @@ import ffmpegStatic from 'ffmpeg-static'
 import { AgentsStore } from './agents-store'
 import { BridgeServer } from './bridge-server'
 import { CodexTail } from './codex-tail'
+import { CHROMIUM_CACHE_DIRS } from './chromium-cache-policy'
 import {
   installClaudeCode,
   uninstallClaudeCode,
@@ -48,7 +49,11 @@ import { sniffRecordingContainer } from '../shared/recording-format'
 import { RecordingSessionStore } from './recording-session-store'
 import { RecordingProjectStore } from './recording-project-store'
 import { transcribeRecordingFile } from './recording-transcription'
+import { startLanShare, type LanShareHandle } from './lan-share'
+import { startMjpegServer, type MjpegServerHandle } from './mjpeg-server'
+import { startObsVirtualCamera, stopObsVirtualCamera } from './obs-virtual-camera'
 import type { DecisionMessage, FollowupRequest, LlmRequestConfig, PinnedShotPayload, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotSnipRegion, ScreenshotTarget, ScrollHudState, TerminalJumpHint, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
+import { isVerificationCommand, type VerificationRules } from '../shared/verification'
 import { recordingWindowHandle } from '../shared/recording-source'
 
 // 允许 WebAudio 无需用户手势即可播放（提示音/试听）
@@ -72,9 +77,14 @@ let rendererDialogRelease: (() => void) | null = null
 const store = new AgentsStore()
 // 会话级改动归属：会话开始时给工作区拍基线，之后只把"基线之后变化的文件"算作本次产出
 const sessionChanges = new SessionChanges(captureBaseline, diffSinceBaseline)
+// 验证命令规则（内置 + 用户自定义），随 save-state 更新
+let verificationRules: VerificationRules = {}
+const isVerification = (command: string, cwd: string): boolean =>
+  isVerificationCommand(command, verificationRules, basename(cwd || ''))
 // 审批策略钩子装配：命中规则/本会话放行即自动放行并记审计；会话结束清理临时放行与基线
 store.setPolicyHooks({
   autoDecision: policyAutoDecision,
+  isVerification,
   onSessionStart: (agentId, cwd) => sessionChanges.ensure(agentId, cwd),
   onSessionEnd: (agentId) => { sessionChanges.forget(agentId); clearSessionAllows(agentId) }
 })
@@ -97,9 +107,11 @@ const bridge = new BridgeServer(
   (event) => sessionChanges.ready(`${event.backend}:${event.sessionId || event.cwd}`, event.cwd)
 )
 // Codex 实时接入：跟随其 rollout 会话日志（Windows 上 hooks/notify 都不通，这是唯一可靠通道）
-const codexTail = new CodexTail(store, sessionChanges.summary.bind(sessionChanges))
+const codexTail = new CodexTail(store, sessionChanges.summary.bind(sessionChanges), undefined, { isVerification })
 const recordingExportJobs = new Map<string, ChildProcess>()
 const recordingPreviewDirs = new Map<string, string>()
+const lanShares = new Set<LanShareHandle>()
+let mjpegServer: MjpegServerHandle | null = null
 let recordingSessions: RecordingSessionStore
 let recordingProjects: RecordingProjectStore
 
@@ -652,7 +664,13 @@ async function openScreenshotWindowsTool(target: ScreenshotTarget = 'ask'): Prom
  * 实测 Chromium 抓 2560x1600 的锐度与 DPI-aware .NET 直接抓物理像素**完全一致**（35.2983）。
  * 顺带让截图与录制走同一条采集链路。
  */
-async function prepareScreenCapture(): Promise<{ ok: boolean; sourceId?: string; error?: string }> {
+async function prepareScreenCapture(): Promise<{
+  ok: boolean
+  sourceId?: string
+  displayId?: string
+  display?: { width: number; height: number; scaleFactor: number }
+  error?: string
+}> {
   try {
     const target = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     win?.hide()
@@ -663,7 +681,14 @@ async function prepareScreenCapture(): Promise<{ ok: boolean; sourceId?: string;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
       const match = sources.find((item) => item.display_id && item.display_id === String(target.id))
-      if (match) return { ok: true, sourceId: match.id }
+      if (match) {
+        return {
+          ok: true,
+          sourceId: match.id,
+          displayId: String(target.id),
+          display: { width: target.bounds.width, height: target.bounds.height, scaleFactor: target.scaleFactor }
+        }
+      }
       if (attempt === 0) await new Promise((r) => setTimeout(r, 240))
     }
     return { ok: false, error: '没有找到光标所在显示器的采集源，请重试' }
@@ -1006,16 +1031,31 @@ function wireIpc(): void {
   })
   interface GhRepo { full_name: string; owner: { login: string; avatar_url?: string }; name: string; description?: string; stargazers_count: number; forks_count?: number; language?: string; html_url: string; created_at?: string; updated_at?: string; topics?: string[] }
   const mapRepo = (r: GhRepo): Record<string, unknown> => ({ fullName: r.full_name, owner: r.owner?.login, avatar: r.owner?.avatar_url, name: r.name, desc: r.description || '', stars: r.stargazers_count, forks: r.forks_count || 0, language: r.language || '', url: r.html_url, createdAt: r.created_at, updatedAt: r.updated_at, topics: r.topics || [] })
+  const ghRequests = new Map<string, AbortController>()
 
-  ipcMain.handle('github-trending-repos', async (_e, range: 'daily' | 'weekly' | 'monthly', token?: string) => {
+  ipcMain.handle('github-cancel', (_e, requestId: string) => {
+    const id = String(requestId || '')
+    ghRequests.get(id)?.abort()
+    ghRequests.delete(id)
+    return { ok: true }
+  })
+
+  ipcMain.handle('github-trending-repos', async (_e, range: 'daily' | 'weekly' | 'monthly', token?: string, requestId?: string) => {
+    const ctrl = new AbortController()
+    const id = String(requestId || '')
+    if (id) ghRequests.set(id, ctrl)
     try {
       const days = range === 'daily' ? 1 : range === 'weekly' ? 7 : 30
       const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
-      const res = await net.fetch(`https://api.github.com/search/repositories?q=created:%3E=${since}&sort=stars&order=desc&per_page=25`, { headers: ghHeaders(token) })
+      const res = await netFetch(`https://api.github.com/search/repositories?q=created:%3E=${since}&sort=stars&order=desc&per_page=25`, { headers: ghHeaders(token), timeoutMs: 12_000, signal: ctrl.signal })
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
       const data = (await res.json()) as { items?: GhRepo[] }
       return { ok: true, repos: (data.items || []).map(mapRepo) }
-    } catch (e) { return { ok: false, error: String(e) } }
+    } catch (e) {
+      return { ok: false, error: ctrl.signal.aborted ? '已取消加载' : (e instanceof Error && e.name === 'AbortError' ? '网络超时（12 秒）' : String(e)) }
+    } finally {
+      if (id) ghRequests.delete(id)
+    }
   })
   ipcMain.handle('github-my-repos', async (_e, token: string) => {
     if (!token) return { ok: false, error: '需要 GitHub Token' }
@@ -1028,13 +1068,20 @@ function wireIpc(): void {
       return { ok: true, user: { login: user.login, avatar: user.avatar_url, repos: user.public_repos, followers: user.followers, following: user.following }, repos: data.map(mapRepo) }
     } catch (e) { return { ok: false, error: String(e) } }
   })
-  ipcMain.handle('github-search', async (_e, q: string, token?: string) => {
+  ipcMain.handle('github-search', async (_e, q: string, token?: string, requestId?: string) => {
+    const ctrl = new AbortController()
+    const id = String(requestId || '')
+    if (id) ghRequests.set(id, ctrl)
     try {
-      const res = await net.fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc&per_page=20`, { headers: ghHeaders(token) })
+      const res = await netFetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc&per_page=20`, { headers: ghHeaders(token), timeoutMs: 12_000, signal: ctrl.signal })
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
       const data = (await res.json()) as { items?: GhRepo[] }
       return { ok: true, repos: (data.items || []).map(mapRepo) }
-    } catch (e) { return { ok: false, error: String(e) } }
+    } catch (e) {
+      return { ok: false, error: ctrl.signal.aborted ? '已取消加载' : (e instanceof Error && e.name === 'AbortError' ? '网络超时（12 秒）' : String(e)) }
+    } finally {
+      if (id) ghRequests.delete(id)
+    }
   })
   ipcMain.handle('github-readme', async (_e, owner: string, repo: string, token?: string) => {
     try {
@@ -1218,7 +1265,13 @@ function wireIpc(): void {
       return { ok: true, state: terminalWorkspace.save(raw) }
     } catch (error) { return { ok: false, error: String(error) } }
   })
-  app.on('will-quit', () => { flushState(); stopClipboardWatch?.(); ptyKillAll(); killAllFollowups(); globalShortcut.unregisterAll() })
+  app.on('will-quit', () => {
+    flushState(); stopClipboardWatch?.(); ptyKillAll(); killAllFollowups(); globalShortcut.unregisterAll()
+    for (const share of lanShares) void share.close()
+    lanShares.clear()
+    if (mjpegServer) { void mjpegServer.close(); mjpegServer = null }
+    void stopObsVirtualCamera({})
+  })
 
   // 智能勿扰：渲染层把最终勿扰态告知主进程（真则不自动弹窗/响铃）
   ipcMain.on('set-dnd', (_e, active: boolean) => { dndActive = !!active })
@@ -1868,6 +1921,52 @@ const verifyRecordingOutput = async (ffmpegPath: string, outputPath: string, req
     if (!session) return { ok: false, error: '录制会话不存在或已清理' }
     return exportRecordingPath(event, session.filePath, request)
   })
+  // 局域网临时分享：只允许媒体成品，随机 token、1 小时自动关闭；不是公网上传。
+  ipcMain.handle('share-file', async (_e, filePath: string) => {
+    try {
+      const target = String(filePath || '')
+      if (!/\.(?:mp4|webm|gif|mp3|png|jpe?g|webp)$/i.test(target)) return { ok: false, error: '只支持分享媒体文件' }
+      const info = await stat(target).catch(() => null)
+      if (!info?.isFile()) return { ok: false, error: '文件不存在或不是普通文件' }
+      if (info.size > 2_000_000_000) return { ok: false, error: '超过 2GB 的文件不适合临时分享' }
+      const handle = await startLanShare(target, { ttlMs: 60 * 60 * 1000 })
+      lanShares.add(handle)
+      const timer = setTimeout(() => { lanShares.delete(handle) }, 61 * 60 * 1000)
+      timer.unref?.()
+      return { ok: true, url: handle.url, expiresAt: handle.expiresAt }
+    } catch (error) {
+      return { ok: false, error: String(error instanceof Error ? error.message : error) }
+    }
+  })
+  // 虚拟摄像头：本机 MJPEG 推流 + OBS WebSocket 启动 OBS Virtual Camera。
+  ipcMain.handle('mjpeg-start', async () => {
+    try {
+      if (mjpegServer) return { ok: true, url: mjpegServer.url, token: mjpegServer.token, port: mjpegServer.port }
+      mjpegServer = await startMjpegServer()
+      return { ok: true, url: mjpegServer.url, token: mjpegServer.token, port: mjpegServer.port }
+    } catch (error) {
+      return { ok: false, error: String(error instanceof Error ? error.message : error) }
+    }
+  })
+  ipcMain.on('mjpeg-frame', (_e, dataUrl: string) => { mjpegServer?.push(String(dataUrl || '')) })
+  ipcMain.handle('mjpeg-stop', async () => {
+    const server = mjpegServer
+    mjpegServer = null
+    if (server) await server.close().catch(() => {})
+    return { ok: true }
+  })
+  ipcMain.handle('virtual-camera-start', async (_e, options: { streamUrl: string; width: number; height: number; obsUrl?: string; password?: string }) => {
+    return startObsVirtualCamera({
+      streamUrl: String(options?.streamUrl || ''),
+      width: Number(options?.width) || 1920,
+      height: Number(options?.height) || 1080,
+      obsUrl: String(options?.obsUrl || ''),
+      password: String(options?.password || '')
+    })
+  })
+  ipcMain.handle('virtual-camera-stop', async (_e, options: { obsUrl?: string; password?: string }) => {
+    return stopObsVirtualCamera({ obsUrl: String(options?.obsUrl || ''), password: String(options?.password || '') })
+  })
   ipcMain.handle('recording-transcribe-session', async (_event, id: string, cfg: LlmRequestConfig, model: string, language: 'auto' | 'zh' | 'en') => {
     const session = recordingSessions.getFile(String(id || ''))
     if (!session) return { ok: false, error: '录制会话不存在或已清理' }
@@ -2052,12 +2151,19 @@ const verifyRecordingOutput = async (ffmpegPath: string, outputPath: string, req
   ipcMain.on('save-state', (_e, state: Record<string, unknown>) => {
     scheduleSave(state)
     // 同步主进程的提示音偏好（按类型的声效映射）—— 即时生效，不随防抖延迟
-    const s = state as { settings?: { sound?: boolean; clipWatch?: boolean }; soundMap?: Record<string, string>; approvalPolicy?: Parameters<typeof setApprovalPolicy>[0] }
+    const s = state as { settings?: { sound?: boolean; clipWatch?: boolean }; soundMap?: Record<string, string>; approvalPolicy?: Parameters<typeof setApprovalPolicy>[0]; verificationRules?: VerificationRules }
     if (typeof s.settings?.sound === 'boolean') soundPref.on = s.settings.sound
     if (typeof s.settings?.clipWatch === 'boolean') setClipboardWatch(s.settings.clipWatch)
     if (s.soundMap && typeof s.soundMap === 'object') Object.assign(soundPref.map, s.soundMap)
     // 审批策略随 save-state 全量同步（主进程为强制执行方）
     if (s.approvalPolicy && typeof s.approvalPolicy === 'object') setApprovalPolicy(s.approvalPolicy)
+    // 验收规则随 save-state 同步：命令结果要不要留作证据，主进程说了算
+    if (s.verificationRules && typeof s.verificationRules === 'object') {
+      verificationRules = {
+        extra: Array.isArray(s.verificationRules.extra) ? s.verificationRules.extra.filter((x) => typeof x === 'string') : undefined,
+        byProject: s.verificationRules.byProject && typeof s.verificationRules.byProject === 'object' ? s.verificationRules.byProject : undefined
+      }
+    }
   })
   // 审批卡片「本会话放行」：记住该会话的这条命令（当前请求由渲染层另行 decide 放行）
   ipcMain.on('approval-session-allow', (_e, agentId: string, command: string) => approvalSessionAllow(String(agentId), String(command)))
@@ -2075,11 +2181,9 @@ function prepareChromiumCacheForVersion(userData: string, version: string): void
   try {
     if (readFileSync(marker, 'utf8').trim() === version) return
   } catch { /* 首次或标记丢失：执行一次清理 */ }
-  const cacheNames = [
-    'GPUCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'Code Cache', 'Cache',
-    'Session Storage', 'Local State', 'Preferences', 'Dictionaries', 'Shared Dictionary'
-  ]
-  for (const name of cacheNames) {
+  // 只清纯缓存。`Local State`（safeStorage/OSCrypt 的 DPAPI 密钥）与 `Preferences`
+  // 必须保留，否则此前加密的 config.json 会永久解不开。
+  for (const name of CHROMIUM_CACHE_DIRS) {
     try { rmSync(join(userData, name), { recursive: true, force: true }) } catch { /* 单个失败不影响启动 */ }
   }
   try { writeFileSync(marker, version) } catch { /* 下次再试 */ }
@@ -2150,6 +2254,7 @@ app.whenReady().then(async () => {
   try { globalShortcut.register('CommandOrControl+Alt+Space', openCapsule) } catch { /* 热键被占用 */ }
   try { globalShortcut.register('CommandOrControl+Alt+S', openScreenshot) } catch { /* 热键被占用 */ }
   try { globalShortcut.register('CommandOrControl+Alt+A', () => void openScreenAnalyze()) } catch { /* 热键被占用 */ }
+  try { globalShortcut.register('CommandOrControl+Alt+R', () => { if (win) { win.show(); win.moveTop(); safeSend('open-recorder') } }) } catch { /* 热键被占用 */ }
   // 剪贴板助手：clipWatch 关闭时主进程也停止读取系统剪贴板
   setClipboardWatch(clipWatchEnabled)
   // 会议检测：麦克风/摄像头占用变化推给渲染层（渲染层结合"自动勿扰"开关决定是否静默）

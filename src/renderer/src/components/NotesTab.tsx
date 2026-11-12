@@ -100,6 +100,9 @@ const extractTasks = (md: string): { line: number; done: boolean; text: string }
   })
   return out
 }
+/** 卡片正文里去掉任务行：任务由下方可勾选清单单独承载，避免同一份清单渲染两次 */
+const withoutTaskLines = (md: string): string =>
+  md.split('\n').filter((line) => !/^\s*- \[( |x)\]\s*/.test(line)).join('\n')
 /** 提取正文里第一张图（画廊形态用） */
 const firstImage = (md: string): string | null => md.match(/!\[[^\]]*\]\(([^)]+)\)/)?.[1] || null
 const dayKey = (ts: number): string => { const d = new Date(ts); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}` }
@@ -540,7 +543,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
     const r = await island.saveMdFile(`# ${n.emoji} ${n.title}\n\n${n.md}\n\n${n.tags.map((t) => '#' + t).join(' ')}`, n.title || '便签')
     if (r.ok) flash('✓ 已导出 ' + (r.name || ''))
   }
-  const toggleLock = (n: StickyNote): void => { p.onUpdate({ ...n, locked: !n.locked }); flash(n.locked ? '🔓 已解锁' : '🔒 已锁定（防误编辑/误删）') }
+  const toggleLock = (n: StickyNote): void => { p.onUpdate({ ...n, locked: !n.locked }); flash(n.locked ? '已解锁' : '已锁定（防误编辑/误删）') }
 
   const toggleSel = (id: number): void => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   // 导出选中/全部为单个 .md 文件
@@ -1085,7 +1088,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
               {(layout === 'grid' || layout === 'timeline') && (
                 <div style={{ fontSize: FS.small }}>
                   <Collapsible collapsedHeight={110}>
-                    <Markdown text={n.md} onWikiLink={jumpToTitle} />
+                    <Markdown text={!showTrash && tasks.length > 0 ? withoutTaskLines(n.md) : n.md} onWikiLink={jumpToTitle} />
                   </Collapsible>
                 </div>
               )}
@@ -1126,7 +1129,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
                     <Act icon={Bookmark} title={n.later ? '移出稍后读' : '加入稍后读队列'} onClick={() => p.onUpdate({ ...n, later: !n.later })} color={n.later ? sem.run : ink(4)} />
                     <Act icon={Eye} title="阅读模式（大屏浮层）" onClick={() => setReadNote(n)} />
                     <Act icon={Pin} title={n.pinned ? '取消置顶' : '置顶'} onClick={() => p.onTogglePin(n.id)} />
-                    <Act icon={Pencil} title={n.locked ? '已锁定：点击解锁' : '编辑'} onClick={() => { if (n.locked) { flash('🔒 便签已锁定，先点 🔒 解锁'); return } startEdit(n) }} color={n.locked ? ink(4) : undefined} />
+                    <Act icon={Pencil} title={n.locked ? '已锁定：点击解锁' : '编辑'} onClick={() => { if (n.locked) { flash('便签已锁定，先用锁定图标解锁'); return } startEdit(n) }} color={n.locked ? ink(4) : undefined} />
                     <Act icon={Expand} title="在 Markdown 工作台里打开" onClick={() => p.onOpenStudio(n)} />
                     <Act icon={PictureInPicture2} title="钉到桌面（浮贴）" onClick={() => p.onPinDesktop(n)} />
                     <Act icon={ClipboardType} title="复制富文本" onClick={() => copyRich(n)} color={accentText(0.8, 0.85)} />
@@ -1134,7 +1137,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
                     <Act icon={Download} title="导出为 .md 文件" onClick={() => void exportOne(n)} />
                     <Act icon={Copy} title="创建副本" onClick={() => duplicate(n)} />
                     <Act icon={n.locked ? Lock : LockOpen} title={n.locked ? '解锁' : '锁定（防误编辑/误删）'} onClick={() => toggleLock(n)} color={n.locked ? sem.warn : ink(3)} />
-                    <Act icon={Trash2} title={n.locked ? '已锁定，先解锁' : '移入回收站'} onClick={() => { if (n.locked) { flash('🔒 便签已锁定，先解锁再删'); return } p.onDelete(n.id) }} color={n.locked ? ink(4) : semBg(sem.danger, 0.8)} />
+                    <Act icon={Trash2} title={n.locked ? '已锁定，先解锁' : '移入回收站'} onClick={() => { if (n.locked) { flash('便签已锁定，先解锁再删'); return } p.onDelete(n.id) }} color={n.locked ? ink(4) : semBg(sem.danger, 0.8)} />
                   </>
                 )}
               </div>

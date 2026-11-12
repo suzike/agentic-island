@@ -166,9 +166,17 @@ try {
   // 断言拿到的视频轨是显示器物理像素，而不是 DIP/逻辑尺寸。
   const nativeCapture = await evaluate(`(async () => {
     const displays = await window.island.getDisplays()
-    const display = displays.find((item) => item.primary) || displays[0]
     const prepared = await window.island.prepareScreenCapture()
     if (!prepared.ok || !prepared.sourceId) return { ok: false, error: prepared.error || 'prepare failed', displays }
+    // 产品按光标所在屏截图；用主进程回传的真实目标屏校验，而不是假定主屏。
+    const display = prepared.display
+      ? {
+          id: prepared.displayId,
+          width: prepared.display.width,
+          height: prepared.display.height,
+          scaleFactor: prepared.display.scaleFactor
+        }
+      : displays.find((item) => item.primary) || displays[0]
     let stream
     try {
       stream = await navigator.mediaDevices.getUserMedia({

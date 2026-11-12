@@ -486,18 +486,18 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
       </div>
 
       {/* AI 执行指挥条：规划、排期、风险、汇报形成闭环 */}
-      <div className="todo-ai-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 2, padding: 3, ...surface.inset(), borderRadius: R.lg }}>
+      <div className="todo-ai-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 0, borderTop: `0.5px solid ${hairline(0.07)}`, borderBottom: `0.5px solid ${hairline(0.07)}` }}>
         {([
           ['plan', '目标拆解', Ico.plan], ['schedule', '智能排期', Ico.calendar], ['focus', '今日聚焦', Ico.focus],
           ['risk', '风险诊断', Ico.approval], ['standup', '生成站会', Ico.review], ['week', '本周计划', Ico.grid]
-        ] as const).map(([key, label, Icon]) => (
+        ] as const).map(([key, label, Icon], index) => (
           <button
             key={key}
             type="button"
             className="hv"
             onClick={() => openAi(key)}
             title={label}
-            style={{ minWidth: 0, height: 30, padding: '0 6px', borderRadius: R.md, border: 'none', background: aiTool === key ? semBg(accent(), 0.14) : 'transparent', color: aiTool === key ? accentText(0.88) : ink(2), cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontFamily: 'var(--font)', transition: transition('background, color') }}
+            style={{ minWidth: 0, height: 32, padding: '0 6px', borderRadius: 0, border: 'none', borderLeft: index > 0 ? `0.5px solid ${hairline(0.06)}` : 'none', background: aiTool === key ? semBg(accent(), 0.12) : 'transparent', color: aiTool === key ? accentText(0.88) : ink(2), cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontFamily: 'var(--font)', transition: transition('background, color') }}
           >
             <Icon size={12} strokeWidth={1.75} style={{ color: aiTool === key ? accentText() : ink(3), flex: 'none' }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 650 }}>{label}</span>
@@ -822,7 +822,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px' }}>
                     <span style={{ width: 20, height: 20, flex: 'none', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', background: semBg(col, 0.2), color: col }}><ColIcon size={11} strokeWidth={2} /></span>
                     <span style={{ flex: 1, color: col, fontSize: FS.small, fontWeight: 800 }}>{label}</span>
-                    {wip && <span title="进行中过多,注意 WIP" style={{ color: sem.warn, fontSize: 9, display: 'inline-flex', alignItems: 'center', gap: 2 }}><Ico.approval size={9} strokeWidth={2} />WIP</span>}
+                    {wip && <span title="进行中过多，注意 WIP" style={{ color: sem.warn, fontSize: 9, display: 'inline-flex', alignItems: 'center', gap: 2 }}><Ico.approval size={9} strokeWidth={2} />WIP</span>}
                     <span style={{ flex: 'none', minWidth: 18, textAlign: 'center', padding: '1px 7px', borderRadius: R.pill, background: wip ? semBg(sem.warn, 0.3) : semBg(col, 0.2), color: wip ? sem.warn : col, fontSize: 9.5, fontWeight: 700 }}>{items.length}</span>
                     <span className="hv" onClick={() => { setAddingCol(addingCol === key ? null : key); setAddText('') }} title="添加到此栏" style={{ cursor: 'pointer', color: col, display: 'flex' }}><Ico.add size={13} strokeWidth={2.25} /></span>
                     <span className="hv" onClick={() => setColCollapse((c) => ({ ...c, [key]: !c[key] }))} style={{ cursor: 'pointer', color: ink(3), display: 'flex', transform: ccol ? 'rotate(-90deg)' : 'none', transition: 'transform .18s' }}><Ico.expand size={10} strokeWidth={2} /></span>

@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.7.0](https://img.shields.io/badge/release-v0.7.0-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.7.0)
+[![Release v0.7.1](https://img.shields.io/badge/release-v0.7.2-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.7.2)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/terminal-v070.png" alt="Agentic-Island v0.7.0 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
+<img src="screenshots/terminal-v072.png" alt="Agentic-Island v0.7.2 · 可恢复的 PowerShell ConPTY 开发工作区真实截图" width="880"/>
 
 </div>
 
@@ -35,20 +35,18 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
 
-## v0.7.0 更新概览
+## v0.7.2 更新概览
 
-这一版把“计划审阅”升级成真正的**验收台**，同时收口 Agent 状态、截图高清、录屏性能和页面误收起。
+这一版把十一个分区做了一轮界面精修，并修掉几处长期存在的显示缺陷；功能与数据结构不变。
 
-- **验收台**：Agent 会话结束时留档最后回复、计划原文、实际改动文件和验证记录，按“计划 → 实际改动 → 未验证项”对照。改动归属改为会话开始时的工作区基线，不再把你未提交的改动算进 Agent 产出；只有真实测试/构建命令才算执行证据，不把“执行过”写成“通过”。
-- **截图高清**：框选裁剪以主进程记录的真实 `scaleFactor` 为准；隔离实测显示器 `1707×1067 @1.5x`，原生抓帧 `2560×1600`。快存后会解码成品、读回真实宽高并显示；尺寸与预期不一致会明确告警。
-- **截图历史与页面交互**：每次框选/整屏/长截图自动归档，工坊可回看、载入、定位最近 120 张；修复叠层首帧配置竞态、首击穿透，以及旧 260ms 计时器把资讯详情收回的问题；长文“展开全部”现在会真正变高。
-- **录屏性能与真实统计**：默认原始画面直通编码器，录制期运镜/光晕改到导出期重建；同一活动画面实测 `25.58fps → 27.09fps`。录制条每 1.2 秒显示实际 FPS、丢帧率、像素尺寸与编码器，低于目标 80% 会直接告警。
-- **后期能力**：新增点击强调运镜、双语字幕（同时间码双行，可导出 SRT/VTT）与导出交付面板（读回自检、打开文件夹、复制路径/分享文案），对齐 BaoCut/Cap 的高频剪辑动作。
-- **Agent 状态与误判**：Codex 等待态 3 分钟、普通态 15 分钟无新增即回收；没有 rollout 的 hook 卡片按等待态 10 分钟兜底移除，审批中的请求永远保留。微信/豆包/Windows 语音输入和岛自身录音不再被当成会议。
-- **信息密度**：待办页“近期日程”默认折叠，只显示数量。
-- **升级稳定性**：按版本标记清理可重建的 Chromium GPU/代码缓存，避免跨版本启动 FATAL；保留配置、录屏、附件、终端现场和知识库。
+- **关键修复**：升级清理不再删除 `Local State`（safeStorage/OSCrypt 密钥）与 `Preferences`，避免版本升级后旧配置无法解密；新增缓存策略回归测试。
+- **设置更清楚**：验收规则与门禁合并为两张按「全局 / 项目」切换的卡片，项目选择只在需要时出现；审批策略统一成开关行 + 规则卡；规则输入改为通栏轻质字段。
+- **问答更安静**：多模型候选收成标签行，右侧只保留「采用」；候选与气泡分析改为轻卡片；可继续追问整行可点，去掉每行重复提示。
+- **列表与卡片层次**：待办 AI 指挥条改为发丝线分段；资讯 TOP3 换成方形编号、审稿流水线压成细进度；复盘单日不再显示筛选，日报周报正文改轻卡片。
+- **视觉缺陷修复**：便签任务清单不再重复渲染；灵卵进化路线不再是一排灰化小图标；统一仓库页中文标点，移除按钮降噪并补完整路径提示。
+- **保留 v0.7.0 能力**：验收台、截图高清与历史、录屏场景/多画面/OBS/双语字幕、Agent 状态回收等完整能力不变，逐项记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-完整验证：46 个离线测试、类型检查、生产构建、对比度审计（硬失败 0）、截图/录屏/问答/终端隔离审计全部通过。
+完整验证：类型检查、51 个离线测试、生产构建、对比度审计（硬失败 0）、11 分区功能扫页与问答/终端/验收台/截图工坊隔离审计全部通过；安装版另跑真实审批闭环，岛上点“允许”后 hook 收到 `behavior=allow`。
 
 媒体能力的逐项对标（含仍明确没做的场景/来源模型、云分享、动态遮罩）见 [docs/MEDIA_TOOL_BENCHMARK.md](docs/MEDIA_TOOL_BENCHMARK.md)。
 
@@ -58,24 +56,24 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v070.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v070.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v072.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v072.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v070.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v070.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v072.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v072.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v070.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v070.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v072.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v072.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/recording-v070.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
-<td width="50%" align="center"><img src="screenshots/settings-v070.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v072.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
+<td width="50%" align="center"><img src="screenshots/settings-v072.png" alt="设置与主题系统"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v070.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v072.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -84,16 +82,16 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | 分区 | 当前能力 |
 |---|---|
 | **Agents** | Claude Code/Codex 会话聚合；运行、等待、审批、完成状态；风险分级；允许/拒绝；拒绝理由回传；git 变更小结；跳回原终端；会话时间线；审批策略自动放行与本会话放行；模型与上下文占用显示 |
-| **验收** | 计划审阅仍在此进行（Markdown 方案、批准/带理由打回、等待时长、终端定位）；会话结束自动留档最后回复、变更文件与计划原文，按「计划 → 实际改动 → 未验证项」对照；改动按会话基线归属（不含你之前的未提交改动），验证记录带真实退出码/耗时，失败命令直接进未验证项；未验证项可一键整理成追问，复制或按会话 id 续跑（`claude --resume` / `codex exec resume`）让它补齐 |
+| **验收** | 计划审阅仍在此进行（Markdown 方案、批准/带理由打回、等待时长、终端定位）；会话结束自动留档最后回复、变更文件与计划原文，按「计划 → 实际改动 → 未验证项」对照；改动按会话基线归属（不含你之前的未提交改动，会话期间提交掉的文件也计入并标「已提交」），计划外判定按**路径级**（精确文件/目录/同名文件，不再用全文子串），验证命令判定走共享规则——覆盖前端/后端工具链、MATLAB/Simulink 回归（`matlab -batch`、`runtests`、`sltest`、`slcoverage`）、C/C++ 构建与测试（cmake/make/ctest/gcc/clang-tidy/cppcheck）与 CANoe，并支持全局/按项目补充规则；验证记录带真实退出码/耗时，失败命令直接进未验证项；**项目级门禁**（验证必须全部退出 0、最少验证条数、受保护路径不得改动）未满足时「标记已验收」要二次确认，确认后留痕；未验证项可一键整理成追问，复制或按会话 id 续跑（`claude --resume` / `codex exec resume`）让它补齐，续跑证据并回原记录且只看每条命令的最新结果；计划项可一键转待办（带验收标准），整条验收可导出 Markdown 凭证存便签，凭证会抽出计划/路径/回复里的需求编号（`SWR-123`、`SourceID:` 等）做需求追溯；记录支持项目筛选与全文搜索 |
 | **问答** | OpenAI 兼容云模型（含 Ollama / LM Studio 本地端点预设）、Anthropic Messages API 与本机 Claude Code/Codex；供应商/账号原子切换与回答模型标记；15 种单轮回答方法与本地智能推荐；23 种附着气泡的深度分析；会话分支树与任意节点 Fork；长期记忆、持续指令和上下文钉选/排除；多模型并行、共识与辩论；每条回答气泡内的连续追问支线；引用追问；对话写入知识库；会话导出 Markdown；动态灵感推荐 |
 | **快捷** | 12 条内置工程工作流；自定义工作流；AI 生成流程；定时自动化（每日定时 / Agent 会话结束 / 番茄钟结束 / 会议前后触发，跑工作流、写待办或存便签，错过自动补跑）；输入、剪贴板、AI、Shell、打开、Agent、岛动作、确认步骤；变量插值；仓库上下文；危险命令强制确认；外部变量（AI 输出/剪贴板）插值强制确认；执行日志与项目归档 |
 | **待办** | 时间线、看板、今日计划、完成视图；优先级、状态、标签、项目、依赖、验收标准、精力、预估/投入工时、重复、子任务、备注、置顶、归档；批量处理；Markdown 导入导出；日历会议 |
 | **灵感便签** | Markdown 卡片；富文本快捷工具；模板、闪念、日记、放映；标签、颜色、星标、稍后读、锁定、回收站、批量管理；Wiki 双链、反向链接、关系图；快照；桌面便签；AI 生成与语义检索 |
 | **资讯** | RSS/Atom 聚合；正文抓取；AI 评分、分类、摘要；精选、信号、雷达、全部、日报、主题、收藏；关键词观察清单；影响/时间判断；多源 AI 综合；关联文章；转待办；项目情报资产 |
-| **复盘** | 今日工作地图；待办、Agent 活动和 git 改动汇总；AI 日报/周报；工作节律、项目与专注洞察；番茄统计；成果保存到便签；成长记录 |
+| **复盘** | 今日工作地图；待办、Agent 活动、git 改动与验收处置汇总（已验收/待核对、补验证次数、未验证项）；AI 日报/周报；工作节律、项目与专注洞察；番茄统计；成果保存到便签；成长记录 |
 | **仓库** | 本地 Git 仓库状态；分支、提交和改动概览；GitHub 热门、我的仓库、搜索、README 摘要与收藏；可选 Token |
 | **终端** | 基于 `@lydell/node-pty` 的真实 Windows ConPTY；多会话与重启恢复；PowerShell 5.1/7、CMD、WSL；项目工作区、启动任务、任务扫描和 Git 上下文；持久历史、退出码与耗时；输出搜索/折叠；路径拖入/点击；危险命令确认；加密环境配置；AI 诊断、交接与下一步；隐私快照；工作区导入导出 |
-| **设置** | 运行状态；hooks 接入；7 套内置 OKLCH 主题与自定义主题设计器；宽度、字体、缩放、大小和全屏（铺满物理显示器）；通知音；多显示器（真实显示器列表 + 热插拔/DPI 自适应）；开机启动；CalDAV/ICS；按供应商隔离的模型/密钥配置与在线模型同步；自动化规则；勿扰；桌面挂件与迷你条；审批策略规则与审计流水；自动更新检查与安装 |
+| **设置** | 运行状态；hooks 接入；7 套内置 OKLCH 主题与自定义主题设计器；宽度、字体、缩放、大小和全屏（铺满物理显示器）；通知音；多显示器（真实显示器列表 + 热插拔/DPI 自适应）；开机启动；CalDAV/ICS；按供应商隔离的模型/密钥配置与在线模型同步；自动化规则；勿扰；桌面挂件与迷你条；审批策略规则与审计流水；验收规则与门禁（补充验证命令、退出码/条数要求、受保护路径，全局与按项目）；自动更新检查与安装 |
 
 ### 全局工具
 
@@ -104,9 +102,10 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 | **第二大脑** | 跨便签、问答、复盘、资讯和剪贴板统一检索；支持关键词与向量语义排序 |
 | **本地知识库** | 独立 Embedding 地址/模型/密钥；接入文件夹、文件、网页和问答会话；支持常见源码/文本、PDF、DOCX；回答、完整分支或框选片段可直接沉淀；分块、向量索引、引用问答、Wiki 概览与重建索引 |
 | **Markdown 工作台** | 本地打开/保存；编辑、分栏、阅读模式；查找替换；目录；快照；Zen；PDF/HTML/文本导出；AI 写作工具 |
-| **截图工坊** | **应用内框选**（含滚动长截图 · 钉屏到桌面）、**自动截图历史**（最近 120 张，可载入/定位）、**取色器 + 放大镜**、**零摩擦保存**、无损保存、边框/背景/留白/圆角/阴影、11 种标注、**文字卡片**、**标尺/参考线**、**批量美化**、**本地离线 OCR**、OCR/视觉分析、发送问答 |
-| **专业录屏工坊** | 显示器/窗口/区域录制；**默认跟随屏幕原生画幅**；画布合成或**原始画面采集**（跳过合成、实测 30fps 原生画质）；**实际 FPS/丢帧/编码器实时统计**；鼠标聚焦运镜（录制时实时，或**留到导出期按光标轨迹重建**，运镜点可人工编辑，支持**点击强调**）；**导出期光标光晕与按键角标**；**按轨迹自动剪除发呆/等加载空白**；音频混合；画中画与人物替换；分块落盘与恢复；三轨时间线；真实转写、**双语字幕**与 AI 粗剪；工程库；MP4/WebM/GIF/MP3、多档压缩、分辨率/帧率和可开关字幕轨；**导出后读回自检与快捷交付** |
+| **截图工坊** | **应用内框选**（含滚动长截图 · 钉屏到桌面）、**自动截图历史**（最近 120 张，可载入/定位）、**取色器 + 放大镜**、**零摩擦保存**、无损保存、边框/背景/留白/圆角/阴影、11 种标注、**文字卡片**、**标尺/参考线**、**批量美化**、**本地离线 OCR**、OCR/视觉分析、发送问答、**局域网分享链接** |
+| **专业录屏工坊** | 显示器/窗口/区域录制；**默认跟随屏幕原生画幅**；画布合成或**原始画面采集**（跳过合成、实测 30fps 原生画质）；**实际 FPS/丢帧/编码器实时统计**；**12 个“我的场景”预设**；**最多 4 路多画面同时合成**；鼠标聚焦运镜（录制时实时，或**留到导出期按光标轨迹重建**，运镜点可人工编辑，支持**点击强调**）；**导出期光标光晕与按键角标**；**按轨迹自动剪除发呆/等加载空白**；音频混合 + **人声高通/压缩/总线限幅**；**OBS 虚拟摄像头**；**目标跟踪马赛克/模糊**；分块落盘与恢复；三轨时间线；真实转写、**双语字幕**与 AI 粗剪；工程库；MP4/WebM/GIF/MP3、多档压缩、分辨率/帧率和可开关字幕轨；**导出后读回自检、LAN 分享与自定义上传流水线** |
 | **屏幕分析** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> 捕获当前屏幕并交给视觉模型分析 |
+| **录屏工坊** | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd> 直接打开录屏工作台 |
 | **工程计算** | 多行表达式、变量跨行引用、数学函数、统计与温度换算 |
 | **学习中心** | 便签间隔重复复习、技术雷达和学习状态管理 |
 | **专注与自动化** | 番茄钟、专注静默、会议勿扰、晨间简报、晚间复盘、会后记录规则 |
@@ -175,7 +174,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.7.0.exe
+Agentic-Island-Setup-0.7.2.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。
@@ -219,6 +218,7 @@ Codex 首次接入或在 hook 定义变化后，会要求通过 `/hooks` 信任�
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> | 闪念胶囊 |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> | 区域截图并提问 |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | 分析当前屏幕 |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd> | 打开录屏工坊 |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | 岛内命令面板（输入框和终端除外） |
 | <kbd>Ctrl</kbd>+<kbd>\\</kbd> 或 <kbd>Ctrl</kbd>+<kbd>\`</kbd> | 展开/收起灵动岛 |
 | <kbd>Esc</kbd> | 关闭浮层或收起面板 |
@@ -256,6 +256,7 @@ npm run audit:screenshot # 隔离实例跑通截图工坊批量美化（含成�
 npm run bench:recording # 录屏导出基准：直通封装 / 软件编码 / 各硬件编码器
 npm run audit:terminal  # 隔离 Electron 验证真实 ConPTY 交互与恢复
 npm run audit:acceptance # 隔离实例跑通验收台「补验证 → 岛内续跑」全链路
+npm run audit:installed # 安装版真实审批：岛上点“允许” → hook 收到 behavior=allow
 npm run package         # 构建 NSIS 安装包到 dist/
 npm run verify:package  # 隔离验证 unpacked、静默安装启动与卸载
 npm run docs:capture    # 用隔离演示数据重新采集 README 真实截图
@@ -263,7 +264,7 @@ npm run demo:plan       # 向运行中的应用注入计划审阅演示
 npm run probe           # hooks 接入诊断与事件跟踪
 ```
 
-`npm test` 当前顺序执行 46 个离线脚本，自动排除 `test-real-claude.ts`。覆盖 Agent 生命周期、审批协议、验收台与会话基线、Codex 跟随与回收、语音输入误判、外部让位、日历、待办、快捷、终端工作区/项目扫描、Markdown、便签、资讯、复盘、供应商模型配置迁移、回答与分析方法目录、DeepSeek/Kimi/Anthropic 请求协议、录屏合成/会话/工程/FFmpeg 导出、截图高清与滚动拼接、主题、向量、知识链接、RSS、知识库、附件外置、定时自动化、番茄钟、SRS、工程计算和工作台迁移。`npm run audit:ask` 与 `npm run audit:terminal` 分别启动隔离 Electron 验证问答交互和真实 ConPTY 交互。
+`npm test` 当前顺序执行 51 个离线脚本，自动排除 `test-real-claude.ts`。覆盖 Agent 生命周期、审批协议、验收台与会话基线、Codex 跟随与回收、语音输入误判、外部让位、日历、待办、快捷、终端工作区/项目扫描、Markdown、便签、资讯、复盘、供应商模型配置迁移、回答与分析方法目录、DeepSeek/Kimi/Anthropic 请求协议、录屏合成/会话/工程/FFmpeg 导出、局域网分享、MJPEG 推流、OBS 认证、目标跟踪、截图高清与滚动拼接、主题、向量、知识链接、RSS、知识库、附件外置、定时自动化、番茄钟、SRS、工程计算、验证命令判定和工作台迁移。`npm run audit:ask` 与 `npm run audit:terminal` 分别启动隔离 Electron 验证问答交互和真实 ConPTY 交互。
 
 `.github/workflows/release.yml` 提供可重复的 Windows Release 门禁：在 GitHub Windows runner 上重新安装依赖、执行类型检查和全部离线测试、生成 NSIS 安装包与 SHA-256，并上传到指定草稿 Release 后发布。
 

@@ -15,9 +15,6 @@ import type { BridgeEvent, ChangeSummary } from '../shared/protocol'
 
 type Summarizer = (cwd: string, agentId: string) => Promise<ChangeSummary | null>
 
-// 与 src/renderer/src/logic/acceptance.ts 的 CHECK_CMD 保持同步（只决定"值不值得记结果"）
-const VERIFY_CMD = /(npm (?:run )?(?:test|build)|pnpm (?:test|build)|yarn (?:test|build)|vitest|jest|pytest|playwright|go test|cargo (?:test|build)|tsc\b|typecheck|eslint|lint)/i
-
 interface Ctx {
   sessionId: string
   cwd: string
@@ -31,6 +28,8 @@ interface CodexTailOptions {
   idleMs?: number
   /** task_complete 后的等待态：短一些，避免已关闭的会话长期占着 Agents */
   waitingIdleMs?: number
+  /** 命令是否值得留作验证证据（内置规则 + 项目自定义，由主进程注入） */
+  isVerification?: (command: string, cwd: string) => boolean
 }
 
 // 尊重 Codex 官方 CODEX_HOME 环境变量（用户可能自定义 codex 主目录）
@@ -53,6 +52,7 @@ export class CodexTail {
   private lastScan = 0
   private idleMs: number
   private waitingIdleMs: number
+  private verify: (command: string, cwd: string) => boolean
 
   /** rollout 无"会话结束"信号（关终端不会写任何东西）——超过此时长无新数据即视为已结束 */
   private static IDLE_END_MS = 15 * 60 * 1000
@@ -67,6 +67,7 @@ export class CodexTail {
     this.root = root
     this.idleMs = options.idleMs ?? CodexTail.IDLE_END_MS
     this.waitingIdleMs = options.waitingIdleMs ?? CodexTail.WAITING_END_MS
+    this.verify = options.isVerification ?? (() => true)
   }
 
   /** 供测试：直接跑一次轮询（跳过定时器） */
@@ -254,7 +255,7 @@ export class CodexTail {
         let cmd = ''
         try { cmd = String((JSON.parse(String(p.arguments || '{}')) as { command?: string }).command || '') } catch { /* */ }
         // 记下验证命令的 call_id：输出回来时要靠它补退出码
-        if (cmd && VERIFY_CMD.test(cmd)) {
+        if (cmd && this.verify(cmd, ctx.cwd)) {
           ctx.calls = ctx.calls || new Map()
           ctx.calls.set(String(p.call_id || ''), { command: cmd.slice(0, 400), at: Date.now() })
           if (ctx.calls.size > 12) ctx.calls.delete(ctx.calls.keys().next().value as string)

@@ -239,6 +239,9 @@ export function Input(props: {
         alignItems: 'center',
         gap: 6,
         padding: '0 10px',
+        // width:100% 的输入框在无全局 border-box 时必须显式声明，否则 padding 会把容器撑宽，
+        // 设置页的长说明在窄面板下会出现 9-22px 的横向溢出。
+        boxSizing: 'border-box',
         transition: transition('border-color, box-shadow'),
         ...style,
       }}
@@ -421,11 +424,16 @@ export function EmptyState(props: {
 
 /* ---------------- Switch（iOS 白钮开关） ---------------- */
 
-export function Switch(props: { on: boolean; onChange: (on: boolean) => void; color?: string; disabled?: boolean }) {
-  const { on, onChange, color, disabled } = props
+export function Switch(props: { on: boolean; onChange: (on: boolean) => void; color?: string; disabled?: boolean; label?: string }) {
+  const { on, onChange, color, disabled, label } = props
   const c = color || accent(0.72)
   return (
     <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label || '开关'}
+      title={label}
       disabled={disabled}
       onClick={() => onChange(!on)}
       style={{

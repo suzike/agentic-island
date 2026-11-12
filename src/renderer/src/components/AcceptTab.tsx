@@ -8,13 +8,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   ArrowUpRight, Check, ChevronDown, ClipboardCheck, ClipboardList, Clock, Copy,
-  FileCode2, Flag, Loader2, Play, ShieldQuestion, Square, TerminalSquare, Trash2, Undo2, Wand2, XCircle
+  FileCode2, Flag, ListPlus, Loader2, NotebookPen, Play, ShieldQuestion, Square, TerminalSquare, Trash2, Undo2, Wand2, XCircle
 } from 'lucide-react'
-import type { AcceptanceRecord, AgentVM } from '../types'
-import { analyzeAcceptance, buildFollowUpPrompt, checkFailed, fileStatusLabel, sessionIdOf, type AcceptanceAnalysis } from '../logic/acceptance'
+import type { AcceptanceGate, AcceptanceRecord, AgentVM } from '../types'
+import {
+  analyzeAcceptance, buildAcceptanceCertificate, buildFollowUpPrompt, checkFailed, evaluateGate,
+  fileStatusLabel, planTodoTexts, requirementIdsOf, searchTextOf, sessionIdOf, type AcceptanceAnalysis
+} from '../logic/acceptance'
 import { island } from '../bridge'
 import { Markdown, Collapsible } from './Markdown'
-import { Button, Chip, EmptyState, IconButton, SectionHeader } from '../ui/components'
+import { Button, Chip, EmptyState, IconButton, Input, SectionHeader } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
 import { accent, accentText, fill, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
 
@@ -23,11 +26,17 @@ interface AcceptTabProps {
   plans: AgentVM[]
   /** 已结束会话的留档（新的在前） */
   records: AcceptanceRecord[]
+  /** 项目级门禁规则 */
+  gate?: AcceptanceGate
   onDecide: (a: AgentVM, d: 'allow' | 'deny') => void
   onJump: (a: AgentVM) => void
   onJumpRecord: (r: AcceptanceRecord) => void
-  onMark: (id: string, status: AcceptanceRecord['status']) => void
+  onMark: (id: string, status: AcceptanceRecord['status'], violations?: string[]) => void
   onRemove: (id: string) => void
+  /** 计划项转待办，返回实际新增条数 */
+  onPlanToTodos: (record: AcceptanceRecord, texts: string[]) => number
+  /** 验收凭证存为便签 */
+  onSaveCertificate: (record: AcceptanceRecord, markdown: string) => void
   waitSecs: Record<string, number>
 }
 
@@ -93,13 +102,19 @@ function PlanCard(p: { a: AgentVM; wait: number; onDecide: AcceptTabProps['onDec
 
 function FileRow(p: { file: AcceptanceAnalysis['changed'][number] }): React.JSX.Element {
   const meta = fileStatusLabel(p.file.status)
-  const tone = meta.tone === 'add' ? sem.calm : meta.tone === 'del' ? sem.danger : sem.warn
+  const tone = meta.tone === 'add' ? sem.calm : meta.tone === 'del' ? sem.danger : accent(0.7)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2.5px 0', minWidth: 0 }}>
       <span style={{ ...text.mono(10), color: tone, background: semBg(tone, 0.13), padding: '0 5px', borderRadius: 4, flex: 'none' }}>{meta.label}</span>
       <span title={p.file.path} style={{ ...text.mono(10.5), color: ink(2), flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.file.path}</span>
       {p.file.inPlan === false && (
         <span title="计划里没有提到这个文件" style={{ fontSize: 10, color: sem.warn, background: semBg(sem.warn, 0.14), padding: '0 5px', borderRadius: 4, flex: 'none' }}>计划外</span>
+      )}
+      {p.file.followup && (
+        <span title="来自补验证那一轮的改动" style={{ fontSize: 10, color: sem.focus, background: semBg(sem.focus, 0.14), padding: '0 5px', borderRadius: 4, flex: 'none' }}>补验证</span>
+      )}
+      {p.file.committed && (
+        <span title="会话期间已提交" style={{ fontSize: 10, color: sem.calm, background: semBg(sem.calm, 0.14), padding: '0 5px', borderRadius: 4, flex: 'none' }}>已提交</span>
       )}
     </div>
   )
@@ -121,6 +136,7 @@ function CheckRow(p: { run: AcceptanceAnalysis['checks'][number] }): React.JSX.E
           ? <XCircle size={10} strokeWidth={2} style={{ color: sem.danger, flex: 'none' }} />
           : <Check size={10} strokeWidth={2.5} style={{ color: tone, flex: 'none' }} />}
         <span title={run.command} style={{ ...text.mono(10.5), color: ink(2), flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{run.command}</span>
+        {run.followup && <span style={{ fontSize: 9, color: accentText(0.8), background: semBg(accent(), 0.12), padding: '0 4px', borderRadius: 3, flex: 'none' }}>补验证</span>}
         <span style={{ fontSize: 10, color: tone, flex: 'none', fontVariantNumeric: 'tabular-nums' }}>{meta}</span>
       </div>
       {failed && run.outputTail && (
@@ -134,20 +150,29 @@ function RecordCard(p: {
   r: AcceptanceRecord
   open: boolean
   run?: FollowupRunView
+  gate?: AcceptanceGate
   onToggle: () => void
   onJump: () => void
-  onMark: (status: AcceptanceRecord['status']) => void
+  onMark: (status: AcceptanceRecord['status'], violations?: string[]) => void
   onRemove: () => void
   onStartFollow: (prompt: string) => Promise<{ ok: boolean; error?: string }>
   onCancelFollow: () => void
+  onPlanToTodos: (texts: string[]) => number
+  onSaveCertificate: (markdown: string) => void
 }): React.JSX.Element {
   const { r } = p
   const a = useMemo(() => analyzeAcceptance(r), [r])
+  const gateHits = useMemo(() => evaluateGate(r, a, p.gate), [r, a, p.gate])
+  const reqIds = useMemo(() => requirementIdsOf(r), [r])
   const v = VERDICT_META[a.verdict]
   const [copied, setCopied] = useState(false)
   const [followOpen, setFollowOpen] = useState(false)
   const [followPrompt, setFollowPrompt] = useState('')
   const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [todosAdded, setTodosAdded] = useState<number | null>(null)
+  const [certSaved, setCertSaved] = useState(false)
+  const [certCopied, setCertCopied] = useState(false)
+  const todoTexts = useMemo(() => planTodoTexts(r), [r])
   const canResume = !!sessionIdOf(r) && !!r.cwd
   const toggleFollow = (e: React.MouseEvent): void => {
     e.stopPropagation()
@@ -162,6 +187,7 @@ function RecordCard(p: {
   }
   // 删除是两段式：第一下只武装，避免手滑丢掉留档
   const [delArmed, setDelArmed] = useState(false)
+  const [gateArmed, setGateArmed] = useState(false)
   const armDelete = (e: React.MouseEvent): void => {
     e.stopPropagation()
     if (!delArmed) {
@@ -192,6 +218,7 @@ function RecordCard(p: {
           <span style={{ color: ink(1), fontSize: FS.small, fontWeight: 650, flex: 'none' }}>{r.tool}</span>
           <span style={{ ...text.mono(10), color: ink(3), flex: 'none' }}>{r.proj}</span>
           <span style={{ color: v.color, fontSize: 10, flex: 'none' }}>{v.label}</span>
+          {a.followupCount > 0 && <span style={{ fontSize: 10, color: accentText(0.82), background: semBg(accent(), 0.12), padding: '0 5px', borderRadius: 4, flex: 'none' }}>补验证 {a.followupCount}</span>}
           <span style={{ ...text.faint(), fontSize: 10, marginLeft: 'auto', flex: 'none' }}>{fmtTime(r.endedAt)}</span>
           <ChevronDown size={12} strokeWidth={2} style={{ color: ink(3), flex: 'none', transform: p.open ? 'rotate(180deg)' : 'none', transition: 'transform .18s' }} />
         </div>
@@ -204,12 +231,24 @@ function RecordCard(p: {
 
       {p.open && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 9 }}>
+          {reqIds.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+              <span style={{ ...text.faint(), fontSize: 10 }}>需求</span>
+              {reqIds.map((id) => (
+                <span key={id} style={{ ...text.mono(10), color: accentText(0.82), background: semBg(accent(), 0.12), padding: '0 6px', borderRadius: 4 }}>{id}</span>
+              ))}
+            </div>
+          )}
           {r.plan && (
             <div>
               <SectionHeader
                 icon={ClipboardList}
                 title="计划"
-                extra={<span style={{ fontSize: 10, color: ink(3) }}>{r.plan.decision === 'allow' ? '已批准' : r.plan.decision === 'deny' ? '已打回' : '未裁决'}</span>}
+                extra={
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 10, color: ink(3) }}>{r.plan.decision === 'allow' ? '已批准' : r.plan.decision === 'deny' ? '已打回' : '未裁决'}</span>
+                  </span>
+                }
               />
               <div style={{ ...surface.inset(), padding: '7px 9px' }}>
                 <Collapsible collapsedHeight={180}><Markdown text={r.plan.text} /></Collapsible>
@@ -347,8 +386,99 @@ function RecordCard(p: {
             </div>
           )}
 
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            {todoTexts.length > 0 && (
+              <Button
+                sm
+                variant="ghost"
+                icon={ListPlus}
+                title="把计划里未勾选的步骤转成待办"
+                onClick={(e) => { e.stopPropagation(); setTodosAdded(p.onPlanToTodos(todoTexts)) }}
+              >
+                {todosAdded === null ? `计划转待办 ${todoTexts.length}` : todosAdded > 0 ? `已加 ${todosAdded} 条` : '已在待办'}
+              </Button>
+            )}
+            <Button
+              sm
+              variant="ghost"
+              icon={NotebookPen}
+              onClick={(e) => {
+                e.stopPropagation()
+                p.onSaveCertificate(buildAcceptanceCertificate(r, a))
+                setCertSaved(true)
+                setTimeout(() => setCertSaved(false), 1800)
+              }}
+            >
+              {certSaved ? '已存便签' : '存验收凭证'}
+            </Button>
+            <Button
+              sm
+              variant="ghost"
+              icon={Copy}
+              onClick={(e) => {
+                e.stopPropagation()
+                navigator.clipboard?.writeText(buildAcceptanceCertificate(r, a)).catch(() => {})
+                setCertCopied(true)
+                setTimeout(() => setCertCopied(false), 1500)
+              }}
+            >
+              {certCopied ? '已复制' : '复制 Markdown'}
+            </Button>
+          </div>
+
+          {(gateHits.length > 0 || r.gateOverride) && (
+            <div style={{
+              display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 8px', borderRadius: R.sm,
+              background: semBg(gateHits.length > 0 ? sem.warn : sem.calm, 0.1),
+              border: `0.5px solid ${semBg(gateHits.length > 0 ? sem.warn : sem.calm, 0.3)}`
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 650, color: gateHits.length > 0 ? sem.warn : sem.calm }}>
+                <ShieldQuestion size={11} strokeWidth={2} />
+                {gateHits.length > 0 ? `门禁未满足 · ${gateHits.length} 项` : '带未满足项验收'}
+              </div>
+              {gateHits.map((v, i) => (
+                <div key={i} style={{ fontSize: 10, color: ink(2), lineHeight: 1.45 }}>· {v.text}</div>
+              ))}
+              {r.gateOverride && (
+                <div style={{ fontSize: 9.5, color: ink(3) }}>
+                  {fmtTime(r.gateOverride.at)} 仍然验收：{r.gateOverride.violations.join('；') || '（无记录）'}
+                </div>
+              )}
+            </div>
+          )}
+
+          {gateArmed && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '6px 8px',
+              borderRadius: R.sm, background: semBg(sem.warn, 0.12), border: `0.5px solid ${semBg(sem.warn, 0.32)}`
+            }}>
+              <span style={{ fontSize: 10, color: ink(2), flex: 1, minWidth: 120 }}>门禁未满足，确认仍然验收？该决定会留痕。</span>
+              <Button
+                sm
+                variant="warn"
+                icon={Check}
+                onClick={(e) => { e.stopPropagation(); p.onMark('accepted', gateHits.map((v) => v.text)); setGateArmed(false) }}
+              >
+                仍然验收
+              </Button>
+              <Button sm onClick={(e) => { e.stopPropagation(); setGateArmed(false) }}>取消</Button>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <Button sm variant={r.status === 'accepted' ? 'tinted' : 'ghost'} icon={Check} onClick={(e) => { e.stopPropagation(); p.onMark(r.status === 'accepted' ? 'pending' : 'accepted') }}>
+            <Button
+              sm
+              variant={r.status === 'accepted' ? 'tinted' : gateHits.length > 0 ? 'warn' : 'ghost'}
+              icon={Check}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (r.status === 'accepted') { p.onMark('pending'); return }
+                // 门禁未满足：先亮出原因，再点一次才落地（留痕 override）
+                if (gateHits.length > 0 && !gateArmed) { setGateArmed(true); return }
+                p.onMark('accepted', gateHits.length > 0 ? gateHits.map((v) => v.text) : undefined)
+                setGateArmed(false)
+              }}
+            >
               {r.status === 'accepted' ? '已验收' : '标记已验收'}
             </Button>
             <Button sm variant={r.status === 'followup' ? 'warn' : 'ghost'} icon={Flag} onClick={(e) => { e.stopPropagation(); p.onMark(r.status === 'followup' ? 'pending' : 'followup') }}>
@@ -372,6 +502,8 @@ function RecordCard(p: {
 export function AcceptTab(p: AcceptTabProps): React.JSX.Element {
   const [filter, setFilter] = useState<'pending' | 'accepted' | 'all'>('all')
   const [openId, setOpenId] = useState<string | null>(null)
+  const [project, setProject] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
   // 补验证的流式输出按记录 id 归集（主进程经 followup-event 推送）
   const [runs, setRuns] = useState<Record<string, FollowupRunView>>({})
   useEffect(() => island.onFollowupEvent((ev) => {
@@ -386,14 +518,25 @@ export function AcceptTab(p: AcceptTabProps): React.JSX.Element {
       return { ...map, [ev.runId]: { status: 'error', text: append(ev.text ? `\n${ev.text}` : '') } }
     })
   }), [])
+  const projects = useMemo(() => [...new Set(p.records.map((r) => r.proj).filter(Boolean))].sort(), [p.records])
+  // 搜索文本按记录缓存：每次按键只做 includes，不重建全文
+  const haystacks = useMemo(() => new Map(p.records.map((r) => [r.id, searchTextOf(r)])), [p.records])
+  const scoped = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return p.records.filter((r) => {
+      if (project && r.proj !== project) return false
+      if (!q) return true
+      return (haystacks.get(r.id) || '').includes(q)
+    })
+  }, [p.records, project, query, haystacks])
   const counts = useMemo(() => ({
-    pending: p.records.filter((r) => r.status !== 'accepted').length,
-    accepted: p.records.filter((r) => r.status === 'accepted').length,
-    all: p.records.length
-  }), [p.records])
+    pending: scoped.filter((r) => r.status !== 'accepted').length,
+    accepted: scoped.filter((r) => r.status === 'accepted').length,
+    all: scoped.length
+  }), [scoped])
   const visible = useMemo(
-    () => p.records.filter((r) => (filter === 'all' ? true : filter === 'accepted' ? r.status === 'accepted' : r.status !== 'accepted')),
-    [p.records, filter]
+    () => scoped.filter((r) => (filter === 'all' ? true : filter === 'accepted' ? r.status === 'accepted' : r.status !== 'accepted')),
+    [scoped, filter]
   )
 
   if (p.plans.length === 0 && p.records.length === 0) {
@@ -423,15 +566,38 @@ export function AcceptTab(p: AcceptTabProps): React.JSX.Element {
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <SectionHeader icon={ClipboardCheck} title={`验收记录 · ${p.records.length}`} style={{ marginBottom: 0, flex: 1 }} />
+        <SectionHeader icon={ClipboardCheck} title={`验收记录 · ${counts.all}`} style={{ marginBottom: 0, flex: 1 }} />
         <Chip active={filter === 'pending'} onClick={() => setFilter('pending')}>待核对 {counts.pending}</Chip>
         <Chip active={filter === 'accepted'} onClick={() => setFilter('accepted')}>已验收 {counts.accepted}</Chip>
         <Chip active={filter === 'all'} onClick={() => setFilter('all')}>全部 {counts.all}</Chip>
       </div>
 
+      {p.records.length > 1 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <Input
+            value={query}
+            onChange={setQuery}
+            placeholder="搜索项目 / 文件 / 命令 / 计划…"
+            style={{ fontSize: FS.small }}
+          />
+          {projects.length > 1 && (
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+              <Chip active={project === null} onClick={() => setProject(null)}>全部项目</Chip>
+              {projects.map((name) => (
+                <Chip key={name} active={project === name} onClick={() => setProject(project === name ? null : name)}>{name}</Chip>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {visible.length === 0 ? (
         <div style={{ ...text.faint(), fontSize: 10.5, padding: '6px 2px' }}>
-          {p.records.length === 0 ? '还没有会话结束；结束时会自动留档。' : filter === 'accepted' ? '还没有标记为已验收的记录。' : '待核对的记录都处理完了。'}
+          {p.records.length === 0
+            ? '还没有会话结束；结束时会自动留档。'
+            : scoped.length === 0
+              ? '没有匹配的记录，换个关键词或项目试试。'
+              : filter === 'accepted' ? '还没有标记为已验收的记录。' : '待核对的记录都处理完了。'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -441,10 +607,13 @@ export function AcceptTab(p: AcceptTabProps): React.JSX.Element {
               r={r}
               open={openId === r.id}
               run={runs[r.id]}
+              gate={p.gate}
               onToggle={() => setOpenId(openId === r.id ? null : r.id)}
               onJump={() => p.onJumpRecord(r)}
-              onMark={(status) => p.onMark(r.id, status)}
+              onMark={(status, violations) => p.onMark(r.id, status, violations)}
               onRemove={() => p.onRemove(r.id)}
+              onPlanToTodos={(texts) => p.onPlanToTodos(r, texts)}
+              onSaveCertificate={(markdown) => p.onSaveCertificate(r, markdown)}
               onStartFollow={async (prompt) => {
                 const sid = sessionIdOf(r)
                 if (!sid || !r.cwd) return { ok: false, error: '这条记录缺少会话 id 或工作目录' }

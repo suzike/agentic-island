@@ -55,6 +55,9 @@ export interface ScreenshotHistoryEntry {
 export interface ScreenCapturePrepare {
   ok: boolean
   sourceId?: string
+  /** 实际要抓的显示器（按光标所在屏选择），用于调用方按真实目标屏校验尺寸 */
+  displayId?: string
+  display?: { width: number; height: number; scaleFactor: number }
   error?: string
 }
 
@@ -382,7 +385,7 @@ export interface ChangeSummary {
   removed: number
   commit: string
   /** 变更文件清单（相对仓库根，最多 200 条；由 git status 得到，非 git/无改动时为空） */
-  paths?: { path: string; status: string }[]
+  paths?: { path: string; status: string; committed?: boolean }[]
   /** 会话期间产生的提交数（>0 时清单只覆盖工作区，已提交内容不在其中） */
   commits?: number
 }
@@ -414,6 +417,8 @@ export interface AgentState {
   proj: string
   /** 会话工作目录（续会话/补验证时需要） */
   cwd?: string
+  /** 岛是在会话已经跑起来之后才接上的：工作区基线必然晚于会话开始，改动清单可能不完整 */
+  baselineLate?: boolean
   status: AgentStatus
   detail: string
   command?: string
@@ -740,11 +745,13 @@ export interface IslandBridgeApi {
   /** GitHub 本周热门仓库（迷你条轮播） */
   githubTrending: () => Promise<{ ok: boolean; items?: string[]; error?: string }>
   /** GitHub 结构化 trending：日/周/月高星新仓库 */
-  githubTrendingRepos: (range: string, token?: string) => Promise<{ ok: boolean; repos?: GitHubRepo[]; error?: string }>
+  githubTrendingRepos: (range: string, token?: string, requestId?: string) => Promise<{ ok: boolean; repos?: GitHubRepo[]; error?: string }>
   /** GitHub 我的账号 + 仓库（需 token） */
   githubMyRepos: (token: string) => Promise<{ ok: boolean; user?: { login: string; avatar?: string; repos?: number; followers?: number; following?: number }; repos?: GitHubRepo[]; error?: string }>
   /** 搜索 GitHub 仓库 */
-  githubSearch: (q: string, token?: string) => Promise<{ ok: boolean; repos?: GitHubRepo[]; error?: string }>
+  githubSearch: (q: string, token?: string, requestId?: string) => Promise<{ ok: boolean; repos?: GitHubRepo[]; error?: string }>
+  /** 取消进行中的 GitHub 请求（慢网/切换范围）。 */
+  githubCancel: (requestId: string) => Promise<{ ok: boolean }>
   /** 拉取仓库 README（供 AI 解读） */
   githubReadme: (owner: string, repo: string, token?: string) => Promise<{ ok: boolean; text?: string; error?: string }>
   /** RSS 资讯：抓取并解析单个订阅源 */
@@ -865,6 +872,15 @@ export interface IslandBridgeApi {
   deleteRecordingProject: (id: string) => Promise<{ ok: boolean; error?: string }>
   cancelRecordingExport: (jobId: string) => void
   onRecordingExportProgress: (cb: (progress: RecordingExportProgress) => void) => () => void
+  /** 为成品生成局域网临时链接（随机 token、1 小时自动过期、只读单文件）。 */
+  shareFile: (path: string) => Promise<{ ok: boolean; url?: string; expiresAt?: number; error?: string }>
+  /** 虚拟摄像头 MJPEG 服务：启停与推帧。 */
+  startMjpeg: () => Promise<{ ok: boolean; url?: string; token?: string; port?: number; error?: string }>
+  pushMjpegFrame: (dataUrl: string) => void
+  stopMjpeg: () => Promise<{ ok: boolean }>
+  /** 通过 OBS WebSocket 启动/停止 OBS Virtual Camera。 */
+  startVirtualCamera: (options: { streamUrl: string; width: number; height: number; obsUrl?: string; password?: string }) => Promise<{ ok: boolean; scene?: string; launched?: boolean; error?: string }>
+  stopVirtualCamera: (options: { obsUrl?: string; password?: string }) => Promise<{ ok: boolean; error?: string }>
   /** 图片写剪贴板 */
   copyImage: (dataUrl: string) => Promise<{ ok: boolean; error?: string }>
   /** 图片存盘（PNG/JPEG/WebP，弹保存框） */
@@ -920,6 +936,8 @@ export interface IslandBridgeApi {
   finishScreenCapture: () => Promise<{ ok: boolean }>
   /** 全局热键请求截图：主进程只转发，抓帧在渲染层。 */
   onScreenCaptureRequested: (cb: (capture: { target: ScreenshotTarget; region?: ScreenshotSnipRegion }) => void) => () => void
+  /** 全局热键直接打开录屏工坊（Ctrl+Alt+R）。 */
+  onOpenRecorder: (cb: () => void) => () => void
   /** 打开本地 Markdown 文件 */
   openMdFile: () => Promise<{ ok: boolean; path?: string; name?: string; content?: string; error?: string }>
   /** 保存 Markdown 到本地（existingPath 为空则弹另存为） */

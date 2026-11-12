@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { EncoderRunner } from '../src/main/recording-export.ts'
 import { buildRecordingAspectFilters, buildRecordingFfmpegArgs, buildRecordingMotionCropFilter, buildRecordingMotionFilter, MOTION_MAX_CENTER_TOLERANCE, recordingMotionUsable, parseRecordingOutputProbe, probeRecordingOutput, recordingExportVerdict, buildRecordingRemuxArgs, crfFor, detectHardwareEncoders, hardwareQuantizerForCrf, MAX_MOTION_WAYPOINTS, parseHardwareEncoders, pickFastestEncoder, pickVideoEncoder, recordingExportDurationMs, recordingExportStrategy, recordingExportSubtitleSegments, recordingHasEdits, simplifyRecordingMotion, videoEncoderArgs } from '../src/main/recording-export.ts'
 import { recordingContainerOf, recordingFileExtension, sniffRecordingContainer } from '../src/shared/recording-format.ts'
-import { clampRecordingBarPosition, formatRecordingTime, recordingBilingualSrt, recordingBilingualVtt, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, remapRecordingMotionFrames, recordingSmoothingAlpha, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTrackSummary, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
+import { clampRecordingBarPosition, formatRecordingTime, normalizeOverlaySources, normalizePrivacyRegions, normalizeRecordingScenes, recordingBilingualSrt, recordingBilingualVtt, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, remapRecordingMotionFrames, recordingSmoothingAlpha, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTrackSummary, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
 } from '../src/renderer/src/logic/recording.ts'
 import { recordingSourceLabel, recordingWindowHandle, sameRecordingWindowSource } from '../src/shared/recording-source.ts'
 import type { RecordingExportRequest } from '../src/shared/protocol.ts'
@@ -59,6 +59,32 @@ const motionPlain = recordingMotionFrames(motionSamples, [{ startMs: 0, endMs: 2
 const motionClicked = recordingMotionFrames(motionSamples, [{ startMs: 0, endMs: 2000 }], { fps: 30, motion: 'gentle', strength: 0.5, maxZoom: 1.6, clicks: [{ t: 1000, x: 0.8, y: 0.8 }], clickFocus: true })
 assert.ok(motionClicked[32].zoom > motionPlain[32].zoom, '点击后 1.2 秒内推近，形成点击强调')
 assert.ok(motionClicked[50].zoom <= 1.6, '点击强调不会超过最大放大')
+const scenes = normalizeRecordingScenes([
+  { name: '教程', sourceKind: 'window', fps: 999, region: { left: 9, top: -1, right: 0.2, bottom: 0.1 } },
+  { name: '', fps: 30 },
+  { name: '会议', resolution: '1440p', captureMode: 'composite' }
+])
+assert.equal(scenes.length, 2, '场景库丢弃无名记录')
+assert.equal(scenes.find((s) => s.name === '教程')?.fps, 60, '场景帧率钳到 60')
+assert.equal(scenes.find((s) => s.name === '教程')?.region.left, 0.8, '场景区域钳到有效范围')
+assert.equal(scenes.find((s) => s.name === '会议')?.captureMode, 'composite', '场景保留采集方式')
+const masks = normalizePrivacyRegions([
+  { x: 0.9, y: 0.9, w: 0.5, h: 0.5, mode: 'blur' },
+  { x: -1, y: 0, w: 0, h: 0 },
+  { bad: true }
+])
+assert.equal(masks.length, 3, '区域遮罩逐条规范化')
+assert.ok(masks[0].x + masks[0].w <= 1.0001 && masks[0].y + masks[0].h <= 1.0001, '遮罩不越出画面')
+assert.equal(masks[0].mode, 'blur', '遮罩保留模糊模式')
+assert.equal(recordingRawModeBlockers({ regionEnabled: false, webcam: false, watermarkEnabled: false, privacyTop: 0, privacyBottom: 0, privacyRegions: 1 }).some((item) => item.includes('区域隐私遮罩')), true, '区域遮罩会阻止 raw 直通')
+assert.equal(recordingRawModeBlockers({ regionEnabled: false, webcam: false, watermarkEnabled: false, privacyTop: 0, privacyBottom: 0, overlaySources: 1 }).some((item) => item.includes('多画面')), true, '多画面会阻止 raw 直通')
+const overlays = normalizeOverlaySources([
+  { name: '窗口 A', x: 0.7, y: 0.7, w: 0.5, h: 0.5 },
+  { name: '窗口 B', x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+  { name: '窗口 C' }, { name: '窗口 D' }, { name: '窗口 E' }
+])
+assert.equal(overlays.length, 4, '叠加画面最多 4 路')
+assert.ok(overlays[0].x + overlays[0].w <= 1.0001 && overlays[0].y + overlays[0].h <= 1.0001, '叠加画面不越界')
 assert.equal(formatRecordingTime(3_725_000), '01:02:05', '长录制时长格式')
 assert.match(recordingStartError(new DOMException('Permission denied', 'NotAllowedError')), /权限被拒绝/, '权限错误转为可执行提示')
 assert.match(recordingStartError(new Error('desktop picture timed out')), /连接屏幕画面超时/, '采集超时转为可执行提示')

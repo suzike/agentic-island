@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  Cloud, Terminal, Hexagon, Zap, Brain, Library, Settings2, ChevronDown,
+  Cloud, Terminal, Hexagon, Zap, Brain, Library, Layers, Settings2, ChevronDown,
   Pencil, ClipboardList, Plus, History, Sparkles, Lightbulb, X, Check, Star, MessageSquare, MoreHorizontal,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -243,8 +243,8 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
               {m.active && <span style={{ color: accentText(), fontSize: 10, fontWeight: 700 }}>使用中</span>}
             </div>
           ))}
-          <div className="hv" onClick={() => { setShowModels(false); p.onOpenLlmSettings() }} style={{ textAlign: 'center', padding: '6px 0', borderRadius: R.md, color: ink(3), fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>
-            ⚙ 管理模型配置（在设置里保存多个即可在此切换）
+          <div className="hv" onClick={() => { setShowModels(false); p.onOpenLlmSettings() }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '6px 0', borderRadius: R.md, color: ink(3), fontSize: 10.5, fontWeight: 600, cursor: 'pointer' }}>
+            <Settings2 size={10} strokeWidth={2} />管理模型配置（在设置里保存多个即可在此切换）
           </div>
         </motion.div>
       )}
@@ -318,7 +318,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: ink(1), fontSize: 11, fontWeight: 700 }}><ClipboardList size={11} strokeWidth={2} style={{ color: accentText() }} />剪贴板</span>
             <span style={{ ...text.faint(), fontSize: 9.5 }}>★ 收藏才落盘</span>
             <span style={{ flex: 1 }} />
-            <span className="hv" onClick={p.onClusterClips} title="AI 把片段按主题聚成集" style={{ color: p.clipClustering ? ink(4) : accentText(0.85), fontSize: 10, cursor: 'pointer' }}>{p.clipClustering ? '聚类中…' : '🧩 归类'}</span>
+            <span className="hv" onClick={p.onClusterClips} title="AI 把片段按主题聚成集" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: p.clipClustering ? ink(4) : accentText(0.85), fontSize: 10, cursor: 'pointer' }}>{p.clipClustering ? '聚类中…' : <><Layers size={10} strokeWidth={2} />归类</>}</span>
             <span className="hv" onClick={p.onClearClips} title="清空未收藏项" style={{ color: ink(3), fontSize: 10, cursor: 'pointer' }}>清空</span>
           </div>
           <input
@@ -368,7 +368,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
                   if (!items.length) return null
                   return (
                     <div key={name} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                      <div style={{ color: accentText(0.72, 0.85), fontSize: 10, fontWeight: 700, marginTop: 2 }}>🧩 {name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 3, color: accentText(0.72, 0.85), fontSize: 10, fontWeight: 700, marginTop: 2 }}><Layers size={10} strokeWidth={2} />{name}</div>
                       {items.map(renderClip)}
                     </div>
                   )

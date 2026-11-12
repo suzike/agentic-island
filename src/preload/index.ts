@@ -48,9 +48,10 @@ const api: IslandBridgeApi = {
   setIslandWidth: (w: number): void => ipcRenderer.send('set-island-width', w),
   setZoom: (z: number): void => ipcRenderer.send('set-zoom', z),
   githubTrending: () => ipcRenderer.invoke('github-trending'),
-  githubTrendingRepos: (range: string, token?: string) => ipcRenderer.invoke('github-trending-repos', range, token),
+  githubTrendingRepos: (range: string, token?: string, requestId?: string) => ipcRenderer.invoke('github-trending-repos', range, token, requestId),
   githubMyRepos: (token: string) => ipcRenderer.invoke('github-my-repos', token),
-  githubSearch: (q: string, token?: string) => ipcRenderer.invoke('github-search', q, token),
+  githubSearch: (q: string, token?: string, requestId?: string) => ipcRenderer.invoke('github-search', q, token, requestId),
+  githubCancel: (requestId: string) => ipcRenderer.invoke('github-cancel', requestId),
   githubReadme: (owner: string, repo: string, token?: string) => ipcRenderer.invoke('github-readme', owner, repo, token),
   rssFetch: (url: string) => ipcRenderer.invoke('rss-fetch', url),
   onCapsuleToggle: (cb: () => void): (() => void) => {
@@ -95,6 +96,11 @@ const api: IslandBridgeApi = {
     const handler = (_e: unknown, capture: { target: ScreenshotTarget; region?: ScreenshotSnipRegion }): void => cb(capture)
     ipcRenderer.on('screen-capture-requested', handler)
     return () => ipcRenderer.removeListener('screen-capture-requested', handler)
+  },
+  onOpenRecorder: (cb: () => void): (() => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('open-recorder', handler)
+    return () => ipcRenderer.removeListener('open-recorder', handler)
   },
   onScreenshot: (cb: (capture: ScreenshotCapture) => void): (() => void) => {
     const handler = (_e: unknown, capture: ScreenshotCapture): void => cb(capture)
@@ -196,6 +202,12 @@ const api: IslandBridgeApi = {
     ipcRenderer.on('recording-export-progress', handler)
     return () => ipcRenderer.removeListener('recording-export-progress', handler)
   },
+  shareFile: (path: string) => ipcRenderer.invoke('share-file', path),
+  startMjpeg: () => ipcRenderer.invoke('mjpeg-start'),
+  pushMjpegFrame: (dataUrl: string): void => ipcRenderer.send('mjpeg-frame', dataUrl),
+  stopMjpeg: () => ipcRenderer.invoke('mjpeg-stop'),
+  startVirtualCamera: (options) => ipcRenderer.invoke('virtual-camera-start', options),
+  stopVirtualCamera: (options) => ipcRenderer.invoke('virtual-camera-stop', options),
   copyImage: (dataUrl: string) => ipcRenderer.invoke('copy-image', dataUrl),
   saveImage: (dataUrl: string, name: string) => ipcRenderer.invoke('save-image', dataUrl, name),
   openImageFile: () => ipcRenderer.invoke('open-image-file'),

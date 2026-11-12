@@ -4,11 +4,13 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Activity, CalendarClock, ChevronDown, GlassWater, MessageSquare, Minus, PanelTop, Palette, RefreshCw, ShieldCheck,
+    Activity, CalendarClock, ChevronDown, GlassWater, ListChecks, MessageSquare, Minus, PanelTop, Palette, RefreshCw, ShieldCheck,
   Moon, Pencil, Play, Plug, Plus, Power, Settings2, Sparkles, Sun, Terminal, TimerReset, TriangleAlert,
   Waves, Wind, Wrench, X, Zap
 } from 'lucide-react'
 import type { ApprovalAuditEntry, ApprovalPolicy, DisplayInfo, RuntimeInfo, UpdateState } from '../../../shared/protocol'
+import type { VerificationRules } from '../../../shared/verification'
+import type { AcceptanceGate } from '../types'
 import type { BarConfig } from '../types'
 import { SOUNDS, SOUND_TYPES, type SoundMap } from '../logic/sounds'
 import { PROVIDERS, providerConfigEquals, providerIsKeyless, type ProviderSettingsSnapshot } from '../logic/providers'
@@ -121,6 +123,14 @@ interface SettingsTabProps {
   onInstallUpdate: () => void
   /** 审批策略：放行规则 + 自动放行审计流水（主进程强制执行） */
   approvalPolicy: ApprovalPolicy
+  /** 验收规则：内置判定之外的补充命令片段（全局 + 按项目） */
+  verificationRules: VerificationRules
+  onSetVerificationRules: (rules: VerificationRules) => void
+  /** 可选的项目名（来自工作台项目与验收记录），用于配置项目规则 */
+  knownProjects: string[]
+  /** 验收门禁：退出码全 0 / 最少验证条数 / 受保护路径 */
+  acceptanceGate: AcceptanceGate
+  onSetAcceptanceGate: (gate: AcceptanceGate) => void
   onSetApprovalPolicy: (p: ApprovalPolicy) => void
   approvalAudit: ApprovalAuditEntry[]
 }
@@ -236,6 +246,63 @@ function CollapsibleSection(props: {
   )
 }
 
+/** 项目选择：验收规则与门禁共用同一个当前项目。 */
+function ProjectPicker(props: { projects: string[]; value: string; onChange: (value: string) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+      <span style={{ ...text.faint(), fontSize: 10, flex: 'none' }}>当前项目</span>
+      {props.projects.map((name) => (
+        <Chip key={name} active={props.value === name} onClick={() => props.onChange(name)}>{name}</Chip>
+      ))}
+    </div>
+  )
+}
+
+/** 规则作用域：全局或单个项目。 */
+type RuleScope = 'global' | 'project'
+
+/** 规则组：标题、说明、作用域切换、可选项目选择、规则 chips 和输入框。 */
+function RuleBlock(props: {
+  title: string
+  desc?: string
+  rules: string[]
+  placeholder: string
+  extra?: React.ReactNode
+  scope?: { value: RuleScope; onChange: (value: RuleScope) => void }
+  onAdd: (rule: string) => void
+  onRemove: (rule: string) => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', background: fill(2), borderRadius: R.lg, border: `0.5px solid ${hairline(0.045)}` }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <div style={{ ...text.body(), fontSize: FS.small, fontWeight: 650 }}>{props.title}</div>
+          {props.desc && <div style={{ ...text.faint(), lineHeight: 1.5 }}>{props.desc}</div>}
+        </div>
+        {props.scope && (
+          <Segmented
+            options={[{ key: 'global', label: '全局' }, { key: 'project', label: '项目' }] as { key: RuleScope; label: string }[]}
+            value={props.scope.value}
+            onChange={props.scope.onChange}
+            style={{ flex: 'none' }}
+          />
+        )}
+      </div>
+      {props.extra}
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, minHeight: 22 }}>
+        {props.rules.length
+          ? props.rules.map((rule) => (
+            <Chip key={rule} title="点击移除该规则" onClick={() => props.onRemove(rule)}>
+              {rule} <X size={10} strokeWidth={2.2} style={{ display: 'inline', verticalAlign: -1, opacity: 0.7 }} />
+            </Chip>
+          ))
+          : <span style={text.faint()}>暂无</span>}
+      </div>
+      <RuleInput placeholder={props.placeholder} onAdd={props.onAdd} />
+    </div>
+  )
+}
+
 /** 组内小标签 */
 const labelSm: React.CSSProperties = { fontSize: FS.small, fontWeight: 600, color: ink(2), letterSpacing: '-.004em' }
 const endpointHost = (baseUrl: string): string => {
@@ -283,6 +350,12 @@ function UpdateRow({ p }: { p: SettingsTabProps }): React.JSX.Element {
 export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
   const [hookMsg, setHookMsg] = useState('')
   const [modelDraft, setModelDraft] = useState('')
+  const [ruleProject, setRuleProject] = useState(p.knownProjects[0] || '')
+  const [ruleScope, setRuleScope] = useState<RuleScope>('global')
+  const [pathScope, setPathScope] = useState<RuleScope>('global')
+  useEffect(() => {
+    if (!p.knownProjects.includes(ruleProject)) setRuleProject(p.knownProjects[0] || '')
+  }, [p.knownProjects, ruleProject])
   // ICS 链接草稿：点「保存并同步」才生效，避免每敲一个字符就触发拉取
   const [icsDraft, setIcsDraft] = useState(p.icsUrl)
   useEffect(() => setIcsDraft(p.icsUrl), [p.icsUrl])
@@ -351,28 +424,124 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
         <UpdateRow p={p} />
       </Section>
 
+      {/* 验收规则与门禁：先说明哪些命令算证据，再说明标记已验收前的检查。 */}
+      <Section icon={ListChecks} title="验收规则与门禁">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ ...text.faint(), lineHeight: 1.55 }}>
+            内置判定覆盖常见工具链；这里只补项目特有的命令片段，子串匹配、大小写不敏感。
+          </div>
+
+          <RuleBlock
+            title="补充规则"
+            desc={ruleScope === 'global' ? '所有项目都生效' : `仅在命令运行于 ${ruleProject || '该项目'} 目录时生效`}
+            scope={{ value: ruleScope, onChange: setRuleScope }}
+            rules={(ruleScope === 'global' ? p.verificationRules.extra : p.verificationRules.byProject?.[ruleProject]) || []}
+            placeholder={ruleScope === 'global' ? '添加规则，如 run_regression，回车确认' : `为 ${ruleProject || '该项目'} 添加规则，如 sim_suite，回车确认`}
+            extra={ruleScope === 'project'
+              ? (p.knownProjects.length > 0
+                ? <ProjectPicker projects={p.knownProjects} value={ruleProject} onChange={setRuleProject} />
+                : <span style={text.faint()}>暂无已知项目，运行过一次命令后出现在这里</span>)
+              : undefined}
+            onAdd={(rule) => {
+              const text = rule.trim()
+              if (!text) return
+              if (ruleScope === 'global') {
+                const list = p.verificationRules.extra || []
+                if (!list.includes(text)) p.onSetVerificationRules({ ...p.verificationRules, extra: [...list, text] })
+              } else if (ruleProject) {
+                const list = p.verificationRules.byProject?.[ruleProject] || []
+                if (!list.includes(text)) p.onSetVerificationRules({ ...p.verificationRules, byProject: { ...(p.verificationRules.byProject || {}), [ruleProject]: [...list, text] } })
+              }
+            }}
+            onRemove={(rule) => {
+              if (ruleScope === 'global') {
+                p.onSetVerificationRules({ ...p.verificationRules, extra: (p.verificationRules.extra || []).filter((x) => x !== rule) })
+              } else if (ruleProject) {
+                p.onSetVerificationRules({ ...p.verificationRules, byProject: { ...(p.verificationRules.byProject || {}), [ruleProject]: (p.verificationRules.byProject?.[ruleProject] || []).filter((x) => x !== rule) } })
+              }
+            }}
+          />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 2 }}>
+            <span style={{ ...text.overline() }}>门禁</span>
+            <span style={{ flex: 1, height: 0.5, background: hairline(0.07) }} />
+          </div>
+
+          <Group>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ ...text.body(), fontSize: FS.small, fontWeight: 650 }}>验证必须全部退出 0</div>
+                <div style={text.faint()}>非零退出码需要二次确认；未回传退出码不算通过</div>
+              </div>
+              <Switch label="验证必须全部退出 0" on={p.acceptanceGate.requireExitZero} onChange={(on) => p.onSetAcceptanceGate({ ...p.acceptanceGate, requireExitZero: on })} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ ...text.body(), fontSize: FS.small, fontWeight: 650 }}>最少验证记录条数</div>
+                <div style={text.faint()}>0 表示不要求；不足时同样二次确认</div>
+              </div>
+              <Input
+                type="number"
+                value={String(p.acceptanceGate.minChecks || 0)}
+                onChange={(v) => p.onSetAcceptanceGate({ ...p.acceptanceGate, minChecks: Math.max(0, Math.min(20, Number(v) || 0)) })}
+                style={{ width: 72 }}
+              />
+            </div>
+          </Group>
+
+          <RuleBlock
+            title="受保护路径"
+            desc={pathScope === 'global' ? '相对仓库根；以 / 结尾表示目录' : `仅对 ${ruleProject || '该项目'} 生效；相对仓库根`}
+            scope={{ value: pathScope, onChange: setPathScope }}
+            rules={(pathScope === 'global' ? p.acceptanceGate.forbiddenPaths : p.acceptanceGate.byProject?.[ruleProject]) || []}
+            placeholder={pathScope === 'global' ? '添加路径，如 model/ 或 src/generated*，回车确认' : `为 ${ruleProject || '该项目'} 添加路径，如 torque/，回车确认`}
+            extra={pathScope === 'project'
+              ? (p.knownProjects.length > 0
+                ? <ProjectPicker projects={p.knownProjects} value={ruleProject} onChange={setRuleProject} />
+                : <span style={text.faint()}>暂无已知项目，运行过一次命令后出现在这里</span>)
+              : undefined}
+            onAdd={(rule) => {
+              const text = rule.trim()
+              if (!text) return
+              if (pathScope === 'global') {
+                const list = p.acceptanceGate.forbiddenPaths || []
+                if (!list.includes(text)) p.onSetAcceptanceGate({ ...p.acceptanceGate, forbiddenPaths: [...list, text] })
+              } else if (ruleProject) {
+                const list = p.acceptanceGate.byProject?.[ruleProject] || []
+                if (!list.includes(text)) p.onSetAcceptanceGate({ ...p.acceptanceGate, byProject: { ...(p.acceptanceGate.byProject || {}), [ruleProject]: [...list, text] } })
+              }
+            }}
+            onRemove={(rule) => {
+              if (pathScope === 'global') {
+                p.onSetAcceptanceGate({ ...p.acceptanceGate, forbiddenPaths: (p.acceptanceGate.forbiddenPaths || []).filter((x) => x !== rule) })
+              } else if (ruleProject) {
+                p.onSetAcceptanceGate({ ...p.acceptanceGate, byProject: { ...(p.acceptanceGate.byProject || {}), [ruleProject]: (p.acceptanceGate.byProject?.[ruleProject] || []).filter((x) => x !== rule) } })
+              }
+            }}
+          />
+        </div>
+      </Section>
+
       {/* 审批策略：命中放行规则的命令不再阻塞审批，全部自动放行记入审计流水 */}
       <Section icon={ShieldCheck} title="审批策略">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ ...text.body(), fontSize: FS.small, fontWeight: 650 }}>启用自动放行规则</div>
-              <div style={text.faint()}>命中规则的命令不再阻塞审批，直接放行并记入审计流水；危险命令词仍始终强制确认</div>
+          <Group>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ ...text.body(), fontSize: FS.small, fontWeight: 650 }}>启用自动放行规则</div>
+                <div style={text.faint()}>命中规则的命令不再阻塞审批，直接放行并记入审计流水；危险命令词仍始终强制确认</div>
+              </div>
+              <Switch label="启用自动放行规则" on={p.approvalPolicy.enabled} onChange={(on) => p.onSetApprovalPolicy({ ...p.approvalPolicy, enabled: on })} />
             </div>
-            <Switch on={p.approvalPolicy.enabled} onChange={(on) => p.onSetApprovalPolicy({ ...p.approvalPolicy, enabled: on })} />
-          </div>
-          <div>
-            <div style={{ ...text.faint(), fontSize: 10, marginBottom: 5 }}>放行规则（子串匹配命令原文，大小写不敏感；只添加完全信任的命令片段）</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 7 }}>
-              {p.approvalPolicy.rules.map((rule) => (
-                <Chip key={rule} onClick={() => p.onSetApprovalPolicy({ ...p.approvalPolicy, rules: p.approvalPolicy.rules.filter((x) => x !== rule) })} title="点击移除该规则">
-                  {rule} <X size={10} strokeWidth={2.2} style={{ display: 'inline', verticalAlign: -1, opacity: 0.7 }} />
-                </Chip>
-              ))}
-              {!p.approvalPolicy.rules.length && <span style={text.faint()}>暂无规则</span>}
-            </div>
-            <RuleInput onAdd={(rule) => { if (rule.trim() && !p.approvalPolicy.rules.includes(rule.trim())) p.onSetApprovalPolicy({ ...p.approvalPolicy, rules: [...p.approvalPolicy.rules, rule.trim()] }) }} />
-          </div>
+          </Group>
+          <RuleBlock
+            title="放行规则"
+            desc="子串匹配命令原文，大小写不敏感；只添加完全信任的命令片段"
+            rules={p.approvalPolicy.rules}
+            placeholder="添加规则，如 git status / npm run test，回车确认"
+            onAdd={(rule) => { const text = rule.trim(); if (text && !p.approvalPolicy.rules.includes(text)) p.onSetApprovalPolicy({ ...p.approvalPolicy, rules: [...p.approvalPolicy.rules, text] }) }}
+            onRemove={(rule) => p.onSetApprovalPolicy({ ...p.approvalPolicy, rules: p.approvalPolicy.rules.filter((x) => x !== rule) })}
+          />
           {p.approvalAudit.length > 0 && (
             <div>
               <div style={{ ...text.faint(), fontSize: 10, marginBottom: 5 }}>自动放行审计流水（最近 {p.approvalAudit.length} 条）</div>
@@ -496,7 +665,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                     </span>
                     <span style={text.faint()}>{g.desc}</span>
                   </div>
-                  <Switch on={p.settings[g.key]} onChange={() => p.onToggle(g.key)} />
+                  <Switch label={g.label} on={p.settings[g.key]} onChange={() => p.onToggle(g.key)} />
                 </div>
 
                 {isSound && p.soundPickerOpen && p.settings.sound && (
@@ -567,7 +736,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                     <span style={text.body()}>{r.label}</span>
                     <span style={text.faint()}>{r.desc}</span>
                   </div>
-                  <Switch on={p.settings[r.key]} onChange={() => p.onToggle(r.key)} />
+                  <Switch label={r.label} on={p.settings[r.key]} onChange={() => p.onToggle(r.key)} />
                 </div>
               ))}
             </Group>
@@ -843,7 +1012,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
               <span style={{ ...text.body(), fontSize: 12 }}>AI 每 10 分钟刷新内容</span>
               <span style={{ ...text.faint(), fontSize: 10 }}>名言/经验/方法论/热管理/自定义主题持续出新（用问答模型，产生调用费用）</span>
             </div>
-            <Switch on={p.barCfg.aiRefresh !== false} onChange={() => p.onSetBarCfg({ ...p.barCfg, aiRefresh: p.barCfg.aiRefresh === false ? true : false })} />
+            <Switch label="迷你条 AI 刷新" on={p.barCfg.aiRefresh !== false} onChange={() => p.onSetBarCfg({ ...p.barCfg, aiRefresh: p.barCfg.aiRefresh === false ? true : false })} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Button variant="primary" icon={Sparkles} onClick={() => { setBarAiMsg('✨ 正在提炼…'); void p.onAiBarQuotes().then(setBarAiMsg) }}>
@@ -866,7 +1035,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
             <span style={text.body()}>自动接入所有 CLI / 终端</span>
             <span style={text.faint()}>开启后，任何 Claude Code / Codex 会话都实时通信</span>
           </div>
-          <Switch on={p.settings.autoConnect} onChange={() => p.onToggle('autoConnect')} />
+          <Switch label="自动接入所有 CLI / 终端" on={p.settings.autoConnect} onChange={() => p.onToggle('autoConnect')} />
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <Button variant="ghost" onClick={() => { p.onInstallHooks(); setHookMsg('已接入 · 全局写入，所有会话的生命周期会实时反映到岛') }} style={{ flex: 1 }}>立即重新接入</Button>
@@ -910,10 +1079,10 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
 }
 
 /** 放行规则输入：回车或失焦时提交（去重由父级处理） */
-function RuleInput({ onAdd }: { onAdd: (rule: string) => void }): React.JSX.Element {
+function RuleInput({ onAdd, placeholder = '添加规则，如 git status / npm run test，回车确认' }: { onAdd: (rule: string) => void; placeholder?: string }): React.JSX.Element {
   const [value, setValue] = useState('')
   const submit = (): void => { if (value.trim()) { onAdd(value); setValue('') } }
-  return <Input value={value} onChange={setValue} placeholder="添加规则，如 git status / npm run test，回车确认"
+  return <Input value={value} onChange={setValue} placeholder={placeholder}
     onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
-    style={{ maxWidth: 380 }} />
+    style={{ width: '100%', background: fill(1), border: `0.5px solid ${hairline(0.1)}` }} />
 }

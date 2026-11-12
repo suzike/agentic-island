@@ -447,18 +447,21 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
 
       {/* 流水线状态条：一条一条处理，处理完即时进精选 */}
       {(p.proc.active || unprocessed > 0) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', borderRadius: R.md, background: semBg(accent(), 0.08), border: `0.5px solid ${accent(0.7, 0.25)}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '1px 3px' }}>
           {p.proc.active ? (
             <>
-              <span style={{ display: 'inline-block', width: 11, height: 11, border: `2px solid ${accent(0.7, 0.25)}`, borderTopColor: accent(0.8), borderRadius: 999, animation: 'ai-ring .8s linear infinite', flex: 'none' }} />
+              <span style={{ display: 'inline-block', width: 10, height: 10, border: `1.5px solid ${accent(0.7, 0.22)}`, borderTopColor: accent(0.8), borderRadius: 999, animation: 'ai-ring .8s linear infinite', flex: 'none' }} />
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: ink(1), fontSize: FS.small }}>
                 逐条审稿中 {p.proc.done + 1}/{p.proc.total} · {p.proc.current}
+              </span>
+              <span style={{ flex: 'none', width: 86, height: 3, borderRadius: R.pill, background: fill(3), overflow: 'hidden' }}>
+                <span style={{ display: 'block', width: `${Math.min(100, Math.round(((p.proc.done + 1) / Math.max(1, p.proc.total)) * 100))}%`, height: '100%', background: accent(0.78) }} />
               </span>
             </>
           ) : (
             <>
               <span style={{ flex: 1, color: ink(2), fontSize: FS.small }}>还有 {unprocessed} 条待审（抓全文 → 严格评分 → 详细总结）</span>
-              <Button sm variant="primary" icon={Zap} onClick={p.onProcessNow}>继续处理</Button>
+              <Button sm variant="ghost" icon={Zap} onClick={p.onProcessNow}>继续处理</Button>
             </>
           )}
         </div>
@@ -624,7 +627,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
               onClick={() => toggleExpand(it)}
               style={{ ...surface.card(), display: 'flex', alignItems: 'flex-start', gap: 10, padding: '11px 13px', cursor: 'pointer', background: `linear-gradient(90deg, ${accent(0.7, 0.42)} 0, ${accent(0.7, 0.42)} 3px, ${fill(1)} 3px)`, border: `0.5px solid ${accent(0.6, 0.16)}`, borderRadius: R.lg }}
             >
-              <span style={{ flex: 'none', fontSize: 15, fontWeight: 900, color: accentText(0.85 - i * 0.08), fontStyle: 'italic', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+              <span style={{ flex: 'none', width: 22, height: 22, marginTop: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 7, background: semBg(accent(), i === 0 ? 0.2 : 0.12), color: accentText(0.9), fontSize: 11, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ color: ink(1), fontSize: FS.body, fontWeight: 700, lineHeight: 1.4 }}>{it.title}</div>
                 {it.brief && <div style={{ color: ink(2), fontSize: FS.tiny, lineHeight: 1.5, marginTop: 3 }}>{it.brief}</div>}

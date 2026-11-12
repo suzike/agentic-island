@@ -263,7 +263,7 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
           {p.workflowRuns.filter((x) => !p.activeProjectId || x.projectId === p.activeProjectId).slice(0, 4).map((x) => {
             const st = x.status === 'succeeded' ? { c: sem.calm, I: Ico.done } : x.status === 'failed' ? { c: sem.danger, I: Ico.close } : { c: sem.warn, I: Ico.pause }
             return (
-              <span key={x.id} title={x.summary || x.shortcutName} style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: 160, padding: '3px 8px', borderRadius: R.pill, background: semBg(st.c, 0.1), border: `0.5px solid ${semBg(st.c, 0.3)}`, color: st.c, fontSize: 9.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span key={x.id} title={x.summary || x.shortcutName} style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: 170, padding: '3px 9px', borderRadius: R.pill, background: semBg(st.c, 0.12), color: st.c, fontSize: 10, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <st.I size={10} strokeWidth={2.5} style={{ flex: 'none' }} />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.shortcutName} · {x.completedSteps}/{x.stepCount}</span>
               </span>

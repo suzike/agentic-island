@@ -7,7 +7,8 @@ import { motion } from 'framer-motion'
 import {
   BarChart3, Check, Copy, Loader2, NotebookPen, RefreshCw, Sparkles, StickyNote, Sunrise, Volume2
 } from 'lucide-react'
-import type { ActivityEntry, TodoItem } from '../types'
+import type { AcceptanceRecord, ActivityEntry, TodoItem } from '../types'
+import { analyzeAcceptance } from '../logic/acceptance'
 import {
   buildFacts, dayKey, hasContent, reviewPrompt, weeklyPrompt, morningPrompt,
   REVIEW_SYSTEM, WEEKLY_SYSTEM, MORNING_SYSTEM, type DayFacts, type MorningInput
@@ -17,11 +18,13 @@ import { InsightsPanel } from './InsightsPanel'
 import { PetPanel } from './PetPanel'
 import { Button, Chip, IconButton } from '../ui/components'
 import { fadeScaleIn } from '../ui/motion'
-import { accentText, accent, FS, ink, R, sem, SP, surface, text, tintSurface } from '../ui/tokens'
+import { accentText, accent, fill, FS, hairline, ink, R, sem, SP, surface, text, tintSurface } from '../ui/tokens'
 
 interface ReviewTabProps {
   todos: TodoItem[]
   activities: ActivityEntry[]
+  /** 验收台留档：纳入当日/本周事实 */
+  acceptance: AcceptanceRecord[]
   pomoDone: Record<string, number>
   /** 晨间简报素材 */
   morning: MorningInput
@@ -61,17 +64,26 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
     return [...keys].sort().reverse().slice(0, 14)
   }, [p.activities, p.todos, todayKey])
 
-  const facts: DayFacts = useMemo(() => buildFacts(sel, p.todos, p.activities), [sel, p.todos, p.activities])
+  // 验收记录 → 复盘用的最小事实（未验证项数由验收逻辑算，避免 review 依赖它）
+  const acceptanceFacts = useMemo(() => p.acceptance.map((r) => ({
+    endedAt: r.endedAt,
+    status: r.status,
+    followups: r.followups?.length || 0,
+    unverified: analyzeAcceptance(r).unverified.length,
+    proj: r.proj
+  })), [p.acceptance])
+
+  const facts: DayFacts = useMemo(() => buildFacts(sel, p.todos, p.activities, acceptanceFacts), [sel, p.todos, p.activities, acceptanceFacts])
 
   // 本周（近 7 天）事实
   const weekFacts: DayFacts[] = useMemo(() => {
     const out: DayFacts[] = []
     for (let i = 0; i < 7; i++) {
       const k = dayKey(Date.now() - i * 86400_000)
-      out.push(buildFacts(k, p.todos, p.activities))
+      out.push(buildFacts(k, p.todos, p.activities, acceptanceFacts))
     }
     return out
-  }, [p.todos, p.activities])
+  }, [p.todos, p.activities, acceptanceFacts])
 
   const dayReviewKey = `d:${sel}`
   const weekReviewKey = `w:${todayKey}`
@@ -145,13 +157,15 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
       </motion.div>
 
       {/* 日期切换 */}
-      <div className="ai-scroll" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 2 }}>
-        {days.map((k) => (
-          <Chip key={k} active={sel === k} onClick={() => setSel(k)}>
-            {k === todayKey ? '今天' : k.split('-').slice(1).join('/')}
-          </Chip>
-        ))}
-      </div>
+      {days.length > 1 && (
+        <div className="ai-scroll" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 2 }}>
+          {days.map((k) => (
+            <Chip key={k} active={sel === k} onClick={() => setSel(k)}>
+              {k === todayKey ? '今天' : k.split('-').slice(1).join('/')}
+            </Chip>
+          ))}
+        </div>
+      )}
 
       {/* 事实卡 */}
       <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={{ display: 'flex', gap: 7 }}>
@@ -159,6 +173,10 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
         <Stat n={facts.activities.length} label="编码会话" />
         <Stat n={facts.projects.length} label="涉及项目" />
         <Stat n={facts.files ? `+${facts.added}` : '—'} label={facts.files ? `${facts.files} 文件变更` : '代码变更'} />
+        <Stat
+          n={facts.acceptance.total ? `${facts.acceptance.accepted}/${facts.acceptance.total}` : '—'}
+          label={facts.acceptance.total ? `验收 · 未验证 ${facts.acceptance.unverified}` : '验收'}
+        />
       </motion.div>
 
       {/* 今日复盘 */}
@@ -185,12 +203,12 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
             这一天暂无可复盘的记录。完成待办、或让 Claude Code / Codex 会话在岛内跑起来后，这里会自动积累「今天做了什么」。
           </div>
         ) : dayMd ? (
-          <div style={{ ...surface.inset(), padding: SP.md + 1, fontSize: FS.small, lineHeight: 1.6 }}>
+          <div style={{ padding: SP.md + 1, fontSize: FS.small, lineHeight: 1.6, background: fill(1), border: `0.5px solid ${hairline(0.06)}`, borderRadius: R.md }}>
             <Markdown text={dayMd} />
           </div>
         ) : (
           // 未生成时先给事实预览，让用户知道有哪些素材
-          <div style={{ ...surface.inset(), padding: SP.md, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ padding: SP.md, display: 'flex', flexDirection: 'column', gap: 6, background: fill(1), border: `0.5px solid ${hairline(0.06)}`, borderRadius: R.md }}>
             {facts.doneTodos.slice(0, 6).map((t, i) => (
               <div key={`t${i}`} style={{ display: 'flex', alignItems: 'baseline', gap: 6, color: ink(2), fontSize: FS.tiny }}>
                 <Check size={11} strokeWidth={2.5} style={{ color: sem.calm, flex: 'none', position: 'relative', top: 1 }} />
@@ -223,7 +241,7 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
           </Button>
         </div>
         {weekMd && (
-          <div style={{ ...surface.inset(), padding: SP.md + 1, fontSize: FS.small, lineHeight: 1.6 }}>
+          <div style={{ padding: SP.md + 1, fontSize: FS.small, lineHeight: 1.6, background: fill(1), border: `0.5px solid ${hairline(0.06)}`, borderRadius: R.md }}>
             <Collapsible collapsedHeight={140}><Markdown text={weekMd} /></Collapsible>
           </div>
         )}

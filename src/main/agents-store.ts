@@ -9,6 +9,8 @@ import type { AgentState, Backend, BridgeEvent, ChangeSummary, Decision, IslandS
 /** 审批策略钩子（依赖注入，保持本模块 raw-node 可加载）：主进程注入 policyAutoDecision/clearSessionAllows */
 export interface PolicyHooks {
   autoDecision?: (agentId: string, command?: string) => ApprovalAuditEntry | null
+  /** 命令结果是否值得留作验证证据（内置规则 + 项目自定义，由主进程注入） */
+  isVerification?: (command: string, cwd: string) => boolean
   /** 会话第一次出现：此刻还没跑任何工具，可用于拍工作区基线 */
   onSessionStart?: (agentId: string, cwd: string) => void
   onSessionEnd?: (agentId: string) => void
@@ -107,7 +109,9 @@ export class AgentsStore extends EventEmitter {
     // 本轮最终回复：停止/完成事件携带，验收台在会话结束时留档
     if (e.lastReply) next.lastReply = e.lastReply.slice(0, 8000)
     // 验证证据：保留最近 12 条命令结果（跨轮累计，验收时按会话整体看）
-    if (e.check) next.checks = [...(prev?.checks || []), e.check].slice(-12)
+    if (e.check && (this.policyHooks?.isVerification?.(e.check.command, e.cwd) ?? true)) {
+      next.checks = [...(prev?.checks || []), e.check].slice(-12)
+    }
     // 计划全文：ExitPlanMode 的 command 就是计划；同一份计划重复上报时保留原裁决
     if (e.isPlan && e.command) {
       const prevPlan = prev?.plan
@@ -126,7 +130,11 @@ export class AgentsStore extends EventEmitter {
     }
     this.agents.set(key, next)
     // 会话第一次出现：通知主线拍"Agent 动手前"的工作区基线（失败无副作用）
-    if (!prev) this.policyHooks?.onSessionStart?.(key, e.cwd)
+    if (!prev) {
+      // 首个事件不是 SessionStart，说明岛接上时会话已经在跑（Codex 附着旧 rollout 尤其常见）
+      next.baselineLate = e.kind !== 'session' || undefined
+      this.policyHooks?.onSessionStart?.(key, e.cwd)
+    }
     this.prune()
     this.emit('change')
     return next

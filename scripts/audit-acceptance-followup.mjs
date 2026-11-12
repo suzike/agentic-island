@@ -7,7 +7,7 @@
 //       不会碰到任何真实会话。
 
 import { spawn, execFileSync } from 'child_process'
-import { mkdtempSync, existsSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -154,6 +154,7 @@ async function main() {
     )
     ok(!body.includes('app.txt'), '基线之前的改动没有被算进来')
     ok(body.includes('验证记录 · 2') && body.includes('退出 1'), '验证记录带退出码')
+    ok(body.includes('SWR-101'), '计划里的需求编号在卡片上回链')
 
     ok(await evalJs(`(()=>{const b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='补验证'); if(!b) return false; b.click(); return true})()`), '打开补验证')
     const prompt = await evalJs(`(()=>{const t=[...document.querySelectorAll('textarea')].pop(); return t?t.value:''})()`)
@@ -164,6 +165,130 @@ async function main() {
     const runText = await waitFor(`(()=>{const t=document.body.innerText; if(/补验证进行中/.test(t)) return false; return /补验证结束|补验证异常/.test(t) ? t : false})()`, 60000)
     ok(!!runText, '续跑流式输出回到卡片')
     ok(!!runText && /补验证结束 · 退出 1|补验证异常/.test(runText), '伪会话被 CLI 拒绝后如实显示失败', runText ? runText.split('\n').filter((l) => l.includes('补验证')).join(' | ') : '')
+
+    // ===== 计划项转待办 =====
+    ok(await evalJs(`(()=>{const b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim().startsWith('计划转待办')); if(!b) return false; b.click(); return true})()`), '计划项转待办入口可用')
+    await sleep(500)
+    ok(!!(await evalJs(`[...document.querySelectorAll('button')].some(e=>/已加 \\d+ 条|已在待办/.test(e.textContent))`)), '转待办给出条数反馈')
+    await evalJs(`(()=>{const t=[...document.querySelectorAll('[role="tab"]')].find(e=>e.textContent.includes('待办')); t&&t.click(); return 1})()`)
+    await sleep(600)
+    const todoBody = await evalJs('document.body.innerText')
+    ok(/令牌桶|限流/.test(todoBody), '计划步骤出现在待办里', todoBody.split('\n').filter(Boolean).slice(12, 26).join(' | '))
+
+    // ===== 验收凭证 =====
+    await evalJs(`(()=>{const t=[...document.querySelectorAll('[role="tab"]')].find(e=>e.textContent.includes('验收')); t&&t.click(); return 1})()`)
+    await sleep(500)
+    await evalJs(`(()=>{const b=[...document.querySelectorAll('span')].find(e=>/^未验证 \\d+$/.test(e.textContent.trim())); b&&b.parentElement.parentElement.click(); return 1})()`)
+    await sleep(400)
+    ok(await evalJs(`(()=>{const b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='存验收凭证'); if(!b) return false; b.click(); return true})()`), '存验收凭证入口可用')
+    await sleep(500)
+    await evalJs(`(()=>{const t=[...document.querySelectorAll('[role="tab"]')].find(e=>e.textContent.includes('灵感便签')); t&&t.click(); return 1})()`)
+    await sleep(700)
+    const certBody = await evalJs('document.body.innerText')
+    ok(certBody.includes('验收凭证'), '验收凭证已落到便签')
+    ok(certBody.includes('需求追溯') && certBody.includes('SWR-101'), '凭证带回需求追溯小节')
+
+    // ===== 设置页：验收规则 + 门禁开关 =====
+    await evalJs(`(()=>{const t=[...document.querySelectorAll('[role="tab"]')].find(e=>e.textContent.includes('设置')); t&&t.click(); return 1})()`)
+    // 设置页内容较多，等它真正渲染出来再断言，避免固定 sleep 撞上慢一帧
+    const settingsBody = await waitFor(`(()=>{const t=document.body.innerText; return (t.includes('验收规则与门禁') || t.includes('补充规则')) ? t : false})()`, 10000) || ''
+    ok(settingsBody.includes('验收规则') && settingsBody.includes('补充规则'), '设置页有验收规则入口')
+    ok(settingsBody.includes('内置判定覆盖') || settingsBody.includes('MATLAB'), '规则说明交代内置判定范围')
+    ok(await evalJs(`(()=>{
+      const rows = [...document.querySelectorAll('div')].filter(d => d.textContent.includes('验证必须全部退出 0') && d.querySelector('button'))
+      const row = rows.sort((a, b) => a.textContent.length - b.textContent.length)[0]
+      if (!row) return false
+      row.querySelector('button').click()
+      return true
+    })()`), '打开「验证必须全部退出 0」门禁')
+    await sleep(400)
+
+    // ===== 验收门禁：失败命令 → 标记已验收二段确认（此时只有演示记录）=====
+    await evalJs(`(()=>{const t=[...document.querySelectorAll('[role="tab"]')].find(e=>e.textContent.includes('验收')); t&&t.click(); return 1})()`)
+    await sleep(500)
+    await evalJs(`(()=>{const b=[...document.querySelectorAll('span')].find(e=>/^未验证 \\d+$/.test(e.textContent.trim())); b&&b.parentElement.parentElement.click(); return 1})()`)
+    await sleep(500)
+    ok((await evalJs('document.body.innerText')).includes('门禁未满足'), '门禁命中在卡片上明示')
+    ok(await evalJs(`(()=>{const b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='标记已验收'); if(!b) return false; b.click(); return true})()`), '点击标记已验收')
+    await sleep(400)
+    const armedBody = await evalJs('document.body.innerText')
+    ok(armedBody.includes('确认仍然验收'), '门禁未满足时先要求二次确认')
+    ok(!(await evalJs(`[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='已验收')`)), '二次确认前不会直接置为已验收')
+    ok(await evalJs(`(()=>{const b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='仍然验收'); if(!b) return false; b.click(); return true})()`), '确认仍然验收')
+    await sleep(500)
+    ok(await evalJs(`[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='已验收')`), '确认后状态变为已验收')
+    ok((await evalJs('document.body.innerText')).includes('仍然验收：'), '带未满足项验收会留痕')
+
+    // ===== 同一会话续跑：证据并回原记录 =====
+    await evalJs(`(()=>{const t=[...document.querySelectorAll('[role="tab"]')].find(e=>e.textContent.includes('验收')); t&&t.click(); return 1})()`)
+    await sleep(400)
+    const bridgeInfo = JSON.parse(readFileSync(bridgeFile, 'utf8'))
+    const post = (payload) => fetch(`http://127.0.0.1:${bridgeInfo.port}/event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: bridgeInfo.token, backend: 'claude-code', sessionId: 'audit-merge-1', cwd: sandbox, ...payload })
+    })
+    const round = async (exitCode, reply, extraChecks = []) => {
+      const pending = post({ kind: 'permission', tool: 'ExitPlanMode', command: '## 计划\n- [ ] 做事', isPlan: true })
+      await waitFor(`(()=>{const b=[...document.querySelectorAll('button')].find(e=>e.textContent.includes('批准计划')); if(!b) return false; b.click(); return true})()`, 20000)
+      await pending
+      await post({
+        kind: 'notification', detail: '本轮完成', turnEnd: true, lastReply: reply,
+        check: { command: 'npm run build', at: Date.now(), exitCode, ms: 1200, ok: exitCode === 0, outputTail: exitCode === 0 ? undefined : 'error TS2339' }
+      })
+      for (const check of extraChecks) {
+        await post({ kind: 'activity', detail: `验证完成：${check.command}`, check: { ...check, at: Date.now() } })
+      }
+      await sleep(2500)
+      await post({ kind: 'end', detail: '会话结束' })
+      await sleep(900)
+    }
+    await round(1, '第一轮：构建失败', [
+      { command: 'matlab -batch "runtests(\'tests\')"', exitCode: 0, ms: 5400, ok: true },
+      { command: 'gcc -c src/a.c -o a.o', exitCode: 0, ms: 800, ok: true },
+      { command: 'git status', exitCode: 0, ms: 120, ok: true }
+    ])
+    await evalJs(`(()=>{const b=[...document.querySelectorAll('span')].find(e=>/^未验证 \\d+$/.test(e.textContent.trim())); b&&b.parentElement.parentElement.click(); return 1})()`)
+    await sleep(500)
+    ok((await evalJs('document.body.innerText')).includes('验证命令失败：npm run build'), '第一轮失败进入未验证项')
+    await evalJs(`(()=>{const b=[...document.querySelectorAll('span')].find(e=>/^未验证 \\d+$/.test(e.textContent.trim())); b&&b.parentElement.parentElement.click(); return 1})()`)
+    await round(0, '第二轮：构建通过')
+    // 合并后那条已经没有未验证项，按"补验证 N"徽标定位它
+    ok(await evalJs(`(()=>{const b=[...document.querySelectorAll('span')].find(e=>/^补验证 \\d+$/.test(e.textContent.trim())); if(!b) return false; b.parentElement.parentElement.click(); return true})()`), '定位到合并后的记录')
+    await sleep(600)
+    const mergedBody = await evalJs('document.body.innerText')
+    ok(mergedBody.includes('补验证 1'), '续跑证据并回原记录（补验证 1 次）')
+    ok(!mergedBody.includes('验证命令失败：npm run build'), '补验证通过后旧失败不再挂着', mergedBody.slice(mergedBody.indexOf('验证记录'), mergedBody.indexOf('验证记录') + 200).split('\n').join(' | '))
+    ok(mergedBody.includes('退出 0') && mergedBody.includes('退出 1'), '两轮结果都留痕')
+    ok(mergedBody.includes('matlab -batch') && mergedBody.includes('gcc -c src/a.c'), 'MATLAB/Simulink 与 C/C++ 命令被识别为验证证据')
+    ok(!mergedBody.includes('git status'), '非验证命令不会混进验证记录')
+
+    // ===== 搜索过滤 =====
+    const searched = await evalJs(`(()=>{
+      const el = document.querySelector('input[placeholder^="搜索项目"]')
+      if (!el) return false
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+      setter.call(el, 'DEMO_CHANGE')
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      return true
+    })()`)
+    ok(searched, '验收记录有搜索框')
+    await sleep(500)
+    ok((await evalJs('document.body.innerText')).includes('验收记录 · 1'), '搜索按文件名过滤生效')
+    await evalJs(`(()=>{
+      const el = document.querySelector('input[placeholder^="搜索项目"]')
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+      setter.call(el, '')
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      return true
+    })()`)
+    await sleep(400)
+
+    // ===== 复盘接入验收 =====
+    await evalJs(`(()=>{const t=[...document.querySelectorAll('[role="tab"]')].find(e=>e.textContent.includes('复盘')); t&&t.click(); return 1})()`)
+    await sleep(800)
+    ok((await evalJs('document.body.innerText')).includes('验收 · 未验证'), '复盘事实卡出现验收统计')
+
   } finally {
     try { ws.close() } catch { /* */ }
   }

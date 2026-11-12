@@ -51,6 +51,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
   const [myUser, setMyUser] = useState<{ login: string; avatar?: string; repos?: number; followers?: number; following?: number } | null>(null)
   const [myRepos, setMyRepos] = useState<GitHubRepo[]>([])
   const [loading, setLoading] = useState(false)
+  const [slow, setSlow] = useState(false)
   const [err, setErr] = useState('')
   const [tokenInput, setTokenInput] = useState(githubToken)
   const [aiSummary, setAiSummary] = useState<Record<string, string>>({})
@@ -61,6 +62,17 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
   const [status, setStatus] = useState<Record<string, GitInfo>>({})
   const [draft, setDraft] = useState('')
   const reposRef = useRef(repos); reposRef.current = repos
+  const requestRef = useRef('')
+
+  const nextRequestId = (kind: string): string => `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const cancelLoading = (): void => {
+    const id = requestRef.current
+    requestRef.current = ''
+    if (id) void island.githubCancel(id).catch(() => {})
+    setLoading(false)
+    setSlow(false)
+    setErr('已取消加载，可重试')
+  }
 
   const refreshLocal = useCallback(async (): Promise<void> => {
     const results = await Promise.all(reposRef.current.map((r) => island.gitStatus(r.path).then((s) => [r.path, s] as const).catch(() => [r.path, { ok: false }] as const)))
@@ -71,14 +83,35 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
   // 缓存每个 range 的结果 → 切回不重新加载、不闪
   useEffect(() => {
     if (view !== 'trending' || trendingCache[range]) return
-    setLoading(true); setErr('')
-    island.githubTrendingRepos(range, githubToken).then((r) => { setLoading(false); if (r.ok) setTrendingCache((c) => ({ ...c, [range]: r.repos || [] })); else setErr(r.error || '加载失败') })
+    const id = nextRequestId('trending')
+    requestRef.current = id
+    setLoading(true); setSlow(false); setErr('')
+    const slowTimer = window.setTimeout(() => setSlow(true), 3000)
+    island.githubTrendingRepos(range, githubToken, id).then((r) => {
+      if (requestRef.current !== id) return
+      if (r.ok) setTrendingCache((c) => ({ ...c, [range]: r.repos || [] }))
+      else if (r.error !== '已取消加载') setErr(r.error || '加载失败')
+    }).catch((e) => { if (requestRef.current === id) setErr(e instanceof Error ? e.message : String(e)) }).finally(() => {
+      window.clearTimeout(slowTimer)
+      if (requestRef.current === id) { requestRef.current = ''; setLoading(false); setSlow(false) }
+    })
+    return () => { window.clearTimeout(slowTimer); if (requestRef.current === id) { void island.githubCancel(id).catch(() => {}); requestRef.current = '' } }
   }, [view, range, githubToken, trendingCache])
   const refreshTrending = (): void => { setTrendingCache((c) => { const n = { ...c }; delete n[range]; return n }) }
   const doSearch = (): void => {
     const q = searchQ.trim(); if (!q) { setSearchResults(null); return }
-    setLoading(true); setErr('')
-    island.githubSearch(q, githubToken).then((r) => { setLoading(false); if (r.ok) setSearchResults(r.repos || []); else setErr(r.error || '搜索失败') })
+    const id = nextRequestId('search')
+    requestRef.current = id
+    setLoading(true); setSlow(false); setErr('')
+    const slowTimer = window.setTimeout(() => setSlow(true), 3000)
+    island.githubSearch(q, githubToken, id).then((r) => {
+      if (requestRef.current !== id) return
+      if (r.ok) setSearchResults(r.repos || [])
+      else if (r.error !== '已取消加载') setErr(r.error || '搜索失败')
+    }).finally(() => {
+      window.clearTimeout(slowTimer)
+      if (requestRef.current === id) { requestRef.current = ''; setLoading(false); setSlow(false) }
+    })
   }
 
   const connect = (): void => {
@@ -180,7 +213,11 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
         onChange={setView}
         style={{ alignSelf: 'flex-start' }}
       />
-      {err && <div style={{ color: sem.danger, fontSize: FS.small }}>{err}</div>}
+      {err && <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: sem.danger, fontSize: FS.small }}>
+        <span style={{ flex: 1 }}>{err}</span>
+        <Button sm variant="ghost" icon={RefreshCw} onClick={() => { setErr(''); if (searchQ.trim() || searchResults) doSearch(); else refreshTrending() }}>重试</Button>
+        <IconButton icon={X} size={22} title="关闭提示" onClick={() => setErr('')} />
+      </div>}
 
       {/* Top 语言条 */}
       {(view === 'trending' || view === 'github') && langDist.length > 0 && (
@@ -235,7 +272,23 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
             </div>
           )}
           {loading
-            ? <div style={{ ...text.faint(), padding: '20px 0', textAlign: 'center' }}>加载中…</div>
+            ? <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="ai-card" style={{ ...surface.card(), padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <div style={{ width: 22, height: 22, borderRadius: 7, background: fill(3) }} />
+                      <div style={{ width: `${150 - i * 18}px`, height: 11, borderRadius: 5, background: fill(3) }} />
+                    </div>
+                    <div style={{ width: '92%', height: 8, borderRadius: 4, background: fill(2) }} />
+                    <div style={{ width: '63%', height: 8, borderRadius: 4, background: fill(2) }} />
+                  </div>
+                ))}
+                <div style={{ ...text.faint(), fontSize: 10.5, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                  {slow ? '网络较慢，仍在加载（最多 12 秒）…' : '正在从 GitHub 拉取…'}
+                  <Button sm variant="ghost" onClick={cancelLoading}>取消等待</Button>
+                </div>
+              </div>
             : (searchResults ?? trending.filter((r) => !langFilter || r.language === langFilter)).map(repoCard)}
         </>
       )}
@@ -253,8 +306,8 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {[
                   '① 点下方蓝色按钮 → 浏览器打开 GitHub 的建 Token 页（已帮你勾好权限）',
-                  '② 页面最下方点绿色「Generate token」,复制生成的 ghp_… 串',
-                  '③ 粘回下面输入框,点「连接」即可'
+                  '② 页面最下方点绿色「Generate token」，复制生成的 ghp_… 串',
+                  '③ 粘回下面输入框，点「连接」即可'
                 ].map((s, i) => <div key={i} style={{ ...text.dim(), fontSize: FS.tiny, lineHeight: 1.55 }}>{s}</div>)}
               </div>
               <Button variant="primary" icon={ExternalLink} onClick={() => island.openExternal('https://github.com/settings/tokens/new?description=Agentic-Island&scopes=repo,read:user')} style={{ alignSelf: 'flex-start' }}>
@@ -266,7 +319,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
               </div>
               <div style={{ ...text.faint(), display: 'flex', alignItems: 'center', gap: 4 }}>
                 <Lock size={10} strokeWidth={1.75} style={{ flex: 'none' }} />
-                Token 仅本机 DPAPI 加密存储,永不上传。只读你的仓库与账号。
+                Token 仅本机 DPAPI 加密存储，永不上传。只读你的仓库与账号。
               </div>
             </motion.div>
           ) : (
@@ -295,7 +348,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
       {/* 收藏 */}
       {view === 'saved' && (
         bookmarks.length === 0
-          ? <EmptyState icon={Star} title="还没有收藏" desc="热门里点星标收藏感兴趣的项目,这里汇总" />
+          ? <EmptyState icon={Star} title="还没有收藏" desc="热门里点星标收藏感兴趣的项目，这里汇总" />
           : bookmarks.map(repoCard)
       )}
 
@@ -303,11 +356,11 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
       {view === 'local' && (
         <>
           <div style={{ display: 'flex', gap: 6 }}>
-            <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && draft.trim()) { onAdd(draft.trim()); setDraft('') } }} placeholder="粘贴本地仓库路径,如 E:\proj\thermal-ctrl" style={rawInput(true)} />
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && draft.trim()) { onAdd(draft.trim()); setDraft('') } }} placeholder="粘贴本地仓库路径，如 E:\proj\thermal-ctrl" style={rawInput(true)} />
             <Button variant="primary" icon={Plus} onClick={() => { if (draft.trim()) { onAdd(draft.trim()); setDraft('') } }}>添加</Button>
             <IconButton icon={RefreshCw} onClick={() => void refreshLocal()} title="刷新" />
           </div>
-          {repos.length === 0 && <EmptyState icon={FolderGit2} title="还没有本地仓库" desc="钉几个常用仓库,一览 git 状态" />}
+          {repos.length === 0 && <EmptyState icon={FolderGit2} title="还没有本地仓库" desc="钉几个常用仓库，一览 git 状态" />}
           {repos.map((r) => {
             const s = status[r.path]
             const dot = s?.ok ? (s.dirty ? sem.warn : sem.calm) : ink(3)
@@ -316,7 +369,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
                 style={{ padding: `${SP.md - 1}px ${SP.md}px`, ...surface.card(), display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ flex: 'none', width: 8, height: 8, borderRadius: R.pill, background: dot }} />
-                  <span style={{ flex: 1, minWidth: 0, ...text.subtitle(), fontSize: FS.body, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{baseName(r.path)}</span>
+                  <span title={r.path} style={{ flex: 1, minWidth: 0, ...text.subtitle(), fontSize: FS.body, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{baseName(r.path)}</span>
                   {s?.ok && (
                     <span style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 5, fontSize: FS.tiny, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 8px', borderRadius: R.pill, background: semBg(accent(), 0.14), color: accentText(0.85) }}>
@@ -329,7 +382,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
                   )}
                   <IconButton icon={FolderOpen} size={22} title="在资源管理器打开" style={{ borderRadius: R.sm, background: 'transparent' }}
                     onClick={() => island.openFolder(r.path)} />
-                  <IconButton icon={X} size={22} title="移除" color={sem.danger} style={{ borderRadius: R.sm, background: 'transparent' }}
+                  <IconButton icon={X} size={22} title="从列表移除（不影响本地文件）" color={ink(3)} style={{ borderRadius: R.sm, background: 'transparent' }}
                     onClick={() => onRemove(r.path)} />
                 </div>
                 <div style={{ ...text.mono(10.5), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

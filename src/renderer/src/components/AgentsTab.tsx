@@ -154,6 +154,7 @@ function AgentCard({
 
   const isWaiting = a.status === 'waiting'
   const isDone = a.status === 'done'
+  const compact = isDone || (a.status === 'running' && !a.summary)
   const dot =
     a.status === 'needs_approval' || isWaiting ? sem.warn : isDone ? ink(3) : accent()
   const label = a.status === 'needs_approval' ? '待处理' : isWaiting ? '等待回复' : isDone ? '已结束' : '运行中'
@@ -172,9 +173,14 @@ function AgentCard({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
-        padding: `${SP.md}px ${SP.md + 1}px`,
-        ...surface.card(highlight),
+        gap: compact ? 6 : 8,
+        padding: compact ? '9px 11px' : `${SP.md}px ${SP.md + 1}px`,
+        ...surface.card(),
+        ...(highlight ? {
+          background: `linear-gradient(90deg, ${semBg(sem.warn, 0.62)} 0 3px, ${fill(2)} 3px)`,
+          border: `0.5px solid ${semBg(sem.warn, 0.26)}`,
+          boxShadow: `0 10px 28px -16px ${semBg(sem.warn, 0.3)}`
+        } : {}),
         ...(isDone ? { background: fill(1), border: 'none' } : {}),
         opacity: isDone ? 0.72 : 1
       }}
@@ -196,7 +202,9 @@ function AgentCard({
         </div>
       </div>
       {/* 状态描述：长内容（如 Agent 提问/最近消息）渲染 Markdown + 可折叠 */}
-      {a.detail.length > 90 || a.detail.includes('\n') ? (
+      {compact ? (
+        <div title={a.detail} style={{ color: ink(2), fontSize: FS.small, lineHeight: 1.45, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.detail}</div>
+      ) : a.detail.length > 90 || a.detail.includes('\n') ? (
         <div style={{ color: ink(2) }}>
           <Collapsible collapsedHeight={72}>
             <Markdown text={a.detail} />
@@ -284,10 +292,13 @@ function AgentCard({
           )}
           {risk.level === 'danger' && <div style={{ color: 'oklch(0.82 0.14 25)', fontSize: 10.5, marginBottom: 8 }}>⚠ {risk.reason}，请确认后再放行</div>}
           <div style={{ display: 'flex', gap: 8 }}>
-            <div
+            <button
+              type="button"
               onClick={() => onDecide(a, 'allow')}
               className="hv"
               style={{
+                border: 0,
+                fontFamily: 'inherit',
                 flex: 1,
                 textAlign: 'center',
                 padding: 7,
@@ -305,7 +316,7 @@ function AgentCard({
               }}
             >
               {risk.level === 'danger' ? (isArmed ? '确认执行 · 再点一次' : '允许（需确认）') : '允许 Allow'}
-            </div>
+            </button>
             <Button variant="ghost" onClick={() => onDecide(a, 'deny')} style={{ flex: 1 }}>拒绝 Deny</Button>
           </div>
           {a.command && (
@@ -334,7 +345,7 @@ function AgentCard({
       {decided && a.detail.includes('已允许') && <div style={{ fontSize: 11, color: accentText(), fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={12} strokeWidth={2.5} />已允许，继续执行中…</div>}
       {decided && a.detail.includes('已拒绝') && <div style={{ fontSize: 11, color: 'oklch(0.7 0.1 30)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}><X size={12} strokeWidth={2.5} />已拒绝，已通知 Agent</div>}
 
-      {a.summary && (
+      {a.summary && !isDone && (
         <div style={{ marginTop: 3, padding: '10px 11px', borderRadius: R.lg, background: fill(3), border: `0.5px solid ${accent(0.6, 0.25)}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
             <span style={{ color: accentText(0.88, 0.95), fontSize: 11, fontWeight: 700 }}>变更小结</span>
@@ -349,6 +360,17 @@ function AgentCard({
             <Button sm variant="ghost" icon={Copy} onClick={() => onCopyCommit(a.id, a.summary!.commit)}>复制</Button>
           </div>
           {copiedId === a.id && <div style={{ color: accentText(), fontSize: 10, marginTop: 5, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={10} strokeWidth={2.5} />提交信息已复制</div>}
+        </div>
+      )}
+
+      {a.summary && isDone && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 2, padding: '6px 9px', borderRadius: R.md, background: fill(2), minWidth: 0 }}>
+          <span style={{ color: accentText(0.8), fontSize: 10.5, fontWeight: 700, flex: 'none' }}>变更</span>
+          <span style={{ color: ink(2), fontSize: 10.5, flex: 'none' }}>{a.summary.files} 文件</span>
+          <span style={{ color: accentText(), fontSize: 10.5, fontFamily: 'ui-monospace,monospace', flex: 'none' }}>+{a.summary.added}</span>
+          <span style={{ color: sem.danger, fontSize: 10.5, fontFamily: 'ui-monospace,monospace', flex: 'none' }}>−{a.summary.removed}</span>
+          <span title={a.summary.commit} style={{ flex: 1, minWidth: 0, textAlign: 'right', ...text.mono(9.5), color: ink(3), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.summary.commit}</span>
+          <Button sm variant="ghost" icon={Copy} onClick={() => onCopyCommit(a.id, a.summary!.commit)} style={{ flex: 'none', padding: '2px 8px' }}>复制</Button>
         </div>
       )}
 

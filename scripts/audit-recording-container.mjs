@@ -70,6 +70,12 @@ try {
   console.log('运镜切固定画面:', fixedFraming)
   assert.equal(fixedFraming, 'clicked', '运镜页应有"固定画面"档')
   await sleep(400)
+  await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>n.textContent?.trim()==='采集'); b?.click(); return Boolean(b) })()`)
+  await sleep(700)
+  console.log('叠加画面候选:', await ev(`(() => {
+    const select = [...document.querySelectorAll('select')].find((node) => [...node.options].some((option) => /添加一个窗口作为叠加画面/.test(option.textContent || '')))
+    return select ? [...select.options].map((option) => (option.textContent || '').trim()).filter(Boolean).slice(0, 12).join(' | ') : 'missing'
+  })()`))
   const recordingsDir = join(profile, 'recordings')
   let mediaChecked = 0
   let compositeFps = 0
@@ -145,9 +151,11 @@ try {
     "app.disableHardwareAcceleration()",
     "app.whenReady().then(() => {",
     "  const bounds = screen.getPrimaryDisplay().bounds",
-    "  const win = new BrowserWindow({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, frame: false, alwaysOnTop: true, skipTaskbar: true, focusable: false })",
-    "  const html = '<html><body style=\"margin:0;overflow:hidden\"><div id=\"b\" style=\"position:fixed;inset:0;background:#c00\"></div><scr' + 'ipt>let i=0;setInterval(()=>{document.getElementById(\"b\").style.background=\"hsl(\"+(i=(i+9)%360)+\",85%,50%)\"},16)</scr' + 'ipt></body></html>'",
+    "  const win = new BrowserWindow({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, frame: false, alwaysOnTop: true, skipTaskbar: true, focusable: false, title: 'AIISLAND-AUDIT-ACTIVITY' })",
+    "  const html = '<html><head><title>AIISLAND-AUDIT-ACTIVITY</title></head><body style=\"margin:0;overflow:hidden\"><div id=\"b\" style=\"position:fixed;inset:0;background:#c00\"></div><scr' + 'ipt>let i=0;setInterval(()=>{document.getElementById(\"b\").style.background=\"hsl(\"+(i=(i+9)%360)+\",85%,50%)\"},16)</scr' + 'ipt></body></html>'",
     "  win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))",
+    "  const overlay = new BrowserWindow({ x: bounds.x + 80, y: bounds.y + 80, width: 640, height: 420, frame: true, alwaysOnTop: true, skipTaskbar: false, title: 'AIISLAND-AUDIT-OVERLAY' })",
+    "  overlay.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<html><head><title>AIISLAND-AUDIT-OVERLAY</title></head><body style=\"margin:0;background:#123;color:#fff;font:24px sans-serif;display:grid;place-items:center\">AUDIT OVERLAY</body></html>'))",
     "})"
   ].join(String.fromCharCode(10))
   await writeFile(activityMain, activitySource, 'utf8')
@@ -155,6 +163,68 @@ try {
   await sleep(3500)
   console.log('屏幕活动窗口:', child.exitCode === null && activityChild.exitCode === null ? '已启动' : '启动失败')
   await sleep(1200)
+  // 新能力：多画面 + 跟踪遮罩。先把活动窗口刷新进来源列表，再选为叠加画面并加一个跟踪遮罩。
+  await ev(`(() => { const b=document.querySelector('[title="刷新来源"]'); b?.click(); return Boolean(b) })()`)
+  await sleep(1200)
+  const overlayOptions = await ev(`(() => {
+    const select = [...document.querySelectorAll('select')].find((node) => [...node.options].some((option) => /添加一个窗口作为叠加画面/.test(option.textContent || '')))
+    return select ? [...select.options].map((option) => (option.textContent || '').trim()).filter(Boolean) : []
+  })()`)
+  console.log('叠加画面候选（活动窗口启动后）:', overlayOptions.join(' | '))
+  const overlayPicked = await ev(`(() => {
+    const select = [...document.querySelectorAll('select')].find((node) => [...node.options].some((option) => /添加一个窗口作为叠加画面/.test(option.textContent || '')))
+    if (!select) return 'missing'
+    const option = [...select.options].find((node) => /AIISLAND-AUDIT-OVERLAY|AIISLAND-AUDIT-ACTIVITY/.test(node.textContent || ''))
+      || [...select.options].find((node) => /cn\.desktodo\.desktop-siw|NVIDIA GeForce Overlay/.test(node.textContent || ''))
+    if (!option) return 'no-activity-option'
+    select.value = option.value
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    return 'selected'
+  })()`)
+  console.log('叠加画面选择:', overlayPicked)
+  assert.equal(overlayPicked, 'selected', '应能把活动窗口选为叠加画面')
+  const maskAdded = await ev(`(() => {
+    const buttons = [...document.querySelectorAll('button')].filter((b) => (b.textContent || '').trim() === '添加')
+    const button = buttons.find((b) => (b.parentElement?.parentElement?.innerText || '').includes('区域遮罩'))
+    if (!button) return 'missing'
+    button.click()
+    return 'clicked'
+  })()`)
+  console.log('区域遮罩添加:', maskAdded)
+  await sleep(500)
+  const trackingOn = await ev(`(() => {
+    const chip = [...document.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '跟踪')
+    if (!chip) return 'missing'
+    chip.click()
+    return 'clicked'
+  })()`)
+  console.log('跟踪遮罩开启:', trackingOn)
+  assert.equal(maskAdded, 'clicked', '应能添加区域遮罩')
+  assert.equal(trackingOn, 'clicked', '应能开启目标跟踪')
+  const featureFile = await recordOnce('多画面+跟踪', 6)
+  console.log('多画面/跟踪录制产物:', featureFile.slice(recordingsDir.length + 1))
+  {
+    const manifests = (await readdir(recordingsDir)).filter((f) => f.endsWith('.json'))
+    let matched = null
+    for (const file of manifests) {
+      const manifest = JSON.parse(await readFile(join(recordingsDir, file), 'utf8'))
+      if (manifest.fileName === featureFile.slice(recordingsDir.length + 1)) matched = manifest
+    }
+    assert.ok(matched, '多画面/跟踪录制应生成 manifest')
+    assert.equal(matched.status, 'ready', '多画面/跟踪录制应完成落盘')
+    assert.match(String(matched.mimeType), /mp4/, '多画面/跟踪录制应为 MP4 容器')
+  }
+  // 还原 UI，避免影响后面的单源合成/原始对照。
+  await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/重新录制/.test(n.textContent||'')); b?.click(); return Boolean(b) })()`)
+  await sleep(900)
+  await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>n.textContent?.trim()==='采集'); b?.click(); return Boolean(b) })()`)
+  await sleep(500)
+  await ev(`(() => {
+    document.querySelector('[title="移除叠加画面"]')?.click()
+    document.querySelector('[title="删除遮罩"]')?.click()
+    return true
+  })()`)
+  await sleep(700)
   // 产品默认已改为原始采集；这条审计要保留"合成 vs 原始"的帧率对照，因此先显式切回画布合成。
   await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>n.textContent?.trim()==='采集'); b?.click(); return Boolean(b) })()`)
   await sleep(900)

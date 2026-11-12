@@ -10,6 +10,106 @@ export interface RecordingSize { width: number; height: number }
 export interface RecordingCrop { x: number; y: number; width: number; height: number }
 export interface RecordingComposition { source: RecordingCrop; destination: RecordingCrop }
 
+/**
+ * 可复用录制场景（OBS 的 scene 轻量版）：把来源、画幅、音频、运镜与叠加层打成一份预设。
+ * 只存"怎么录"，不存素材；切换场景不会动已有录制。
+ */
+export interface RecordingScene {
+  id: string
+  name: string
+  createdAt: number
+  sourceKind: 'screen' | 'window'
+  sourceName?: string
+  resolution: RecordingResolution
+  aspect: RecordingAspect
+  fitMode: 'contain' | 'cover'
+  fps: number
+  captureQuality: 'standard' | 'high' | 'ultra'
+  motionMode: RecordingMotion
+  motionStrength: number
+  maxZoom: number
+  systemAudio: boolean
+  microphone: boolean
+  micHighpass: boolean
+  micCompressor: boolean
+  systemCompressor: boolean
+  masterLimiter: boolean
+  webcam: boolean
+  cameraPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  cameraSize: number
+  regionEnabled: boolean
+  region: { left: number; top: number; right: number; bottom: number }
+  countdownSeconds: number
+  keyframeIntervalSeconds: number
+  autoMarkerSeconds: number
+  watermarkEnabled: boolean
+  privacyTop: number
+  privacyBottom: number
+  privacyRegions: RecordingPrivacyRegion[]
+  overlays: RecordingOverlaySource[]
+  captureMode: 'raw' | 'composite'
+}
+
+const clampNumber = (value: unknown, min: number, max: number, fallback: number): number => {
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback
+}
+
+const oneOf = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+  allowed.includes(value as T) ? value as T : fallback
+
+/** 读回本地场景库：坏数据逐条丢弃，不让一条脏记录拖垮整个列表。 */
+export function normalizeRecordingScenes(value: unknown): RecordingScene[] {
+  if (!Array.isArray(value)) return []
+  return value.map((raw): RecordingScene | null => {
+    if (!raw || typeof raw !== 'object') return null
+    const item = raw as Record<string, unknown>
+    const name = typeof item.name === 'string' ? item.name.trim().slice(0, 40) : ''
+    if (!name) return null
+    const region = item.region && typeof item.region === 'object' ? item.region as Record<string, unknown> : {}
+    return {
+      id: typeof item.id === 'string' && item.id ? item.id : `scene-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      createdAt: clampNumber(item.createdAt, 0, Number.MAX_SAFE_INTEGER, Date.now()),
+      sourceKind: item.sourceKind === 'window' ? 'window' : 'screen',
+      sourceName: typeof item.sourceName === 'string' ? item.sourceName.slice(0, 120) : undefined,
+      resolution: oneOf(item.resolution, ['source', '1080p', '1440p', '4k'] as const, 'source'),
+      aspect: oneOf(item.aspect, ['source', '16:9', '9:16', '1:1'] as const, 'source'),
+      fitMode: item.fitMode === 'cover' ? 'cover' : 'contain',
+      fps: Math.round(clampNumber(item.fps, 15, 60, 30)),
+      captureQuality: oneOf(item.captureQuality, ['standard', 'high', 'ultra'] as const, 'high'),
+      motionMode: oneOf(item.motionMode, ['off', 'gentle', 'dynamic'] as const, 'off'),
+      motionStrength: clampNumber(item.motionStrength, 0.15, 1, 0.68),
+      maxZoom: clampNumber(item.maxZoom, 1.08, 1.8, 1.45),
+      systemAudio: item.systemAudio !== false,
+      microphone: item.microphone === true,
+      micHighpass: item.micHighpass === true,
+      micCompressor: item.micCompressor === true,
+      systemCompressor: item.systemCompressor === true,
+      masterLimiter: item.masterLimiter !== false,
+      webcam: item.webcam === true,
+      cameraPosition: oneOf(item.cameraPosition, ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const, 'bottom-right'),
+      cameraSize: clampNumber(item.cameraSize, 0.1, 0.42, 0.2),
+      regionEnabled: item.regionEnabled === true,
+      region: {
+        left: clampNumber(region.left, 0, 0.8, 0),
+        top: clampNumber(region.top, 0, 0.8, 0),
+        right: clampNumber(region.right, 0, 0.8, 0),
+        bottom: clampNumber(region.bottom, 0, 0.8, 0)
+      },
+      countdownSeconds: Math.round(clampNumber(item.countdownSeconds, 0, 10, 3)),
+      keyframeIntervalSeconds: Math.round(clampNumber(item.keyframeIntervalSeconds, 0, 60, 15)),
+      autoMarkerSeconds: Math.round(clampNumber(item.autoMarkerSeconds, 0, 600, 0)),
+      watermarkEnabled: item.watermarkEnabled === true,
+      privacyTop: clampNumber(item.privacyTop, 0, 0.3, 0),
+      privacyBottom: clampNumber(item.privacyBottom, 0, 0.3, 0),
+      privacyRegions: normalizePrivacyRegions(item.privacyRegions),
+      overlays: normalizeOverlaySources(item.overlays),
+      captureMode: item.captureMode === 'composite' ? 'composite' : 'raw'
+    }
+  }).filter((item): item is RecordingScene => !!item).sort((a, b) => b.createdAt - a.createdAt).slice(0, 12)
+}
+
 export function selectRecordingSourceId(
   sources: Array<{ id: string; name?: string; kind: 'screen' | 'window'; available?: boolean }>,
   kind: 'screen' | 'window',
@@ -806,6 +906,10 @@ export interface RecordingRawModeOptions {
   watermarkEnabled: boolean
   privacyTop: number
   privacyBottom: number
+  /** 区域遮罩数量（≥1 时必须画布逐帧处理） */
+  privacyRegions?: number
+  /** 叠加画面数量（≥1 时需要逐帧叠图） */
+  overlaySources?: number
 }
 
 /**
@@ -827,7 +931,67 @@ export function recordingRawModeBlockers(options: RecordingRawModeOptions): stri
   if (options.webcam) blockers.push('摄像头画中画（需要逐帧叠图）')
   if (options.watermarkEnabled) blockers.push('文字水印（需要逐帧绘制）')
   if (options.privacyTop > 0 || options.privacyBottom > 0) blockers.push('隐私遮挡条（需要逐帧遮挡）')
+  if ((options.privacyRegions || 0) > 0) blockers.push('区域隐私遮罩（需要逐帧马赛克/模糊）')
+  if ((options.overlaySources || 0) > 0) blockers.push('多画面叠加（需要逐帧叠图与布局）')
   return blockers
+}
+
+/** 动态区域遮罩：归一化坐标，录制/导出时逐帧应用。 */
+export interface RecordingPrivacyRegion {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  mode: 'mosaic' | 'blur'
+  /** 是否按画面内容跟踪目标（模板匹配；失败时冻结在最后位置） */
+  tracking?: boolean
+}
+
+export function normalizePrivacyRegions(value: unknown): RecordingPrivacyRegion[] {
+  if (!Array.isArray(value)) return []
+  return value.map((raw, index): RecordingPrivacyRegion | null => {
+    if (!raw || typeof raw !== 'object') return null
+    const item = raw as Record<string, unknown>
+    const x = clampNumber(item.x, 0, 0.94, 0.3)
+    const y = clampNumber(item.y, 0, 0.94, 0.3)
+    const w = clampNumber(item.w, 0.03, 1 - x, 0.3)
+    const h = clampNumber(item.h, 0.03, 1 - y, 0.2)
+    return {
+      id: typeof item.id === 'string' && item.id ? item.id : `mask-${index}-${Math.random().toString(36).slice(2, 6)}`,
+      x, y, w, h,
+      mode: item.mode === 'blur' ? 'blur' : 'mosaic',
+      tracking: item.tracking === true
+    }
+  }).filter((item): item is RecordingPrivacyRegion => !!item).slice(0, 8)
+}
+
+/** 多画面叠加源：归一化位置/大小，最多 4 路，画面同时合成。 */
+export interface RecordingOverlaySource {
+  id: string
+  name: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export function normalizeOverlaySources(value: unknown): RecordingOverlaySource[] {
+  if (!Array.isArray(value)) return []
+  return value.map((raw, index): RecordingOverlaySource | null => {
+    if (!raw || typeof raw !== 'object') return null
+    const item = raw as Record<string, unknown>
+    const name = typeof item.name === 'string' ? item.name.trim().slice(0, 120) : ''
+    const id = typeof item.id === 'string' && item.id ? item.id : `overlay-${index}-${Math.random().toString(36).slice(2, 6)}`
+    const x = clampNumber(item.x, 0, 0.9, 0.68)
+    const y = clampNumber(item.y, 0, 0.9, 0.68)
+    return {
+      id, name: name || `画面 ${index + 1}`,
+      x, y,
+      w: clampNumber(item.w, 0.1, 1 - x, 0.28),
+      h: clampNumber(item.h, 0.1, 1 - y, 0.24)
+    }
+  }).filter((item): item is RecordingOverlaySource => !!item).slice(0, 4)
 }
 
 /** 原始采集的成片尺寸就是屏幕原始尺寸，只把奇数边长收成偶数（H.264 要求）。 */

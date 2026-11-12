@@ -40,11 +40,13 @@ export function buildInsights(
   const acts = activities.filter((a) => a.ts >= since || a.updatedAt >= since)
   for (const a of acts) {
     hourly[new Date(a.ts).getHours()]++
-    const p = projMap.get(a.proj) || { proj: a.proj, count: 0, added: 0, removed: 0 }
+    // 历史活动可能没有项目字段：归到“未归属”，不能把 undefined 写进洞察文案。
+    const proj = a.proj?.trim() || '未归属'
+    const p = projMap.get(proj) || { proj, count: 0, added: 0, removed: 0 }
     p.count++
     p.added += a.added || 0
     p.removed += a.removed || 0
-    projMap.set(a.proj, p)
+    projMap.set(proj, p)
   }
 
   const doneTodos = todos.filter((t) => t.done && t.doneAt && t.doneAt >= since)

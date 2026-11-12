@@ -10,8 +10,9 @@ import { RecordingNeuralStyle } from '../logic/recording-neural-style'
 import type { NeuralStyleStatus } from '../logic/recording-neural-style'
 import { deleteRecordingAvatar, loadRecordingAvatar, saveRecordingAvatar } from '../logic/recording-avatar'
 import { formatBytes } from '../logic/screenshot'
-import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingBilingualSrt, recordingBilingualVtt, recordingCursorPath, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTrackSummary, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, remapRecordingMotionFrames, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
-import type { RecordingAnimePalette, RecordingAspect, RecordingCaptureMode, RecordingClickSample, RecordingMotion, RecordingMotionKeyframe, RecordingResolution, RecordingTrackStats, RecordingTrackSummary } from '../logic/recording'
+import { createTemplate, grayscaleFrame, trackTemplate, type TrackerRect, type TrackerTemplate } from '../logic/object-tracker'
+import { clampRecordingBarPosition, formatRecordingTime, normalizeOverlaySources, normalizePrivacyRegions, normalizeRecordingScenes, parseRecordingAiEditPlan, recordingBilingualSrt, recordingBilingualVtt, recordingCursorPath, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTrackSummary, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, remapRecordingMotionFrames, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
+import type { RecordingAnimePalette, RecordingAspect, RecordingCaptureMode, RecordingClickSample, RecordingMotion, RecordingMotionKeyframe, RecordingOverlaySource, RecordingPrivacyRegion, RecordingResolution, RecordingScene, RecordingTrackStats, RecordingTrackSummary } from '../logic/recording'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accentText, accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
@@ -190,6 +191,8 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [aspect, setAspect] = useState<RecordingAspect>('source')
   const [fitMode, setFitMode] = useState<RecordingFit>('contain')
   const [recordingPreset, setRecordingPreset] = useState<RecordingPreset>('custom')
+  const [recordingScenes, setRecordingScenes] = useState<RecordingScene[]>([])
+  const [sceneName, setSceneName] = useState('')
   const [fps, setFps] = useState(30)
   const [captureQuality, setCaptureQuality] = useState<CaptureQuality>('high')
   const [motionMode, setMotionMode] = useState<RecordingMotion>('off')
@@ -208,6 +211,10 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [noiseSuppression, setNoiseSuppression] = useState(true)
   const [echoCancellation, setEchoCancellation] = useState(true)
   const [autoGainControl, setAutoGainControl] = useState(true)
+  const [micHighpass, setMicHighpass] = useState(false)
+  const [micCompressor, setMicCompressor] = useState(false)
+  const [systemCompressor, setSystemCompressor] = useState(false)
+  const [masterLimiter, setMasterLimiter] = useState(true)
   const [systemMuted, setSystemMuted] = useState(false)
   const [micMuted, setMicMuted] = useState(false)
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([])
@@ -247,6 +254,8 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [showSourceLabel, setShowSourceLabel] = useState(false)
   const [privacyTop, setPrivacyTop] = useState(0)
   const [privacyBottom, setPrivacyBottom] = useState(0)
+  const [privacyRegions, setPrivacyRegions] = useState<RecordingPrivacyRegion[]>([])
+  const [overlaySources, setOverlaySources] = useState<RecordingOverlaySource[]>([])
   const [countdown, setCountdown] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [recordedBytes, setRecordedBytes] = useState(0)
@@ -302,6 +311,12 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [exportProgress, setExportProgress] = useState<RecordingExportProgress | null>(null)
   const [exporting, setExporting] = useState(false)
   const [lastExport, setLastExport] = useState<{ path: string; summary?: string; ok: boolean } | null>(null)
+  const [uploadCommand, setUploadCommand] = useState(() => localStorage.getItem('recording-upload-command') || '')
+  const [virtualCamOn, setVirtualCamOn] = useState(false)
+  const [virtualCamBusy, setVirtualCamBusy] = useState(false)
+  const [virtualCamMessage, setVirtualCamMessage] = useState('')
+  const [obsUrl, setObsUrl] = useState(() => localStorage.getItem('obs-websocket-url') || 'ws://127.0.0.1:4455')
+  const [obsPassword, setObsPassword] = useState('')
   const [toast, setToast] = useState('')
   const [aiBusy, setAiBusy] = useState('')
   const [aiResults, setAiResults] = useState<AiResult[]>([])
@@ -354,6 +369,13 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null)
   const cameraEffectCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const privacyPixelRef = useRef<HTMLCanvasElement | null>(null)
+  const privacyRegionsRef = useRef<RecordingPrivacyRegion[]>([])
+  const privacyTrackerRef = useRef<Map<string, { template: TrackerTemplate; rect: TrackerRect }>>(new Map())
+  const trackingCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const trackingUiAtRef = useRef(0)
+  const overlayStreamsRef = useRef<Map<string, MediaStream>>(new Map())
+  const overlayVideosRef = useRef<Map<string, HTMLVideoElement>>(new Map())
   const cameraEffectPaintAtRef = useRef(0)
   const neuralStyleRef = useRef(new RecordingNeuralStyle())
   const avatarImageRef = useRef<HTMLImageElement | null>(null)
@@ -404,7 +426,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   personaOptionsRef.current = { cameraEffect, cameraFrame, animeStrength, animePalette, avatarMotion, cameraMirror }
 
   // 原始采集不能用到的能力（画布相关）：非空时"原始画面"选项给出逐条原因
-  const rawModeBlockers = useMemo(() => recordingRawModeBlockers({ regionEnabled, webcam, watermarkEnabled, privacyTop, privacyBottom }), [regionEnabled, webcam, watermarkEnabled, privacyTop, privacyBottom])
+  const rawModeBlockers = useMemo(() => recordingRawModeBlockers({ regionEnabled, webcam, watermarkEnabled, privacyTop, privacyBottom, privacyRegions: privacyRegions.length, overlaySources: overlaySources.length }), [regionEnabled, webcam, watermarkEnabled, privacyTop, privacyBottom, privacyRegions.length, overlaySources.length])
   const rawModeReady = rawModeBlockers.length === 0
   const selectedSource = useMemo(() => sources.find((source) => source.id === sourceId), [sources, sourceId])
   const visibleSources = useMemo(() => {
@@ -669,6 +691,91 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     }
   }
 
+  const saveScene = (): void => {
+    const name = sceneName.trim() || `场景 ${recordingScenes.length + 1}`
+    const scene: RecordingScene = {
+      id: `scene-${Date.now()}`,
+      name,
+      createdAt: Date.now(),
+      sourceKind,
+      sourceName: selectedSource?.name,
+      resolution, aspect, fitMode, fps, captureQuality,
+      motionMode, motionStrength, maxZoom,
+      systemAudio, microphone, micHighpass, micCompressor, systemCompressor, masterLimiter, webcam, cameraPosition, cameraSize,
+      regionEnabled, region,
+      countdownSeconds, keyframeIntervalSeconds, autoMarkerSeconds,
+      watermarkEnabled, privacyTop, privacyBottom, privacyRegions,
+      overlays: overlaySources,
+      captureMode
+    }
+    const next = [scene, ...recordingScenes.filter((item) => item.name !== name)].slice(0, 12)
+    setRecordingScenes(next)
+    localStorage.setItem('recording-scenes', JSON.stringify(next))
+    setSceneName('')
+    flash(`场景「${name}」已保存`)
+  }
+
+  const applyScene = (scene: RecordingScene): void => {
+    setSourceKind(scene.sourceKind)
+    setSourceId(selectRecordingSourceId(sources, scene.sourceKind, '', scene.sourceName || ''))
+    setResolution(scene.resolution); setAspect(scene.aspect); setFitMode(scene.fitMode)
+    setFps(scene.fps); setCaptureQuality(scene.captureQuality)
+    setMotionMode(scene.motionMode); setMotionStrength(scene.motionStrength); setMaxZoom(scene.maxZoom)
+    setSystemAudio(scene.systemAudio); setMicrophone(scene.microphone)
+    setMicHighpass(scene.micHighpass); setMicCompressor(scene.micCompressor); setSystemCompressor(scene.systemCompressor); setMasterLimiter(scene.masterLimiter)
+    setWebcam(scene.webcam); setCameraPosition(scene.cameraPosition); setCameraSize(scene.cameraSize)
+    setRegionEnabled(scene.regionEnabled); setRegion({ ...scene.region })
+    setCountdownSeconds(scene.countdownSeconds); setKeyframeIntervalSeconds(scene.keyframeIntervalSeconds); setAutoMarkerSeconds(scene.autoMarkerSeconds)
+    setWatermarkEnabled(scene.watermarkEnabled); setPrivacyTop(scene.privacyTop); setPrivacyBottom(scene.privacyBottom); setPrivacyRegions(scene.privacyRegions || [])
+    setOverlaySources((scene.overlays || []).map((item) => ({ ...item })))
+    setCaptureMode(scene.captureMode); setRecordingPreset('custom')
+    flash(`已应用场景「${scene.name}」`)
+  }
+
+  const removeScene = (id: string): void => {
+    const next = recordingScenes.filter((item) => item.id !== id)
+    setRecordingScenes(next)
+    localStorage.setItem('recording-scenes', JSON.stringify(next))
+  }
+
+  const addPrivacyRegion = (): void => {
+    setPrivacyRegions((list) => [...list, {
+      id: `mask-${Date.now()}`,
+      x: 0.34, y: 0.34, w: 0.3, h: 0.2, mode: 'mosaic' as const
+    }].slice(0, 8))
+  }
+
+  const patchPrivacyRegion = (id: string, patch: Partial<RecordingPrivacyRegion>): void => {
+    if ('x' in patch || 'y' in patch || 'w' in patch || 'h' in patch || patch.tracking === false) privacyTrackerRef.current.delete(id)
+    setPrivacyRegions((list) => list.map((item) => item.id === id ? { ...item, ...patch } : item))
+  }
+
+  const removePrivacyRegion = (id: string): void => {
+    setPrivacyRegions((list) => list.filter((item) => item.id !== id))
+  }
+
+  const addOverlaySource = (id: string): void => {
+    const source = sources.find((item) => item.id === id)
+    if (!source || overlaySources.some((item) => item.id === id) || overlaySources.length >= 4) return
+    const index = overlaySources.length
+    setOverlaySources((list) => [...list, {
+      id, name: source.name,
+      x: 0.66, y: 0.66 - index * 0.02,
+      w: 0.3, h: 0.3
+    }])
+  }
+
+  const patchOverlaySource = (id: string, patch: Partial<RecordingOverlaySource>): void => {
+    setOverlaySources((list) => list.map((item) => item.id === id ? { ...item, ...patch } : item))
+  }
+
+  const removeOverlaySource = (id: string): void => {
+    setOverlaySources((list) => list.filter((item) => item.id !== id))
+    overlayStreamsRef.current.get(id)?.getTracks().forEach((track) => track.stop())
+    overlayStreamsRef.current.delete(id)
+    overlayVideosRef.current.delete(id)
+  }
+
   useEffect(() => {
     const neural = neuralStyleRef.current
     const unsubscribeNeural = neural.subscribe(() => setNeuralState(neural.snapshot()))
@@ -682,6 +789,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
       image.src = asset.dataUrl
     }).catch(() => {})
     void loadSources()
+    try { setRecordingScenes(normalizeRecordingScenes(JSON.parse(localStorage.getItem('recording-scenes') || '[]'))) } catch { /* 坏数据按空场景库处理 */ }
     void island.listRecordingSessions().then((result) => {
       if (result.ok) setRecoverableSessions((result.sessions || []).filter((session) => session.bytes >= 1024))
     }).catch(() => {})
@@ -720,6 +828,12 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   }, [sourceId])
 
   useEffect(() => { statusRef.current = status }, [status])
+
+  useEffect(() => {
+    privacyRegionsRef.current = privacyRegions.map((item) => ({ ...item }))
+    const live = new Set(privacyRegions.filter((item) => item.tracking).map((item) => item.id))
+    for (const id of [...privacyTrackerRef.current.keys()]) if (!live.has(id)) privacyTrackerRef.current.delete(id)
+  }, [privacyRegions])
 
   // 采集轨真实统计：目标 30fps 不等于实际 30fps。每 1.2s 读一次 MediaStreamTrack.getStats()，
   // 把实际帧率/丢帧/像素尺寸放到录制条上；看不到真实帧率就无法解释"录出来为什么卡"。
@@ -821,10 +935,14 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     stopCursorLog()
     sourceStreamRef.current?.getTracks().forEach((track) => track.stop())
     outputStreamRef.current?.getTracks().forEach((track) => track.stop())
+    for (const stream of overlayStreamsRef.current.values()) stream.getTracks().forEach((track) => track.stop())
     micStreamRef.current?.getTracks().forEach((track) => track.stop())
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop())
     sourceStreamRef.current = null
     outputStreamRef.current = null
+    overlayStreamsRef.current.clear()
+    for (const video of overlayVideosRef.current.values()) video.srcObject = null
+    overlayVideosRef.current.clear()
     micStreamRef.current = null
     cameraStreamRef.current = null
     if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null
@@ -1040,6 +1158,24 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
             })
           }
         }
+        // 多画面叠加：每个叠加源按归一化矩形逐帧合成，最多 4 路。
+        for (const overlay of overlaySources) {
+          const overlayVideo = overlayVideosRef.current.get(overlay.id)
+          if (!overlayVideo || overlayVideo.readyState < 2 || !overlayVideo.videoWidth) continue
+          const x = Math.round(overlay.x * canvas.width)
+          const y = Math.round(overlay.y * canvas.height)
+          const width = Math.round(overlay.w * canvas.width)
+          const height = Math.round(overlay.h * canvas.height)
+          if (width < 2 || height < 2) continue
+          const radius = Math.max(10, Math.round(Math.min(width, height) * 0.035))
+          ctx.save()
+          ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = Math.max(12, width * 0.04); ctx.shadowOffsetY = 5
+          ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); ctx.fillStyle = '#0b0d10'; ctx.fill(); ctx.clip()
+          ctx.shadowColor = 'transparent'
+          drawCover(ctx, overlayVideo, overlayVideo.videoWidth, overlayVideo.videoHeight, x, y, width, height)
+          ctx.restore()
+          ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, width, height, radius); ctx.strokeStyle = 'rgba(255,255,255,.72)'; ctx.lineWidth = Math.max(2, canvas.width / 1100); ctx.stroke(); ctx.restore()
+        }
         const camera = cameraVideoRef.current
         const avatar = avatarImageRef.current
         const cameraReady = Boolean(camera?.readyState && camera.videoWidth > 0)
@@ -1078,6 +1214,73 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
         if (showSourceLabel) drawOverlay(recordingSourceLabel(source), 'top-right', 0.68)
         if (privacyTop > 0) { ctx.fillStyle = '#080a0d'; ctx.fillRect(0, 0, canvas.width, canvas.height * privacyTop) }
         if (privacyBottom > 0) { ctx.fillStyle = '#080a0d'; ctx.fillRect(0, canvas.height * (1 - privacyBottom), canvas.width, canvas.height * privacyBottom) }
+        // 目标跟踪：低分辨率模板匹配；置信度低时冻结最后位置，避免遮罩乱跳。
+        const tracked = privacyRegionsRef.current.filter((item) => item.tracking)
+        if (tracked.length > 0) {
+          const trackerCanvas = trackingCanvasRef.current || document.createElement('canvas')
+          trackingCanvasRef.current = trackerCanvas
+          const trackerWidth = 320
+          const trackerHeight = Math.max(1, Math.round(canvas.height * trackerWidth / Math.max(1, canvas.width)))
+          if (trackerCanvas.width !== trackerWidth || trackerCanvas.height !== trackerHeight) {
+            trackerCanvas.width = trackerWidth; trackerCanvas.height = trackerHeight
+          }
+          const trackerCtx = trackerCanvas.getContext('2d', { willReadFrequently: true })!
+          trackerCtx.drawImage(canvas, 0, 0, trackerWidth, trackerHeight)
+          const frame = grayscaleFrame(trackerCtx.getImageData(0, 0, trackerWidth, trackerHeight).data, trackerWidth, trackerHeight)
+          for (const region of tracked) {
+            const rect: TrackerRect = {
+              x: region.x * trackerWidth,
+              y: region.y * trackerHeight,
+              w: Math.max(4, region.w * trackerWidth),
+              h: Math.max(4, region.h * trackerHeight)
+            }
+            const existing = privacyTrackerRef.current.get(region.id)
+            if (!existing || Math.abs(existing.rect.w - rect.w) > rect.w * 0.25 || Math.abs(existing.rect.h - rect.h) > rect.h * 0.25) {
+              const template = createTemplate(frame, rect)
+              if (template) privacyTrackerRef.current.set(region.id, { template, rect })
+              continue
+            }
+            const result = trackTemplate(frame, existing.template, existing.rect, { radius: Math.max(10, Math.round(rect.w * 0.6)), step: 2 })
+            if (result.confidence >= 0.35) {
+              region.x = result.rect.x / trackerWidth
+              region.y = result.rect.y / trackerHeight
+            }
+            existing.rect = result.rect
+          }
+          if (now - trackingUiAtRef.current >= 800) {
+            trackingUiAtRef.current = now
+            setPrivacyRegions(privacyRegionsRef.current.map((item) => ({ ...item })))
+          }
+        }
+        // 区域隐私遮罩：马赛克用"缩小再放大"做像素化；模糊用 clip + filter 只处理框内。
+        for (const region of privacyRegionsRef.current) {
+          const rx = Math.round(region.x * canvas.width)
+          const ry = Math.round(region.y * canvas.height)
+          const rw = Math.round(region.w * canvas.width)
+          const rh = Math.round(region.h * canvas.height)
+          if (rw < 2 || rh < 2) continue
+          if (region.mode === 'mosaic') {
+            const small = privacyPixelRef.current || document.createElement('canvas')
+            privacyPixelRef.current = small
+            const sw = Math.max(1, Math.round(rw / 22))
+            const sh = Math.max(1, Math.round(rh / 22))
+            if (small.width !== sw || small.height !== sh) { small.width = sw; small.height = sh }
+            const smallCtx = small.getContext('2d')!
+            smallCtx.clearRect(0, 0, sw, sh)
+            smallCtx.imageSmoothingEnabled = true
+            smallCtx.drawImage(canvas, rx, ry, rw, rh, 0, 0, sw, sh)
+            ctx.save(); ctx.imageSmoothingEnabled = false
+            ctx.drawImage(small, 0, 0, sw, sh, rx, ry, rw, rh)
+            ctx.restore()
+          } else {
+            ctx.save()
+            ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip()
+            ctx.filter = `blur(${Math.max(4, Math.round(canvas.width / 110))}px)`
+            ctx.drawImage(canvas, 0, 0)
+            ctx.filter = 'none'
+            ctx.restore()
+          }
+        }
         const at = currentElapsed()
         if (statusRef.current === 'recording' && keyframeIntervalSeconds > 0 && at - frameCaptureAtRef.current >= keyframeIntervalSeconds * 1000) {
           frameCaptureAtRef.current = at
@@ -1100,7 +1303,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     focusRef.current = { x: 0.5, y: 0.5, zoom: 1, cursorX: 0.5, cursorY: 0.5, speed: 0, pollAt: 0, lastX: 0.5, lastY: 0.5 }
     drawLoop(video, canvas, selectedSource, true)
     return () => window.cancelAnimationFrame(rafRef.current)
-  }, [sourcePreviewing, sourceId, resolution, aspect, fitMode, regionEnabled, region.left, region.top, region.right, region.bottom, motionMode, motionStrength, maxZoom, cursorHalo, cursorHaloSize, cursorHaloColor, cursorTrail, webcam, cameraPosition, cameraSize, cameraEffect, cameraFrame, cameraOpacity, cameraBorder, cameraShadow, cameraMargin, avatarDataUrl, avatarMotion, watermarkEnabled, watermarkText, watermarkPosition, watermarkOpacity, showTimestamp, showSourceLabel, privacyTop, privacyBottom])
+  }, [sourcePreviewing, sourceId, resolution, aspect, fitMode, regionEnabled, region.left, region.top, region.right, region.bottom, motionMode, motionStrength, maxZoom, cursorHalo, cursorHaloSize, cursorHaloColor, cursorTrail, webcam, cameraPosition, cameraSize, cameraEffect, cameraFrame, cameraOpacity, cameraBorder, cameraShadow, cameraMargin, avatarDataUrl, avatarMotion, watermarkEnabled, watermarkText, watermarkPosition, watermarkOpacity, showTimestamp, showSourceLabel, privacyTop, privacyBottom, overlaySources])
 
   const startRecording = async (): Promise<void> => {
     const source = selectedSource
@@ -1162,6 +1365,24 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
       video.srcObject = desktopStream; video.muted = true; video.playsInline = true
       await video.play(); await withTimeout(waitVideo(video), 9_000, '桌面画面加载超时')
       setSourceMediaSize({ sourceId: source.id, width: video.videoWidth, height: video.videoHeight })
+      for (const overlay of overlaySources) {
+        const overlaySource = sources.find((item) => item.id === overlay.id)
+        if (!overlaySource || overlaySource.available === false || overlaySource.id === source.id) continue
+        setStartupMessage(`正在连接叠加画面：${overlay.name}…`)
+        try {
+          const stream = await withTimeout(navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: overlaySource.id, maxFrameRate: fps } }
+          } as unknown as MediaStreamConstraints), 10_000, '连接叠加画面超时')
+          const overlayVideo = document.createElement('video')
+          overlayVideo.srcObject = stream; overlayVideo.muted = true; overlayVideo.playsInline = true
+          await overlayVideo.play(); await withTimeout(waitVideo(overlayVideo), 8_000, '叠加画面加载超时')
+          overlayStreamsRef.current.set(overlay.id, stream)
+          overlayVideosRef.current.set(overlay.id, overlayVideo)
+        } catch {
+          flash(`叠加画面「${overlay.name}」不可用，已跳过`)
+        }
+      }
       const raw = captureMode === 'raw' && rawModeReady
       // 原始采集的成片尺寸就是屏幕原始尺寸（裁剪/比例/水印留到导出期），合成模式才走目标尺寸
       const size = raw
@@ -1220,17 +1441,38 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
         audioContextRef.current = audioContext
         if (audioContext.state === 'suspended') await audioContext.resume()
         const destination = audioContext.createMediaStreamDestination()
+        // 总线限幅：系统声 + 麦克风先汇到 master，再进编码器；限幅器防爆音，关掉时保持直通。
+        const master = audioContext.createDynamicsCompressor()
+        master.threshold.value = masterLimiter ? -3 : 0
+        master.knee.value = masterLimiter ? 0 : 40
+        master.ratio.value = masterLimiter ? 20 : 1
+        master.attack.value = 0.003
+        master.release.value = 0.25
+        master.connect(destination)
         if (desktopStream.getAudioTracks().length) {
           const sourceNode = audioContext.createMediaStreamSource(new MediaStream(desktopStream.getAudioTracks()))
           const gain = audioContext.createGain(); gain.gain.value = systemMuted ? 0 : systemGain
           systemGainRef.current = gain
-          sourceNode.connect(gain).connect(destination)
+          const compressor = audioContext.createDynamicsCompressor()
+          compressor.threshold.value = systemCompressor ? -24 : 0
+          compressor.ratio.value = systemCompressor ? 4 : 1
+          compressor.attack.value = 0.01
+          compressor.release.value = 0.2
+          sourceNode.connect(compressor).connect(gain).connect(master)
         }
         if (micStreamRef.current?.getAudioTracks().length) {
           const sourceNode = audioContext.createMediaStreamSource(micStreamRef.current)
           const gain = audioContext.createGain(); gain.gain.value = micMuted ? 0 : micGain
           micGainRef.current = gain
-          sourceNode.connect(gain).connect(destination)
+          // 人声链：80Hz 高通去掉低频轰鸣 → 可选压缩 → 增益 → 总线。
+          const highpass = audioContext.createBiquadFilter()
+          highpass.type = 'highpass'; highpass.frequency.value = micHighpass ? 80 : 0; highpass.Q.value = 0.7
+          const compressor = audioContext.createDynamicsCompressor()
+          compressor.threshold.value = micCompressor ? -26 : 0
+          compressor.ratio.value = micCompressor ? 4 : 1
+          compressor.attack.value = 0.005
+          compressor.release.value = 0.18
+          sourceNode.connect(highpass).connect(compressor).connect(gain).connect(master)
         }
         destination.stream.getAudioTracks().forEach((track) => output.addTrack(track))
       }
@@ -2021,8 +2263,80 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
   }
 
   const copyText = (value: string): void => { void navigator.clipboard.writeText(value).then(() => flash('已复制')) }
-  const labelStyle: React.CSSProperties = { ...text.overline(), fontSize: 9.5 }
-  const controlRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8 }
+  /** ShareX 式上传流水线：用户自己的命令/脚本上传成品，stdout 里第一个 URL 作为分享链接。 */
+  const runUploadCommand = async (): Promise<void> => {
+    if (!lastExport?.path) { flash('先导出成品'); return }
+    const template = uploadCommand.trim()
+    if (!template) { flash('先填写上传命令，例如 aws s3 cp %file% s3://bucket/ --acl public-read'); return }
+    const command = template
+      .replace(/%file%/g, `"${lastExport.path}"`)
+      .replace(/%name%/g, `"${recordingName}"`)
+    flash('正在执行上传命令…')
+    const result = await island.shortcutShell(command)
+    if (!result.ok) { flash(result.error || result.output?.slice(-200) || '上传命令失败'); return }
+    const url = (result.output || '').match(/https?:\/\/[^\s"'<>]+/)?.[0]
+    if (url) {
+      void navigator.clipboard.writeText(url).catch(() => {})
+      flash(`上传完成，公网链接已复制：${url}`)
+    } else {
+      flash(`命令已完成，但输出里没有 URL：${(result.output || '').trim().slice(-160) || '（无输出）'}`)
+    }
+  }
+
+  const toggleVirtualCamera = async (on: boolean): Promise<void> => {
+    if (virtualCamBusy) return
+    setVirtualCamBusy(true)
+    setVirtualCamMessage('')
+    try {
+      if (!on) {
+        await island.stopVirtualCamera({ obsUrl, password: obsPassword }).catch(() => {})
+        await island.stopMjpeg().catch(() => {})
+        setVirtualCamOn(false)
+        setVirtualCamMessage('虚拟摄像头已关闭')
+        return
+      }
+      const stream = await island.startMjpeg()
+      if (!stream.ok || !stream.url) throw new Error(stream.error || '本机画面服务启动失败')
+      const result = await island.startVirtualCamera({
+        streamUrl: stream.url,
+        width: recordingSize.width || 1920,
+        height: recordingSize.height || 1080,
+        obsUrl,
+        password: obsPassword
+      })
+      if (!result.ok) {
+        await island.stopMjpeg().catch(() => {})
+        throw new Error(result.error || 'OBS 虚拟摄像头启动失败')
+      }
+      setVirtualCamOn(true)
+      setVirtualCamMessage(`${result.launched ? '已启动 OBS · ' : ''}OBS Virtual Camera 已开启，可在会议软件里选择 “OBS Virtual Camera”`)
+      localStorage.setItem('obs-websocket-url', obsUrl)
+    } catch (error) {
+      setVirtualCamOn(false)
+      setVirtualCamMessage(error instanceof Error ? error.message : String(error))
+    } finally { setVirtualCamBusy(false) }
+  }
+
+  useEffect(() => {
+    if (!virtualCamOn) return
+    const timer = window.setInterval(() => {
+      const canvas = canvasRef.current
+      if (!canvas || !canvas.width) return
+      try { island.pushMjpegFrame(canvas.toDataURL('image/jpeg', 0.72)) } catch { /* 单帧失败继续 */ }
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [virtualCamOn])
+
+  useEffect(() => {
+    if (!virtualCamOn) return
+    return () => {
+      void island.stopVirtualCamera({ obsUrl, password: obsPassword }).catch(() => {})
+      void island.stopMjpeg().catch(() => {})
+    }
+  }, [virtualCamOn, obsUrl, obsPassword])
+
+  const labelStyle: React.CSSProperties = { ...text.overline(), fontSize: 10 }
+  const controlRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 9 }
   const progress = exportProgress?.progress || 0
   const recordingAvailable = Boolean(recordingBlob || recordingSessionId)
   const timelineLaneWidth = Math.max(Math.round(760 * timelineZoom), Math.round(Math.max(1, elapsed) / 1000 * 24 * timelineZoom))
@@ -2318,25 +2632,25 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                 </div>
                 <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
                   <div style={{ width: 92, flex: 'none', borderRight: `0.5px solid rgba(255,255,255,.08)`, background: '#10141a' }}>
-                    <div style={{ height: 25, display: 'flex', alignItems: 'center', padding: '0 8px', color: 'rgba(255,255,255,.38)', fontSize: 8.5 }}>轨道</div>
-                    <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Layers size={12} color={accentText()} /><span style={{ flex: 1, color: ink(2), fontSize: 9.5 }}>V1 画面</span><IconButton icon={videoTrackLocked ? Lock : Unlock} title={videoTrackLocked ? '解锁视频轨' : '锁定视频轨'} size={23} onClick={() => setVideoTrackLocked((value) => !value)} /></div>
-                    <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Volume2 size={12} color={sem.calm} /><span style={{ flex: 1, color: ink(2), fontSize: 9.5 }}>A1 音频</span><IconButton icon={editSettings.muteAudio ? VolumeX : Volume2} title={editSettings.muteAudio ? '恢复音频轨' : '静音音频轨'} size={23} disabled={!recordingHasAudio} onClick={() => { rememberEdit(); setEditSettings((current) => ({ ...current, muteAudio: !current.muteAudio })) }} /></div>
-                    <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Tag size={12} color={sem.warn} /><span style={{ flex: 1, color: ink(2), fontSize: 9.5 }}>M1 章节</span><IconButton icon={markerTrackLocked ? Lock : Unlock} title={markerTrackLocked ? '解锁章节轨' : '锁定章节轨'} size={23} onClick={() => setMarkerTrackLocked((value) => !value)} /></div>
+                    <div style={{ height: 25, display: 'flex', alignItems: 'center', padding: '0 8px', color: 'rgba(255,255,255,.46)', fontSize: 9.5 }}>轨道</div>
+                    <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Layers size={12} color={accentText()} /><span style={{ flex: 1, color: ink(2), fontSize: 10 }}>V1 画面</span><IconButton icon={videoTrackLocked ? Lock : Unlock} title={videoTrackLocked ? '解锁视频轨' : '锁定视频轨'} size={23} onClick={() => setVideoTrackLocked((value) => !value)} /></div>
+                    <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Volume2 size={12} color={sem.calm} /><span style={{ flex: 1, color: ink(2), fontSize: 10 }}>A1 音频</span><IconButton icon={editSettings.muteAudio ? VolumeX : Volume2} title={editSettings.muteAudio ? '恢复音频轨' : '静音音频轨'} size={23} disabled={!recordingHasAudio} onClick={() => { rememberEdit(); setEditSettings((current) => ({ ...current, muteAudio: !current.muteAudio })) }} /></div>
+                    <div style={{ height: 45, display: 'flex', alignItems: 'center', gap: 6, padding: '0 7px', borderTop: `0.5px solid rgba(255,255,255,.05)` }}><Tag size={12} color={sem.warn} /><span style={{ flex: 1, color: ink(2), fontSize: 10 }}>M1 章节</span><IconButton icon={markerTrackLocked ? Lock : Unlock} title={markerTrackLocked ? '解锁章节轨' : '锁定章节轨'} size={23} onClick={() => setMarkerTrackLocked((value) => !value)} /></div>
                   </div>
                   <div className="ai-scroll" style={{ flex: 1, minWidth: 0, overflowX: 'auto', overflowY: 'hidden' }}>
                     <div style={{ width: timelineLaneWidth, minWidth: '100%', height: 160, position: 'relative' }}>
                       <div style={{ height: 25, position: 'relative', borderBottom: `0.5px solid rgba(255,255,255,.06)`, cursor: 'crosshair' }} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seekPreview(snapEditPoint((event.clientX - rect.left) / rect.width * elapsed)) }}>
-                        {timelineTicks.map((at) => <span key={at} style={{ position: 'absolute', left: `${elapsed ? at / elapsed * 100 : 0}%`, top: 0, bottom: 0, borderLeft: `0.5px solid rgba(255,255,255,.13)`, color: 'rgba(255,255,255,.42)', fontSize: 8, paddingLeft: 3, whiteSpace: 'nowrap' }}>{formatRecordingTime(at)}</span>)}
+                        {timelineTicks.map((at) => <span key={at} style={{ position: 'absolute', left: `${elapsed ? at / elapsed * 100 : 0}%`, top: 0, bottom: 0, borderLeft: `0.5px solid rgba(255,255,255,.13)`, color: 'rgba(255,255,255,.5)', fontSize: 9, paddingLeft: 3, whiteSpace: 'nowrap' }}>{formatRecordingTime(at)}</span>)}
                       </div>
                       <div data-timeline-video-lane style={{ height: 45, position: 'relative', borderBottom: `0.5px solid rgba(255,255,255,.05)`, background: 'rgba(255,255,255,.018)', cursor: 'crosshair' }} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seekPreview(snapEditPoint((event.clientX - rect.left) / rect.width * elapsed)) }}>
-                        {editSegments.map((segment, index) => <button key={segment.id} onClick={(event) => { event.stopPropagation(); selectSegment(segment) }} title={`${segment.label || `片段 ${index + 1}`} · ${formatRecordingTime(segment.startMs)} - ${formatRecordingTime(segment.endMs)}`} style={{ position: 'absolute', left: `${elapsed ? segment.startMs / elapsed * 100 : 0}%`, width: `${elapsed ? Math.max(0.18, (segment.endMs - segment.startMs) / elapsed * 100) : 100}%`, top: 5, bottom: 5, padding: '0 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left', border: segment.id === activeSegment?.id ? `1.5px solid ${accent()}` : `0.5px solid ${hairline(0.22)}`, borderRadius: 5, color: segment.enabled === false ? ink(4) : '#fff', background: segment.enabled === false ? 'rgba(255,255,255,.04)' : index % 2 ? semBg(sem.calm, 0.38) : semBg(accent(), 0.44), fontFamily: 'inherit', fontSize: 8.5, cursor: videoTrackLocked ? 'not-allowed' : 'pointer' }}><span onPointerDown={(event) => beginTimelineTrim(event, segment, 'start')} title="拖动入点" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: videoTrackLocked ? 'not-allowed' : 'ew-resize', background: segment.id === activeSegment?.id ? accent(0.72, 0.72) : 'rgba(255,255,255,.16)' }} />{segment.label || `片段 ${index + 1}`}<span onPointerDown={(event) => beginTimelineTrim(event, segment, 'end')} title="拖动出点" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: videoTrackLocked ? 'not-allowed' : 'ew-resize', background: segment.id === activeSegment?.id ? accent(0.72, 0.72) : 'rgba(255,255,255,.16)' }} /></button>)}
+                        {editSegments.map((segment, index) => <button key={segment.id} onClick={(event) => { event.stopPropagation(); selectSegment(segment) }} title={`${segment.label || `片段 ${index + 1}`} · ${formatRecordingTime(segment.startMs)} - ${formatRecordingTime(segment.endMs)}`} style={{ position: 'absolute', left: `${elapsed ? segment.startMs / elapsed * 100 : 0}%`, width: `${elapsed ? Math.max(0.18, (segment.endMs - segment.startMs) / elapsed * 100) : 100}%`, top: 5, bottom: 5, padding: '0 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left', border: segment.id === activeSegment?.id ? `1.5px solid ${accent()}` : `0.5px solid ${hairline(0.22)}`, borderRadius: 5, color: segment.enabled === false ? ink(4) : '#fff', background: segment.enabled === false ? 'rgba(255,255,255,.04)' : index % 2 ? semBg(sem.calm, 0.38) : semBg(accent(), 0.44), fontFamily: 'inherit', fontSize: 9.5, cursor: videoTrackLocked ? 'not-allowed' : 'pointer' }}><span onPointerDown={(event) => beginTimelineTrim(event, segment, 'start')} title="拖动入点" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: videoTrackLocked ? 'not-allowed' : 'ew-resize', background: segment.id === activeSegment?.id ? accent(0.72, 0.72) : 'rgba(255,255,255,.16)' }} />{segment.label || `片段 ${index + 1}`}<span onPointerDown={(event) => beginTimelineTrim(event, segment, 'end')} title="拖动出点" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: videoTrackLocked ? 'not-allowed' : 'ew-resize', background: segment.id === activeSegment?.id ? accent(0.72, 0.72) : 'rgba(255,255,255,.16)' }} /></button>)}
                       </div>
                       <div style={{ height: 45, position: 'relative', borderBottom: `0.5px solid rgba(255,255,255,.05)`, cursor: 'crosshair' }} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seekPreview(snapEditPoint((event.clientX - rect.left) / rect.width * elapsed)) }}>
                         {recordingHasAudio && <div style={{ position: 'absolute', inset: '6px 0', borderRadius: 5, opacity: editSettings.muteAudio ? 0.28 : 1, background: `repeating-linear-gradient(90deg, ${semBg(sem.calm, 0.34)} 0 3px, ${semBg(sem.calm, 0.13)} 3px 7px)`, border: `0.5px solid ${semBg(sem.calm, 0.5)}` }} />}
                         {!recordingHasAudio && <span style={{ position: 'absolute', left: 8, top: 15, color: ink(4), fontSize: 8.5 }}>该录制没有音轨</span>}
                       </div>
                       <div style={{ height: 45, position: 'relative', cursor: 'crosshair' }} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seekPreview(snapEditPoint((event.clientX - rect.left) / rect.width * elapsed)) }}>
-                        {timeline.filter((item) => item.type === 'marker' || item.type === 'start').map((item, index) => <button key={`${item.type}-${item.at}-${index}`} onClick={(event) => { event.stopPropagation(); seekPreview(item.at) }} title={`${formatRecordingTime(item.at)} ${item.label}`} style={{ position: 'absolute', left: `${elapsed ? item.at / elapsed * 100 : 0}%`, top: 5, bottom: 5, maxWidth: 130, padding: '0 6px', border: `0.5px solid ${semBg(item.type === 'start' ? sem.calm : sem.warn, 0.68)}`, borderRadius: 5, color: item.type === 'start' ? sem.calm : sem.warn, background: semBg(item.type === 'start' ? sem.calm : sem.warn, 0.13), fontFamily: 'inherit', fontSize: 8, whiteSpace: 'nowrap', cursor: 'pointer', transform: item.at >= elapsed * 0.92 ? 'translateX(-100%)' : undefined }}>{item.label}</button>)}
+                        {timeline.filter((item) => item.type === 'marker' || item.type === 'start').map((item, index) => <button key={`${item.type}-${item.at}-${index}`} onClick={(event) => { event.stopPropagation(); seekPreview(item.at) }} title={`${formatRecordingTime(item.at)} ${item.label}`} style={{ position: 'absolute', left: `${elapsed ? item.at / elapsed * 100 : 0}%`, top: 5, bottom: 5, maxWidth: 130, padding: '0 6px', border: `0.5px solid ${semBg(item.type === 'start' ? sem.calm : sem.warn, 0.68)}`, borderRadius: 5, color: item.type === 'start' ? sem.calm : sem.warn, background: semBg(item.type === 'start' ? sem.calm : sem.warn, 0.13), fontFamily: 'inherit', fontSize: 9, whiteSpace: 'nowrap', cursor: 'pointer', transform: item.at >= elapsed * 0.92 ? 'translateX(-100%)' : undefined }}>{item.label}</button>)}
                       </div>
                       <span ref={(el) => { previewEls.current.main = el }} style={{ position: 'absolute', left: `${elapsed ? previewMsRef.current / elapsed * 100 : 0}%`, top: 0, bottom: 0, width: 1.5, background: '#fff', boxShadow: '0 0 7px rgba(255,255,255,.65)', pointerEvents: 'none', zIndex: 4 }}><span style={{ position: 'absolute', left: -4, top: 0, width: 9, height: 7, clipPath: 'polygon(0 0,100% 0,50% 100%)', background: '#fff' }} /></span>
                     </div>
@@ -2345,7 +2659,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
               </div>
             ) : (
               <div style={{ minHeight: 62, display: 'flex', alignItems: 'center', gap: 10, padding: `0 ${SP.md}px`, borderTop: `0.5px solid rgba(255,255,255,.07)`, background: '#0d1015' }}>
-                <div style={{ minWidth: 136 }}><div style={{ color: 'rgba(255,255,255,.46)', fontSize: 9.5 }}>时间线</div><div style={{ color: '#fff', fontSize: 12, fontVariantNumeric: 'tabular-nums', marginTop: 3 }}>{formatRecordingTime(elapsed)} · {timeline.filter((item) => item.type === 'marker').length} 章节 · {keyframes.length} 关键帧</div></div>
+                <div style={{ minWidth: 136 }}><div style={{ color: 'rgba(255,255,255,.52)', fontSize: 10 }}>时间线</div><div style={{ color: '#fff', fontSize: 12, fontVariantNumeric: 'tabular-nums', marginTop: 3 }}>{formatRecordingTime(elapsed)} · {timeline.filter((item) => item.type === 'marker').length} 章节 · {keyframes.length} 关键帧</div></div>
                 <div style={{ flex: 1, height: 20, position: 'relative', borderRadius: R.pill, background: 'rgba(255,255,255,.08)', overflow: 'hidden' }}><div style={{ position: 'absolute', inset: 0, width: status === 'recording' || status === 'paused' ? '100%' : `${Math.min(100, elapsed ? 100 : 0)}%`, background: `linear-gradient(90deg, ${accent(0.78, 0.72)}, ${sem.calm})`, opacity: 0.36 }} />{timeline.filter((item) => item.type === 'marker').map((item, index) => <span key={`${item.at}-${index}`} title={`${formatRecordingTime(item.at)} ${item.label}`} style={{ position: 'absolute', left: `${elapsed ? Math.min(99, item.at / elapsed * 100) : 0}%`, top: 3, width: 3, height: 14, borderRadius: 2, background: sem.warn }} />)}</div>
                 {recordingAvailable && <span style={{ color: 'rgba(255,255,255,.55)', fontSize: 10.5 }}>{formatBytes(recordedBytes)}</span>}
               </div>
@@ -2365,7 +2679,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
             {panel === 'capture' && (
               <>
                 {recoverableSessions.filter((session) => session.id !== recordingSessionId).length > 0 && <div style={{ ...surface.card(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-                  <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(1), fontSize: 10.5, fontWeight: 680 }}><RefreshCw size={12} color={sem.warn} />可恢复录制</span><span style={{ ...text.num(9), color: sem.warn }}>{recoverableSessions.filter((session) => session.id !== recordingSessionId).length} 项</span></div>
+                  <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(1), fontSize: 10.5, fontWeight: 680 }}><RefreshCw size={12} color={sem.warn} />可恢复录制</span><span style={{ ...text.num(10), color: sem.warn }}>{recoverableSessions.filter((session) => session.id !== recordingSessionId).length} 项</span></div>
                   {recoverableSessions.filter((session) => session.id !== recordingSessionId).slice(0, 3).map((session) => <div key={session.id} style={{ ...controlRow, minWidth: 0, padding: '6px 7px', borderRadius: R.sm, background: surface.inset().background }}>
                     <div style={{ minWidth: 0, flex: 1 }}><div style={{ color: ink(2), fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{session.name}</div><div style={{ ...text.faint(), fontSize: 8.5 }}>{session.status === 'interrupted' ? '异常中断' : '已落盘'} · {formatBytes(session.bytes)} · {session.width}×{session.height}</div></div>
                     <Button sm variant="tinted" icon={Play} onClick={() => void restoreRecordingSession(session)}>恢复</Button>
@@ -2374,6 +2688,24 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                 </div>}
                 <div style={labelStyle}>录制场景预设</div>
                 <Segmented value={recordingPreset} onChange={applyPreset} options={[{ key: 'tutorial', label: '教程' }, { key: 'meeting', label: '会议' }, { key: 'demo', label: '演示' }, { key: 'custom', label: '自定义' }]} />
+                <div style={{ ...controlRow, justifyContent: 'space-between' }}>
+                  <span style={{ ...text.faint(), fontSize: 10 }}>我的场景</span>
+                  <span style={{ ...text.num(9), color: ink(3) }}>{recordingScenes.length}/12</span>
+                </div>
+                {recordingScenes.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {recordingScenes.map((scene) => (
+                      <span key={scene.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '2px 5px 2px 8px', borderRadius: R.pill, background: semBg(accent(), 0.11), border: `0.5px solid ${accent(0.6, 0.28)}`, fontSize: 10 }}>
+                        <button type="button" onClick={() => applyScene(scene)} title={`应用场景：${scene.sourceKind === 'screen' ? '显示器' : '窗口'} · ${scene.resolution} · ${scene.fps}fps`} style={{ border: 0, background: 'transparent', color: accentText(0.9), fontFamily: 'inherit', fontSize: 10, cursor: 'pointer', padding: 0 }}>{scene.name}</button>
+                        <button type="button" onClick={() => removeScene(scene.id)} title="删除场景" style={{ border: 0, background: 'transparent', color: ink(3), cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <Input value={sceneName} onChange={setSceneName} placeholder="场景名，如：代码演示" style={{ flex: 1 }} />
+                  <Button sm variant="ghost" icon={Save} onClick={saveScene} disabled={locked}>存场景</Button>
+                </div>
                 <div style={{ ...controlRow, justifyContent: 'space-between' }}>
                   <span style={labelStyle}>录制来源</span>
                   <IconButton icon={RefreshCw} title="刷新来源" size={25} onClick={() => void loadSources()} disabled={locked || loadingSources} />
@@ -2401,7 +2733,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                       const height = Math.max(30, bounds.height / displayTopology.height * 70)
                       return <button key={source.id} data-recording-source-id={source.id} data-selected={source.id === sourceId || undefined} onClick={() => selectSource(source.id)} disabled={locked || source.available === false} title={`${source.displayLabel || source.name} · 坐标 ${bounds.x},${bounds.y} · ${bounds.width}×${bounds.height}`} style={{ position: 'absolute', left: `${left}%`, top: `${top}%`, width: `${Math.min(width, 88 - left)}%`, height: `${Math.min(height, 82 - top)}%`, minHeight: 46, borderRadius: R.sm, overflow: 'hidden', border: source.id === sourceId ? `2px solid ${accent()}` : `0.5px solid ${hairline(0.2)}`, background: '#10141a', color: '#fff', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
                         {source.thumbnail && <img src={source.thumbnail} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.42 }} />}
-                        <span style={{ position: 'relative', display: 'grid', placeItems: 'center', height: '100%', padding: 5, fontSize: 9.5, fontWeight: 700, textShadow: '0 1px 4px #000' }}>{source.displayLabel?.split(' · ')[0] || source.name}<small style={{ fontSize: 8, fontWeight: 500 }}>{source.nativeSize?.width || bounds.width}×{source.nativeSize?.height || bounds.height}</small></span>
+                        <span style={{ position: 'relative', display: 'grid', placeItems: 'center', height: '100%', padding: 5, fontSize: 10, fontWeight: 700, textShadow: '0 1px 4px #000' }}>{source.displayLabel?.split(' · ')[0] || source.name}<small style={{ fontSize: 9, fontWeight: 500 }}>{source.nativeSize?.width || bounds.width}×{source.nativeSize?.height || bounds.height}</small></span>
                       </button>
                     })}
                   </div>
@@ -2414,7 +2746,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                           {source.appIcon && <img src={source.appIcon} alt="" style={{ position: 'absolute', left: 5, bottom: 5, width: 18, height: 18, padding: 2, borderRadius: 5, objectFit: 'contain', background: 'rgba(5,7,10,.78)' }} />}
                           {sourceId === source.id && <span style={{ position: 'absolute', right: 5, top: 5, display: 'grid', placeItems: 'center', width: 17, height: 17, borderRadius: 9, color: '#fff', background: accent() }}><Check size={10} strokeWidth={3} /></span>}
                         </div>
-                        <div style={{ padding: sourceView === 'list' ? '7px 8px' : '6px 7px', minWidth: 0, flex: 1 }}><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ flex: 1, fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{recordingSourceLabel(source)}</div><span role="button" title={sourceFavorites.includes(source.name) ? '取消收藏' : '收藏来源'} onClick={(event) => { event.stopPropagation(); toggleSourceFavorite(source.name) }} style={{ display: 'grid', placeItems: 'center', color: sourceFavorites.includes(source.name) ? sem.warn : ink(4) }}><Star size={12} fill={sourceFavorites.includes(source.name) ? 'currentColor' : 'none'} /></span></div>{source.displayLabel && <div style={{ ...text.faint(), fontSize: 8.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.name}</div>}{source.available === false && <div style={{ color: sem.warn, fontSize: 8.5, marginTop: 2 }}>当前不可录制</div>}</div>
+                        <div style={{ padding: sourceView === 'list' ? '7px 8px' : '6px 7px', minWidth: 0, flex: 1 }}><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ flex: 1, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{recordingSourceLabel(source)}</div><span role="button" title={sourceFavorites.includes(source.name) ? '取消收藏' : '收藏来源'} onClick={(event) => { event.stopPropagation(); toggleSourceFavorite(source.name) }} style={{ display: 'grid', placeItems: 'center', color: sourceFavorites.includes(source.name) ? sem.warn : ink(4) }}><Star size={12} fill={sourceFavorites.includes(source.name) ? 'currentColor' : 'none'} /></span></div>{source.displayLabel && <div style={{ ...text.faint(), fontSize: 9.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.name}</div>}{source.available === false && <div style={{ color: sem.warn, fontSize: 9.5, marginTop: 2 }}>当前不可录制</div>}</div>
                       </button>
                     ))}
                     {!visibleSources.length && <div style={{ gridColumn: '1 / -1', padding: '24px 8px', textAlign: 'center', color: ink(3), fontSize: 10.5 }}>{sourceQuery ? '没有匹配的录制来源' : sourceAvailableOnly ? '没有可录制来源，可切换查看失效项' : '没有检测到录制来源'}</div>}
@@ -2423,7 +2755,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                 {selectedSource && <div style={{ ...surface.inset(), padding: '8px 9px', display: 'grid', gridTemplateColumns: '1fr auto', gap: 4 }}><div style={{ color: ink(2), fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{recordingSourceLabel(selectedSource)}</div><span data-preview-bound={previewSourceId === selectedSource.id || undefined} style={{ color: selectedSource.available === false ? sem.warn : sem.calm, fontSize: 9 }}>{selectedSource.available === false ? '不可用' : sourcePreviewing && previewSourceId === selectedSource.id ? '实时试播中' : sourcePreviewWantedRef.current ? '正在切换画面' : '已就绪'}</span><div style={{ ...text.faint(), gridColumn: '1 / -1', fontSize: 9 }}>{selectedSource.nativeSize ? `${selectedSource.nativeSize.width}×${selectedSource.nativeSize.height} 原生 · ` : ''}{selectedSource.scaleFactor ? `${Math.round(selectedSource.scaleFactor * 100)}% DPI · ` : ''}{selectedSource.bounds ? `坐标 ${selectedSource.bounds.x}, ${selectedSource.bounds.y}` : '窗口捕获'}</div></div>}
                 <div style={{ height: 0.5, background: hairline(0.09) }} />
                 <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-                  <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 11 }}><Gauge size={13} />采集方式</span><span style={{ ...text.num(9), color: captureMode === 'raw' ? sem.calm : ink(3) }}>{captureMode === 'raw' ? '无合成开销' : '所见即所得'}</span></div>
+                  <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 11 }}><Gauge size={13} />采集方式</span><span style={{ ...text.num(10), color: captureMode === 'raw' ? sem.calm : ink(3) }}>{captureMode === 'raw' ? '无合成开销' : '所见即所得'}</span></div>
                   <Segmented value={captureMode} onChange={(value) => {
                     const mode = value as RecordingCaptureMode
                     if (locked || mode === captureMode) return
@@ -2432,7 +2764,37 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                     // 原始采集没有画布，运镜只能在导出期重建——顺手把跟随关掉并允许导出期运镜
                     if (mode === 'raw') { setMotionMode('off'); setExportMotionEnabled(true); setCursorHalo(false); setCursorTrail(false); flash('原始采集：运镜改为导出期按轨迹重建，画幅与裁剪也留到导出期') }
                   }} options={[{ key: 'composite', label: '画布合成' }, { key: 'raw', label: rawModeReady ? '原始画面' : '原始画面（不可用）' }]} />
-                  <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.55 }}>{captureMode === 'raw' ? `桌面轨道直接进编码器：没有画布重绘、不占 CPU/GPU 合成，录制就是屏幕原样与原生尺寸（本机实测：同一活动画面 29.8fps vs 画布合成 22.4fps）。采集是变化驱动的：画面不动就不会产生重复帧（导出时按目标帧率补齐）。输出画幅按上面的“画面比例”在导出期重组（补黑边或裁切）；裁剪、水印、画中画这类逐帧叠加层需要画布，因此这里仍不支持。` : rawModeReady ? '画布逐帧合成：裁剪、比例、运镜、画中画、水印都在录制时烤进画面（改了要重录）。想拿满帧率、运镜留到导出期改，就切"原始画面"。' : `切到"原始画面"需要先关掉：${rawModeBlockers.join('、')}。`}</div>
+                  <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.6 }}>{captureMode === 'raw' ? `桌面轨道直接进编码器：没有画布重绘、不占 CPU/GPU 合成，录制就是屏幕原样与原生尺寸（本机实测：同一活动画面 29.8fps vs 画布合成 22.4fps）。采集是变化驱动的：画面不动就不会产生重复帧（导出时按目标帧率补齐）。输出画幅按上面的“画面比例”在导出期重组（补黑边或裁切）；裁剪、水印、画中画这类逐帧叠加层需要画布，因此这里仍不支持。` : rawModeReady ? '画布逐帧合成：裁剪、比例、运镜、画中画、水印都在录制时烤进画面（改了要重录）。想拿满帧率、运镜留到导出期改，就切"原始画面"。' : `切到"原始画面"需要先关掉：${rawModeBlockers.join('、')}。`}</div>
+                </div>
+                <div style={{ ...controlRow, justifyContent: 'space-between' }}>
+                  <span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><LayoutGrid size={12} />多画面叠加（最多 4 路）</span>
+                  <span style={{ ...text.num(9), color: ink(3) }}>{overlaySources.length}/4</span>
+                </div>
+                <select value="" onChange={(event) => { if (event.target.value) addOverlaySource(event.target.value) }} disabled={locked || overlaySources.length >= 4} style={{ width: '100%', height: 30, border: 0, outline: 0, borderRadius: R.sm, padding: '0 8px', background: surface.card().background, color: ink(1), fontFamily: 'inherit', fontSize: 10.5 }}>
+                  <option value="">添加一个窗口作为叠加画面…</option>
+                  {sources.filter((item) => item.kind === 'window' && item.id !== sourceId && !overlaySources.some((overlay) => overlay.id === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name}{item.available === false ? '（不可用）' : ''}</option>)}
+                </select>
+                {overlaySources.map((overlay, index) => (
+                  <div key={overlay.id} style={{ ...surface.inset(), padding: 7, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{ ...controlRow, justifyContent: 'space-between' }}>
+                      <span style={{ color: ink(2), fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>#{index + 1} {overlay.name}</span>
+                      <IconButton icon={Trash2} size={22} title="移除叠加画面" onClick={() => removeOverlaySource(overlay.id)} />
+                    </div>
+                    <div style={controlRow}><span style={{ ...text.faint(), width: 38 }}>X/Y</span><Slider min={0} max={0.9} step={0.01} value={overlay.x} onChange={(x) => patchOverlaySource(overlay.id, { x, w: Math.min(overlay.w, 1 - x) })} style={{ flex: 1 }} /><Slider min={0} max={0.9} step={0.01} value={overlay.y} onChange={(y) => patchOverlaySource(overlay.id, { y, h: Math.min(overlay.h, 1 - y) })} style={{ flex: 1 }} /></div>
+                    <div style={controlRow}><span style={{ ...text.faint(), width: 38 }}>W/H</span><Slider min={0.08} max={0.9} step={0.01} value={overlay.w} onChange={(w) => patchOverlaySource(overlay.id, { w: Math.min(w, 1 - overlay.x) })} style={{ flex: 1 }} /><Slider min={0.08} max={0.9} step={0.01} value={overlay.h} onChange={(h) => patchOverlaySource(overlay.id, { h: Math.min(h, 1 - overlay.y) })} style={{ flex: 1 }} /><span style={text.num(8.5)}>{Math.round(overlay.w * 100)}×{Math.round(overlay.h * 100)}%</span></div>
+                  </div>
+                ))}
+                {overlaySources.length > 0 && <div style={{ ...text.faint(), fontSize: 9.5 }}>叠加画面只合成视频、不混入各自声音；启用后自动切到画布合成，并禁用 raw 直通。</div>}
+                <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  <div style={{ ...controlRow, justifyContent: 'space-between' }}>
+                    <span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><Video size={12} />虚拟摄像头（OBS）</span>
+                    <Switch on={virtualCamOn} onChange={(on) => void toggleVirtualCamera(on)} />
+                  </div>
+                  <Input value={obsUrl} onChange={(value) => { setObsUrl(value); localStorage.setItem('obs-websocket-url', value) }} placeholder="ws://127.0.0.1:4455" style={{ width: '100%' }} />
+                  <input type="password" value={obsPassword} onChange={(event) => setObsPassword(event.target.value)} placeholder="OBS WebSocket 密码（不落盘）" style={{ width: '100%', height: 30, border: 0, outline: 0, borderRadius: R.sm, padding: '0 8px', background: surface.card().background, color: ink(1), fontFamily: 'inherit', fontSize: 10.5 }} />
+                  {virtualCamBusy && <div style={{ ...text.faint(), fontSize: 9.5, color: sem.warn }}>正在连接 OBS 并启动虚拟摄像头…</div>}
+                  {!virtualCamBusy && virtualCamMessage && <div style={{ ...text.faint(), fontSize: 9.5, color: virtualCamOn ? sem.calm : sem.warn, lineHeight: 1.5 }}>{virtualCamMessage}</div>}
+                  <div style={{ ...text.faint(), fontSize: 9 }}>需要 OBS Studio 28+ 并启用 WebSocket 服务器（工具 → WebSocket 服务器设置）。开启后会自动建场景/浏览器源并调用 OBS Virtual Camera；密码只保存在本次运行内存里。</div>
                 </div>
                 <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>分辨率</span><Segmented value={resolution} onChange={setResolution} style={{ flex: 1 }} options={[{ key: 'source', label: '原生' }, { key: '1080p', label: '1080P' }, { key: '1440p', label: '2K' }, { key: '4k', label: '4K' }]} /></div>
                 <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>画面比例</span><Segmented value={aspect} onChange={setAspect} style={{ flex: 1 }} options={[{ key: 'source', label: '跟随源' }, { key: '16:9', label: '横屏' }, { key: '9:16', label: '竖屏' }, { key: '1:1', label: '方形' }]} /></div>
@@ -2445,21 +2807,22 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                     if (on && !sourcePreviewing) window.setTimeout(() => void startSourcePreview(), 0)
                   }} /></div>
                   {regionEnabled && <>
-                    <div style={controlRow}><span style={{ ...text.faint(), width: 34 }}>左侧</span><Slider min={0} max={0.45} step={0.01} value={region.left} onChange={(value) => setRegion((current) => ({ ...current, left: value }))} style={{ flex: 1 }} /><span style={text.num(9)}>{Math.round(region.left * 100)}%</span></div>
-                    <div style={controlRow}><span style={{ ...text.faint(), width: 34 }}>右侧</span><Slider min={0} max={0.45} step={0.01} value={region.right} onChange={(value) => setRegion((current) => ({ ...current, right: value }))} style={{ flex: 1 }} /><span style={text.num(9)}>{Math.round(region.right * 100)}%</span></div>
-                    <div style={controlRow}><span style={{ ...text.faint(), width: 34 }}>顶部</span><Slider min={0} max={0.45} step={0.01} value={region.top} onChange={(value) => setRegion((current) => ({ ...current, top: value }))} style={{ flex: 1 }} /><span style={text.num(9)}>{Math.round(region.top * 100)}%</span></div>
-                    <div style={controlRow}><span style={{ ...text.faint(), width: 34 }}>底部</span><Slider min={0} max={0.45} step={0.01} value={region.bottom} onChange={(value) => setRegion((current) => ({ ...current, bottom: value }))} style={{ flex: 1 }} /><span style={text.num(9)}>{Math.round(region.bottom * 100)}%</span></div>
+                    <div style={controlRow}><span style={{ ...text.faint(), width: 34 }}>左侧</span><Slider min={0} max={0.45} step={0.01} value={region.left} onChange={(value) => setRegion((current) => ({ ...current, left: value }))} style={{ flex: 1 }} /><span style={text.num(10)}>{Math.round(region.left * 100)}%</span></div>
+                    <div style={controlRow}><span style={{ ...text.faint(), width: 34 }}>右侧</span><Slider min={0} max={0.45} step={0.01} value={region.right} onChange={(value) => setRegion((current) => ({ ...current, right: value }))} style={{ flex: 1 }} /><span style={text.num(10)}>{Math.round(region.right * 100)}%</span></div>
+                    <div style={controlRow}><span style={{ ...text.faint(), width: 34 }}>顶部</span><Slider min={0} max={0.45} step={0.01} value={region.top} onChange={(value) => setRegion((current) => ({ ...current, top: value }))} style={{ flex: 1 }} /><span style={text.num(10)}>{Math.round(region.top * 100)}%</span></div>
+                    <div style={controlRow}><span style={{ ...text.faint(), width: 34 }}>底部</span><Slider min={0} max={0.45} step={0.01} value={region.bottom} onChange={(value) => setRegion((current) => ({ ...current, bottom: value }))} style={{ flex: 1 }} /><span style={text.num(10)}>{Math.round(region.bottom * 100)}%</span></div>
                     <Button sm variant="ghost" icon={RefreshCw} onClick={() => setRegion({ left: 0, top: 0, right: 0, bottom: 0 })}>重置区域</Button>
                   </>}
                 </div>
                 <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 9 }}>
                   <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 11 }}><Volume2 size={13} />系统声音</span><Switch on={systemAudio} onChange={setSystemAudio} /></div>
-                  {systemAudio && <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>系统音量</span><Slider min={0} max={2} step={0.05} value={systemGain} onChange={setSystemGain} style={{ flex: 1 }} /><span style={text.num(9)}>{Math.round(systemGain * 100)}%</span></div>}
+                  {systemAudio && <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>系统音量</span><Slider min={0} max={2} step={0.05} value={systemGain} onChange={setSystemGain} style={{ flex: 1 }} /><span style={text.num(10)}>{Math.round(systemGain * 100)}%</span></div>}
                   <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 11 }}><Mic size={13} />麦克风降噪</span><Switch on={microphone} onChange={setMicrophone} /></div>
                   {microphone && micDevices.length > 0 && <select value={micDeviceId} onChange={(event) => setMicDeviceId(event.target.value)} disabled={locked} style={{ width: '100%', height: 30, border: 0, outline: 0, borderRadius: R.sm, padding: '0 8px', background: surface.card().background, color: ink(1), fontFamily: 'inherit', fontSize: 10.5 }}><option value="">系统默认麦克风</option>{micDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label || `麦克风 ${device.deviceId.slice(0, 5)}`}</option>)}</select>}
                   {microphone && <>
-                    <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>麦克风音量</span><Slider min={0} max={2} step={0.05} value={micGain} onChange={setMicGain} style={{ flex: 1 }} /><span style={text.num(9)}>{Math.round(micGain * 100)}%</span></div>
+                    <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>麦克风音量</span><Slider min={0} max={2} step={0.05} value={micGain} onChange={setMicGain} style={{ flex: 1 }} /><span style={text.num(10)}>{Math.round(micGain * 100)}%</span></div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}><Chip active={noiseSuppression} onClick={() => setNoiseSuppression((value) => !value)}>环境降噪</Chip><Chip active={echoCancellation} onClick={() => setEchoCancellation((value) => !value)}>回声消除</Chip><Chip active={autoGainControl} onClick={() => setAutoGainControl((value) => !value)}>自动增益</Chip></div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}><Chip active={micHighpass} onClick={() => setMicHighpass((value) => !value)} title="80Hz 高通，去掉低频轰鸣">人声高通</Chip><Chip active={micCompressor} onClick={() => setMicCompressor((value) => !value)} title="压缩动态范围，让讲解更平稳">人声压缩</Chip><Chip active={systemCompressor} onClick={() => setSystemCompressor((value) => !value)} title="压住系统声的突发峰值">系统压缩</Chip><Chip active={masterLimiter} onClick={() => setMasterLimiter((value) => !value)} title="总线限幅，防爆音">总线限幅</Chip></div>
                   </>}
                   <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 11 }}><Camera size={13} />摄像头画中画</span><Switch on={webcam} onChange={(on) => { setWebcam(on); if (!on) stopPersonaPreview() }} /></div>
                   {webcam && <>
@@ -2518,6 +2881,21 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                   <div style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><EyeOff size={12} />隐私遮挡条</div>
                   <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>顶部遮挡</span><Slider min={0} max={0.3} step={0.01} value={privacyTop} onChange={setPrivacyTop} style={{ flex: 1 }} /><span style={text.num(9)}>{Math.round(privacyTop * 100)}%</span></div>
                   <div style={controlRow}><span style={{ ...text.faint(), width: 52 }}>底部遮挡</span><Slider min={0} max={0.3} step={0.01} value={privacyBottom} onChange={setPrivacyBottom} style={{ flex: 1 }} /><span style={text.num(9)}>{Math.round(privacyBottom * 100)}%</span></div>
+                  <div style={{ ...controlRow, justifyContent: 'space-between' }}>
+                    <span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><LayoutGrid size={12} />区域遮罩（马赛克/模糊）</span>
+                    <Button sm variant="ghost" icon={Plus} onClick={addPrivacyRegion} disabled={privacyRegions.length >= 8}>添加</Button>
+                  </div>
+                  {privacyRegions.map((region, index) => (
+                    <div key={region.id} style={{ ...surface.inset(), padding: 7, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      <div style={{ ...controlRow, justifyContent: 'space-between' }}>
+                        <Segmented value={region.mode} onChange={(mode) => patchPrivacyRegion(region.id, { mode: mode as RecordingPrivacyRegion['mode'] })} options={[{ key: 'mosaic', label: '马赛克' }, { key: 'blur', label: '模糊' }]} />
+                        <Chip active={region.tracking} onClick={() => patchPrivacyRegion(region.id, { tracking: !region.tracking })} title="在画面里跟踪这个区域的目标">跟踪</Chip>
+                        <IconButton icon={Trash2} size={22} title="删除遮罩" onClick={() => removePrivacyRegion(region.id)} />
+                      </div>
+                      <div style={controlRow}><span style={{ ...text.faint(), width: 38 }}>X/Y</span><Slider min={0} max={0.9} step={0.01} value={region.x} onChange={(x) => patchPrivacyRegion(region.id, { x, w: Math.min(region.w, 1 - x) })} style={{ flex: 1 }} /><Slider min={0} max={0.9} step={0.01} value={region.y} onChange={(y) => patchPrivacyRegion(region.id, { y, h: Math.min(region.h, 1 - y) })} style={{ flex: 1 }} /><span style={text.num(8.5)}>#{index + 1}</span></div>
+                      <div style={controlRow}><span style={{ ...text.faint(), width: 38 }}>W/H</span><Slider min={0.03} max={0.9} step={0.01} value={region.w} onChange={(w) => patchPrivacyRegion(region.id, { w: Math.min(w, 1 - region.x) })} style={{ flex: 1 }} /><Slider min={0.03} max={0.9} step={0.01} value={region.h} onChange={(h) => patchPrivacyRegion(region.id, { h: Math.min(h, 1 - region.y) })} style={{ flex: 1 }} /><span style={text.num(8.5)}>{Math.round(region.w * 100)}×{Math.round(region.h * 100)}%</span></div>
+                    </div>
+                  ))}
                 </div>
                 <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
                   <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={labelStyle}>录制前检查</span><span style={{ ...text.num(9.5), color: sem.calm }}>约 {estimatedMbPerMinute.toFixed(0)} MB/分钟</span></div>
@@ -2552,7 +2930,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                   </>}
                   <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
                     <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><Sparkles size={12} />运镜点（导出期使用）</span><span style={{ ...text.num(9), color: motionKeyframes.length ? sem.calm : ink(4) }}>{motionKeyframes.length ? `${motionKeyframes.length} 个` : '自动'}</span></div>
-                    <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>{motionKeyframes.length ? '导出时按这些点重建镜头：每个点表示"从这一刻开始推近到该倍数"。开场锚点定义起始状态不可删；需在导出页打开「导出期运镜」才生效。' : '未编辑时按光标轨迹自动运镜。点下面按钮可抽出运镜点，再逐个调整倍数。'}</div>
+                    <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.55 }}>{motionKeyframes.length ? '导出时按这些点重建镜头：每个点表示"从这一刻开始推近到该倍数"。开场锚点定义起始状态不可删；需在导出页打开「导出期运镜」才生效。' : '未编辑时按光标轨迹自动运镜。点下面按钮可抽出运镜点，再逐个调整倍数。'}</div>
                     {motionKeyframes.map((point, index) => (
                       <div key={`${point.t}-${index}`} style={{ ...controlRow, gap: 6 }}>
                         <span style={{ ...text.num(9), width: 46, color: index === 0 ? ink(4) : accentText() }}>{formatRecordingTime(point.t)}</span>
@@ -2709,7 +3087,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                   {!hasExportEdits && (format === 'mp4' || format === 'webm') && (
                     <div style={{ ...surface.inset(), padding: '7px 9px', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Zap size={11} strokeWidth={2} style={{ color: accentText(), flex: 'none' }} />
-                      <span style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.5 }}>无剪辑 · 导出时直接封装：视频流不重编码，只把音频转成 AAC（秒级完成、画质无损）。一旦做了裁剪、缩放、变速或字幕就会重编码。</span>
+                      <span style={{ ...text.faint(), fontSize: 10, lineHeight: 1.55 }}>无剪辑 · 导出时直接封装：视频流不重编码，只把音频转成 AAC（秒级完成、画质无损）。一旦做了裁剪、缩放、变速或字幕就会重编码。</span>
                     </div>
                   )}
                   {format !== 'mp3' && <><div style={labelStyle}>输出画面</div><div style={controlRow}><Segmented value={exportResolution} onChange={setExportResolution} style={{ flex: 1 }} options={[{ key: 'source', label: '源分辨率' }, { key: '1080p', label: '1080p' }, { key: '720p', label: '720p' }]} /><Segmented value={exportFps} onChange={setExportFps} style={{ flex: 1 }} options={[{ key: 'source', label: `${fps}fps` }, { key: '30', label: '30' }, { key: '24', label: '24' }, { key: '15', label: '15' }]} /></div><div style={controlRow}><span style={{ ...text.faint(), width: 46 }}>画布</span><Segmented value={exportAspect} onChange={setExportAspect} style={{ flex: 1 }} options={[{ key: 'source', label: '跟随素材' }, { key: '16:9', label: '横屏' }, { key: '9:16', label: '竖屏' }, { key: '1:1', label: '方形' }]} /></div>{exportAspect !== 'source' && Math.abs(recordingSize.width / Math.max(1, recordingSize.height) - (exportAspect === '16:9' ? 16 / 9 : exportAspect === '9:16' ? 9 / 16 : 1)) > 0.01 && <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>素材画幅与目标不同：按采集页的"适配方式"重组画面（完整显示＝补黑边，铺满＝裁切）。</div>}</>}
@@ -2748,8 +3126,20 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                         void navigator.clipboard.writeText(text).then(() => flash('分享文案已复制（标题/时长/章节）')).catch(() => {})
                       }}>复制分享文案</Button>
                     </div>
+                    <Button sm variant="tinted" icon={Network} onClick={() => {
+                      void island.shareFile(lastExport.path).then((result) => {
+                        if (!result.ok || !result.url) { flash(result.error || '局域网分享启动失败'); return }
+                        void navigator.clipboard.writeText(result.url).catch(() => {})
+                        flash(`局域网链接已复制（1 小时内有效）：${result.url}`)
+                      }).catch(() => flash('局域网分享启动失败'))
+                    }}>生成局域网分享链接（1 小时）</Button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <Input value={uploadCommand} onChange={(value) => { setUploadCommand(value); localStorage.setItem('recording-upload-command', value) }} placeholder="上传命令：aws s3 cp %file% s3://桶/ --acl public-read" style={{ flex: 1 }} />
+                      <Button sm variant="ghost" icon={Upload} onClick={() => void runUploadCommand()} disabled={!uploadCommand.trim()}>上传并复制链接</Button>
+                    </div>
+                    <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>命令里的 %file% 会替换成成品路径，%name% 替换成录制名；stdout 里的第一个 http(s) URL 会复制到剪贴板。这样 S3/R2/自建图床都能接，不绑定某一家。</div>
                   </div>}
-                  <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.6 }}>{trimDuration < elapsed ? `将按启用片段输出 ${formatRecordingTime(trimDuration)} 成片。` : ''}{format === 'gif' ? 'GIF 使用两阶段调色板与差分抖动，适合短演示。' : format === 'mp3' ? 'MP3 会沿用片段、速度、音量和淡入淡出设置。' : exportQuality === 'lossless' ? '无损归档保留每个视频像素，文件可能大于视觉无损版本。' : '可独立控制分辨率、帧率与可开关字幕轨；小体积适合聊天和文档附件。'}</div>
+                  <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.6 }}>{trimDuration < elapsed ? `将按启用片段输出 ${formatRecordingTime(trimDuration)} 成片。` : ''}{format === 'gif' ? 'GIF 使用两阶段调色板与差分抖动，适合短演示。' : format === 'mp3' ? 'MP3 会沿用片段、速度、音量和淡入淡出设置。' : exportQuality === 'lossless' ? '无损归档保留每个视频像素，文件可能大于视觉无损版本。' : '可独立控制分辨率、帧率与可开关字幕轨；小体积适合聊天和文档附件。'}</div>
                 </>}
               </>
             )}

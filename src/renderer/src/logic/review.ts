@@ -20,6 +20,23 @@ export function dayRange(key: string): { start: number; end: number } {
   return { start, end }
 }
 
+/** 验收台喂给复盘的最小事实（由调用方算好，避免 review 依赖验收逻辑） */
+export interface AcceptanceFact {
+  endedAt: number
+  status: 'pending' | 'accepted' | 'followup'
+  followups: number
+  unverified: number
+  proj: string
+}
+
+export interface AcceptanceFacts {
+  total: number
+  accepted: number
+  pending: number
+  followups: number
+  unverified: number
+}
+
 export interface DayFacts {
   key: string
   /** 当天完成的待办文本 */
@@ -34,10 +51,12 @@ export interface DayFacts {
   removed: number
   /** 提交数（有 commit 的活动条数） */
   commits: number
+  /** 当天验收台的处置情况 */
+  acceptance: AcceptanceFacts
 }
 
 /** 汇总某一天的客观事实（供事实卡展示 + 喂给 AI） */
-export function buildFacts(key: string, todos: TodoItem[], activities: ActivityEntry[]): DayFacts {
+export function buildFacts(key: string, todos: TodoItem[], activities: ActivityEntry[], acceptance: AcceptanceFact[] = []): DayFacts {
   const { start, end } = dayRange(key)
   const inDay = (t?: number): boolean => typeof t === 'number' && t >= start && t < end
 
@@ -62,12 +81,20 @@ export function buildFacts(key: string, todos: TodoItem[], activities: ActivityE
     removed += a.removed || 0
     if (a.commit) commits += 1
   }
-  return { key, doneTodos, activities: acts, projects, files, added, removed, commits }
+  const dayAcceptance = acceptance.filter((a) => inDay(a.endedAt))
+  const acceptanceFacts: AcceptanceFacts = {
+    total: dayAcceptance.length,
+    accepted: dayAcceptance.filter((a) => a.status === 'accepted').length,
+    pending: dayAcceptance.filter((a) => a.status !== 'accepted').length,
+    followups: dayAcceptance.reduce((n, a) => n + a.followups, 0),
+    unverified: dayAcceptance.reduce((n, a) => n + a.unverified, 0)
+  }
+  return { key, doneTodos, activities: acts, projects, files, added, removed, commits, acceptance: acceptanceFacts }
 }
 
 /** 事实卡是否有任何可复盘的内容 */
 export function hasContent(f: DayFacts): boolean {
-  return f.doneTodos.length > 0 || f.activities.length > 0
+  return f.doneTodos.length > 0 || f.activities.length > 0 || f.acceptance.total > 0
 }
 
 function factsBlock(f: DayFacts): string {
@@ -86,6 +113,9 @@ function factsBlock(f: DayFacts): string {
   }
   if (f.projects.length) lines.push(`\n涉及项目：${f.projects.join('、')}`)
   if (f.files) lines.push(`代码变更合计：${f.files} 文件 +${f.added}/-${f.removed}，${f.commits} 次提交`)
+  if (f.acceptance.total) {
+    lines.push(`\n验收：${f.acceptance.total} 条（已验收 ${f.acceptance.accepted}，待核对 ${f.acceptance.pending}），补验证 ${f.acceptance.followups} 次，未验证项 ${f.acceptance.unverified} 条`)
+  }
   return lines.join('\n')
 }
 
@@ -141,6 +171,10 @@ export function weeklyPrompt(days: DayFacts[]): string {
   const files = withContent.reduce((s, f) => s + f.files, 0)
   const added = withContent.reduce((s, f) => s + f.added, 0)
   const removed = withContent.reduce((s, f) => s + f.removed, 0)
-  const head = `本周合计：完成待办 ${totalTodos} 项 · 项目 ${allProjects.join('、') || '无'} · 代码 ${files} 文件 +${added}/-${removed}`
+  const acceptTotal = withContent.reduce((s, f) => s + f.acceptance.total, 0)
+  const acceptDone = withContent.reduce((s, f) => s + f.acceptance.accepted, 0)
+  const acceptUnverified = withContent.reduce((s, f) => s + f.acceptance.unverified, 0)
+  const head = `本周合计：完成待办 ${totalTodos} 项 · 项目 ${allProjects.join('、') || '无'} · 代码 ${files} 文件 +${added}/-${removed}` +
+    (acceptTotal ? ` · 验收 ${acceptTotal} 条（已验收 ${acceptDone}，未验证项 ${acceptUnverified}）` : '')
   return `请基于以下本周每日事实写周报：\n\n${head}\n\n${blocks || '（本周无记录）'}`
 }

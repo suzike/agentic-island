@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, History as HistoryIcon, Languages, Layers, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Pin, Pipette, Redo2, RotateCcw, RotateCw, Ruler, Save, ScanLine, ScanText, Scissors, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, Video, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
+import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, History as HistoryIcon, Languages, Layers, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Pin, Pipette, Redo2, RotateCcw, RotateCw, Ruler, Save, ScanLine, ScanText, Scissors, Share2, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, Video, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
 import type { LucideIcon } from '../ui/icons'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
@@ -769,6 +769,22 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
           : `已保存 ${actual} 到 ${SCREENSHOT_QUICK_DIR} 并复制到剪贴板`)
       })
   }
+  /** 先落盘再起局域网只读链接：不弹保存框，链接 1 小时自动过期。 */
+  const doShare = (): void => {
+    const dataUrl = render(deco.scale, exportFormat, exportQuality)
+    const name = `${sanitizeScreenshotName(sourceName)}_share`
+    void island.saveImageQuick(dataUrl, name, exportFormat)
+      .then((saved) => {
+        if (!saved.ok || !saved.path) throw new Error(saved.error || '保存失败')
+        return island.shareFile(saved.path)
+      })
+      .then((shared) => {
+        if (!shared.ok || !shared.url) throw new Error(shared.error || '分享链接启动失败')
+        void navigator.clipboard.writeText(shared.url).catch(() => {})
+        flash(`局域网链接已复制（1 小时有效）：${shared.url}`)
+      })
+      .catch((error) => flash(error instanceof Error ? error.message : String(error)))
+  }
   /** 批量美化：把当前边框/背景/水印套到选中的多张图上，逐张直接落盘（免对话框）。 */
   const doBatch = (): void => {
     if (batchBusy) return
@@ -898,8 +914,8 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
   }, [textInput, annos, redoStack, deco, xf, frame, bgKey, sourceData, exportFormat, exportQuality])
 
   // ── 样式片段（设计系统令牌） ──
-  const label9: React.CSSProperties = { ...text.faint(), fontSize: 9.5, flex: 'none' }
-  const groupLabel: React.CSSProperties = { ...text.overline(), fontSize: 9.5, flex: 'none' }
+  const label9: React.CSSProperties = { ...text.faint(), fontSize: 10, flex: 'none' }
+  const groupLabel: React.CSSProperties = { ...text.overline(), fontSize: 10, flex: 'none' }
   const toolRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8 }
   const toolLabel: React.CSSProperties = { ...label9, width: 42 }
 
@@ -962,6 +978,7 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
           <Button sm variant="ghost" icon={Layers} onClick={doBatch} title={`批量：把当前观感套到多张图上，直接存到 ${SCREENSHOT_QUICK_DIR}`}>{batchBusy ? `批量 ${batchBusy}` : '批量美化'}</Button>
           <Button sm variant="ghost" icon={Ruler} onClick={() => setRulerOn((v) => !v)} title="显示像素标尺与中线参考（只叠加显示，不进成片）">{rulerOn ? '隐藏标尺' : '标尺'}</Button>
           <Button sm variant="ghost" icon={Scissors} onClick={captureScroll} title="滚动长截图：框选区域后滚动，停手即自动拼接">长截图</Button>
+          <Button sm variant="ghost" icon={Share2} onClick={doShare} title="保存到隔离导出目录并生成 1 小时有效的局域网链接">分享</Button>
           <Button sm variant="ghost" icon={ScanLine} onClick={onRetake} title="重新框选截图">重截</Button>
           <span style={{ flex: 1 }} />
           {toast && <span style={{ color: sem.calm, fontSize: FS.tiny, fontWeight: 600 }}>{toast}</span>}
@@ -985,7 +1002,7 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
                 {historyEntries.map((entry) => (
                   <button key={entry.path} type="button" onClick={() => loadHistoryEntry(entry)} title={`${entry.name}\n${entry.width}×${entry.height} · ${formatBytes(entry.bytes)}`} style={{ flex: 'none', width: 124, padding: 0, border: `0.5px solid ${hairline(0.14)}`, borderRadius: R.sm, overflow: 'hidden', background: '#0b0d10', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
                     <img src={entry.thumb} alt="" style={{ display: 'block', width: '100%', height: 66, objectFit: 'cover' }} />
-                    <div style={{ padding: '3px 5px', color: ink(2), fontSize: 8.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{new Date(entry.mtime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} · {entry.width}×{entry.height}</div>
+                    <div style={{ padding: '3px 5px', color: ink(2), fontSize: 9.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{new Date(entry.mtime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} · {entry.width}×{entry.height}</div>
                   </button>
                 ))}
               </div>
@@ -1034,12 +1051,12 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
                 const ticksY = rulerTicks(comp.H, Math.max(40, comp.H / 18))
                 return (
                   <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                    <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 16, background: 'rgba(14,16,20,.62)', color: '#dbe3ee', fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
+                    <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 16, background: 'rgba(14,16,20,.62)', color: '#dbe3ee', fontSize: 9.5, fontVariantNumeric: 'tabular-nums' }}>
                       {ticksX.map((tick) => (
                         <span key={tick.at} style={{ position: 'absolute', left: `${(tick.at / comp.W) * 100}%`, top: 1, paddingLeft: 2, borderLeft: '1px solid rgba(219,227,238,.5)' }}>{tick.label}</span>
                       ))}
                     </div>
-                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 16, background: 'rgba(14,16,20,.62)', color: '#dbe3ee', fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>
+                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 16, background: 'rgba(14,16,20,.62)', color: '#dbe3ee', fontSize: 9.5, fontVariantNumeric: 'tabular-nums' }}>
                       {ticksY.map((tick) => (
                         <span key={tick.at} style={{ position: 'absolute', top: `${(tick.at / comp.H) * 100}%`, left: 1, borderTop: '1px solid rgba(219,227,238,.5)', paddingTop: 1, writingMode: 'vertical-rl' }}>{tick.label}</span>
                       ))}
@@ -1243,7 +1260,7 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
                   <Button sm variant="ghost" icon={Redo2} onClick={redo} disabled={!redoStack.length} style={{ flex: 1 }}>重做</Button>
                   <Button sm variant="ghost" onClick={clearAnno} disabled={!annos.length} style={{ flex: 1 }}>清空</Button>
                 </div>
-                <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.6 }}>
+                <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.6 }}>
                   在左侧图上按住拖拽绘制。文字/序号点击即放置。马赛克/模糊框选区域遮盖敏感内容。<br />快捷键：Ctrl+Z 撤销 · Ctrl+Shift+Z 重做 · Esc 关闭。
                 </div>
               </>
@@ -1287,7 +1304,7 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={groupLabel}>结果</span>
-                      <span className="hv" onClick={() => setAiResults([])} style={{ ...text.faint(), fontSize: 9.5, cursor: 'pointer', marginLeft: 'auto' }}>清空</span>
+                      <span className="hv" onClick={() => setAiResults([])} style={{ ...text.faint(), fontSize: 10, cursor: 'pointer', marginLeft: 'auto' }}>清空</span>
                     </div>
                     {aiResults.map((r) => (
                       <motion.div key={r.id} variants={fadeScaleIn} initial="initial" animate="animate" className="ai-card"
@@ -1297,9 +1314,9 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
                           <span style={{ color: r.err ? sem.danger : accent(0.88), fontSize: FS.small, fontWeight: 700 }}>{r.label}</span>
                           {!r.err && <div style={{ display: 'flex', gap: 9, marginLeft: 'auto' }}>
-                            <span className="hv" onClick={() => onCreateTodo(r.text)} style={{ color: ink(3), fontSize: 9.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><ListChecks size={10} strokeWidth={2} />转待办</span>
-                            <span className="hv" onClick={() => onCreateNote(r.label, r.text)} style={{ color: ink(3), fontSize: 9.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><FileText size={10} strokeWidth={2} />存便签</span>
-                            <span className="hv" onClick={() => copyResult(r.text)} style={{ color: ink(3), fontSize: 9.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Copy size={10} strokeWidth={2} />复制</span>
+                            <span className="hv" onClick={() => onCreateTodo(r.text)} style={{ color: ink(3), fontSize: 10, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><ListChecks size={10} strokeWidth={2} />转待办</span>
+                            <span className="hv" onClick={() => onCreateNote(r.label, r.text)} style={{ color: ink(3), fontSize: 10, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><FileText size={10} strokeWidth={2} />存便签</span>
+                            <span className="hv" onClick={() => copyResult(r.text)} style={{ color: ink(3), fontSize: 10, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Copy size={10} strokeWidth={2} />复制</span>
                           </div>}
                         </div>
                         <div style={{ color: r.err ? sem.danger : ink(1), fontSize: FS.small, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 220, overflow: 'auto' }} className="ai-scroll">{r.text}</div>

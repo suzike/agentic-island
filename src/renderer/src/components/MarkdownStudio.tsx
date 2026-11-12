@@ -428,7 +428,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
     : { card: 'oklch(var(--panel-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a))', fg: ink(1), sub: ink(3), bd: hairline(0.07), btn: fill(2), btnA: semBg(accent(), 0.16), prev: fill(1), panel: fill(1) }
   // 工具栏图标按钮（lucide 图标，明暗自适应；填充制无描边，激活态 0.5px 语义描边）
   const tbtn = (Icon: LucideIcon, tip: string, on: () => void, active?: boolean): React.JSX.Element => (
-    <button key={tip} type="button" className="hv" onClick={on} title={tip} style={{ width: 27, height: 27, padding: 0, borderRadius: R.sm, display: 'grid', placeItems: 'center', cursor: 'pointer', border: active ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: active ? ui.btnA : ui.btn, color: active ? (light ? '#111' : accent()) : ui.fg, opacity: active ? 1 : 0.85, transition: transition('background, border-color, color'), fontFamily: 'inherit', flex: 'none' }}>
+    <button key={tip} type="button" className="hv" onClick={on} title={tip} style={{ width: 28, height: 28, padding: 0, borderRadius: R.sm, display: 'grid', placeItems: 'center', cursor: 'pointer', border: active ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: active ? ui.btnA : ui.btn, color: active ? (light ? '#111' : accent()) : ui.fg, opacity: active ? 1 : 0.85, transition: transition('background, border-color, color'), fontFamily: 'inherit', flex: 'none' }}>
       <Icon size={13} strokeWidth={1.9} />
     </button>
   )
@@ -450,18 +450,18 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
           {tbtn(Target, typewriter ? '打字机模式:开（光标行居中）' : '打字机模式:关', () => setTypewriter((v) => !v), typewriter)}
           {tbtn(Camera, '存版本快照（可回滚）', () => { takeSnap(); setSnapMenu(false) })}
           {snaps.current.length > 0 && (
-            <button type="button" className="hv" onClick={() => setSnapMenu((v) => !v)} title="版本快照列表（点击回滚）" style={{ height: 27, padding: '0 8px', borderRadius: R.sm, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', border: snapMenu ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: snapMenu ? ui.btnA : ui.btn, color: snapMenu ? (light ? '#111' : accent()) : ui.fg, fontFamily: 'inherit', flex: 'none' }}>
+            <button type="button" className="hv" onClick={() => setSnapMenu((v) => !v)} title="版本快照列表（点击回滚）" style={{ height: 28, padding: '0 9px', borderRadius: R.sm, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', border: snapMenu ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: snapMenu ? ui.btnA : ui.btn, color: snapMenu ? (light ? '#111' : accent()) : ui.fg, fontFamily: 'inherit', flex: 'none' }}>
               <History size={13} strokeWidth={1.9} />
-              <span style={{ fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{snaps.current.length}</span>
+              <span style={{ fontSize: 10.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{snaps.current.length}</span>
             </button>
           )}
           {tbtn(Keyboard, '快捷键速查', () => setKeysOpen((v) => !v), keysOpen)}
           {tbtn(HelpCircle, 'Markdown 速查', () => setCheat((v) => !v), cheat)}
-          <button type="button" className="hv" onClick={() => setPowerOpen((v) => !v)} title="高级文档工具" style={{ height: 27, padding: '0 8px', borderRadius: R.sm, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', border: powerOpen ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: powerOpen ? ui.btnA : ui.btn, color: powerOpen ? (light ? '#111' : accent()) : ui.fg, fontFamily: 'inherit', flex: 'none' }}>
+          <button type="button" className="hv" onClick={() => setPowerOpen((v) => !v)} title="高级文档工具" style={{ height: 28, padding: '0 9px', borderRadius: R.sm, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', border: powerOpen ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: powerOpen ? ui.btnA : ui.btn, color: powerOpen ? (light ? '#111' : accent()) : ui.fg, fontFamily: 'inherit', flex: 'none' }}>
             <Wand2 size={13} strokeWidth={1.9} />
-            <span style={{ fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{MARKDOWN_POWER_ACTIONS.length}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{MARKDOWN_POWER_ACTIONS.length}</span>
           </button>
-          <button type="button" className="hv" onClick={() => setAiMenu((v) => !v)} title="AI 增强（对选区/全文）" style={{ height: 27, padding: '0 11px', borderRadius: R.sm, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', border: aiMenu ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: aiMenu ? semBg(accent(), 0.32) : gradient.primary(), color: aiMenu ? accent(0.9) : gradient.onPrimary(), fontSize: FS.small, fontWeight: 700, boxShadow: aiMenu ? 'none' : `0 3px 10px -3px ${accent(0.7, 0.4)}, inset 0 1px 0 rgba(255,255,255,.25)`, fontFamily: 'inherit', flex: 'none' }}>
+          <button type="button" className="hv" onClick={() => setAiMenu((v) => !v)} title="AI 增强（对选区/全文）" style={{ height: 28, padding: '0 12px', borderRadius: R.sm, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', border: aiMenu ? `0.5px solid ${accent(0.7, 0.35)}` : 'none', background: aiMenu ? semBg(accent(), 0.32) : gradient.primary(), color: aiMenu ? accent(0.9) : gradient.onPrimary(), fontSize: FS.small, fontWeight: 700, boxShadow: aiMenu ? 'none' : `0 3px 10px -3px ${accent(0.7, 0.4)}, inset 0 1px 0 rgba(255,255,255,.25)`, fontFamily: 'inherit', flex: 'none' }}>
             <Sparkles size={12} strokeWidth={2} />{aiBusy ? `${aiBusy}…` : 'AI'}
           </button>
           {powerOpen && (
@@ -477,7 +477,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 5 }}>
                 {MARKDOWN_POWER_ACTIONS.filter((x) => x.group === powerGroup).map((action) => (
-                  <button key={action.id} type="button" className="hv" onClick={() => runMarkdownPower(action.id)} title={action.hint} style={{ height: 30, minWidth: 0, padding: '0 7px', borderRadius: R.sm, border: 'none', background: fill(2), color: ink(1), cursor: 'pointer', fontFamily: 'inherit', fontSize: 10, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{action.label}</button>
+                  <button key={action.id} type="button" className="hv" onClick={() => runMarkdownPower(action.id)} title={action.hint} style={{ height: 32, minWidth: 0, padding: '0 8px', borderRadius: R.sm, border: 'none', background: fill(2), color: ink(1), cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{action.label}</button>
                 ))}
               </div>
             </motion.div>
@@ -486,7 +486,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
             <motion.div variants={overlayPop} initial="initial" animate="animate" className="ai-scroll" style={pop({ right: 0, zIndex: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, width: 300, maxHeight: 380, overflowY: 'auto', padding: SP.md })}>
               <div style={{ gridColumn: '1 / -1', ...text.faint(), fontSize: 9.5, marginBottom: 2 }}>选中文字则处理选区，否则处理全文</div>
               {AI_ACTIONS.map((a) => (
-                <div key={a.label} className="hv" onClick={() => void runAI(a)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: R.sm, cursor: 'pointer', background: fill(2), border: 'none', color: ink(1), fontSize: 10.5, fontWeight: 600 }}>
+                <div key={a.label} className="hv" onClick={() => void runAI(a)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px', borderRadius: R.sm, cursor: 'pointer', background: fill(2), border: 'none', color: ink(1), fontSize: 11, fontWeight: 600 }}>
                   <a.icon size={12} strokeWidth={1.9} style={{ color: accentText(0.85), flex: 'none' }} />{a.label}
                 </div>
               ))}
@@ -528,13 +528,13 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
           )}
           {cheat && (
             <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 0, zIndex: 5, width: 260, padding: `${SP.sm}px ${SP.md}px`, display: 'flex', flexDirection: 'column' })}>
-              {CHEATS.map(([syn, desc], i) => <div key={desc} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10, padding: '4.5px 2px', borderTop: i > 0 ? `0.5px solid ${hairline(0.07)}` : 'none' }}><code style={{ ...text.mono(10), color: accentText(0.85) }}>{syn}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
+              {CHEATS.map(([syn, desc], i) => <div key={desc} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, padding: '5px 2px', borderTop: i > 0 ? `0.5px solid ${hairline(0.07)}` : 'none' }}><code style={{ ...text.mono(10.5), color: accentText(0.85) }}>{syn}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
             </motion.div>
           )}
           {keysOpen && (
             <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ left: 60, zIndex: 5, width: 280, padding: `${SP.sm}px ${SP.md}px`, display: 'flex', flexDirection: 'column' })}>
               <div style={{ ...text.overline(), display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2, padding: '2px 2px 5px' }}><Keyboard size={11} strokeWidth={2} style={{ color: accentText() }} />快捷键</div>
-              {KEYS.map(([k, desc]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10, padding: '4.5px 2px', borderTop: `0.5px solid ${hairline(0.07)}` }}><code style={{ ...text.mono(10), color: accentText(0.85) }}>{k}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
+              {KEYS.map(([k, desc]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, padding: '5px 2px', borderTop: `0.5px solid ${hairline(0.07)}` }}><code style={{ ...text.mono(10.5), color: accentText(0.85) }}>{k}</code><span style={{ color: ink(3) }}>{desc}</span></div>)}
             </motion.div>
           )}
           {snapMenu && snaps.current.length > 0 && (
@@ -543,8 +543,8 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
               {snaps.current.map((sn) => (
                 <div key={sn.t} className="hv" onClick={() => restoreSnap(sn)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5.5px 8px', borderRadius: R.sm, cursor: 'pointer', borderTop: `0.5px solid ${hairline(0.07)}` }}>
                   <span style={{ ...text.mono(10), color: ink(1), fontWeight: 700 }}>{new Date(sn.t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span>
-                  <span style={{ flex: 1, color: ink(2), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sn.title}</span>
-                  <span style={{ color: ink(4), fontSize: 9 }}>{sn.md.length} 字</span>
+                  <span style={{ flex: 1, color: ink(2), fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sn.title}</span>
+                  <span style={{ color: ink(4), fontSize: 10 }}>{sn.md.length} 字</span>
                 </div>
               ))}
             </motion.div>
@@ -603,7 +603,7 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
           </div>
           <input value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true) }} placeholder="文档标题" style={{ flex: 1, minWidth: 120, background: 'transparent', border: 'none', outline: 'none', color: ui.fg, fontSize: FS.subtitle, fontWeight: 700, fontFamily: 'inherit' }} />
           {dirty && <span title="未保存" style={{ width: 7, height: 7, borderRadius: 999, background: sem.warn, boxShadow: `0 0 7px ${sem.warn}`, flex: 'none' }} />}
-          {filePath && <span title={filePath} style={{ color: ui.sub, fontSize: 9.5, flex: 'none', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={11} strokeWidth={1.9} />{filePath.split(/[\\/]/).pop()}</span>}
+          {filePath && <span title={filePath} style={{ color: ui.sub, fontSize: 10, flex: 'none', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }}><FileText size={11} strokeWidth={1.9} />{filePath.split(/[\\/]/).pop()}</span>}
           <Segmented<Mode>
             value={mode}
             onChange={setMode}
@@ -625,10 +625,10 @@ export function MarkdownStudio({ open, initial, onClose, onSave, onAI, llmReady 
             {tbtn(FileDown, '导出 PDF/HTML/TXT/MD', () => setExportMenu((v) => !v), exportMenu)}
             {exportMenu && (
               <motion.div variants={overlayPop} initial="initial" animate="animate" style={pop({ right: 0, zIndex: 7, width: 176, padding: SP.sm + 1, display: 'flex', flexDirection: 'column', gap: 2 })}>
-                <div style={{ ...text.overline(), fontSize: 8.5, padding: '2px 5px' }}>样式主题（PDF/HTML）</div>
+                <div style={{ ...text.overline(), fontSize: 9.5, padding: '2px 5px' }}>样式主题（PDF/HTML）</div>
                 <div style={{ display: 'flex', gap: 3, padding: '0 3px 4px' }}>
                   {(Object.entries(EXPORT_THEMES) as [typeof exportTheme, { label: string }][]).map(([k, t]) => (
-                    <div key={k} className="hv" onClick={() => setExportTheme(k)} style={{ flex: 1, textAlign: 'center', padding: '3px 0', borderRadius: R.sm, cursor: 'pointer', background: exportTheme === k ? semBg(accent(), 0.22) : fill(2), border: `0.5px solid ${exportTheme === k ? accent(0.7, 0.3) : 'transparent'}`, color: exportTheme === k ? accent(0.88) : ink(2), fontSize: 9.5, fontWeight: 600 }}>{t.label}</div>
+                    <div key={k} className="hv" onClick={() => setExportTheme(k)} style={{ flex: 1, textAlign: 'center', padding: '4px 0', borderRadius: R.sm, cursor: 'pointer', background: exportTheme === k ? semBg(accent(), 0.22) : fill(2), border: `0.5px solid ${exportTheme === k ? accent(0.7, 0.3) : 'transparent'}`, color: exportTheme === k ? accent(0.88) : ink(2), fontSize: 10, fontWeight: 600 }}>{t.label}</div>
                   ))}
                 </div>
                 {([['pdf', 'PDF', FileText], ['html', 'HTML', Globe], ['txt', 'TXT', FileText], ['md', 'Markdown', FileDown]] as const).map(([k, l, Icon], i) => (

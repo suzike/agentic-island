@@ -31,6 +31,8 @@ export interface WorktreeBaseline {
   files: BaselineFile[]
   /** 脏文件超过上限：超出部分不纳入归属判断 */
   truncated?: boolean
+  /** 上一次计算结果：工作区签名没变时直接复用，省掉逐文件读内容 + git diff */
+  cache?: { sig: string; summary: ChangeSummary | null }
 }
 
 const sha1 = (buf: Buffer): string => createHash('sha1').update(buf).digest('hex')
@@ -128,6 +130,43 @@ const numstatHead = (cwd: string, paths: string[]): Promise<{ added: number; rem
     })
   })
 
+/** 会话期间提交掉的文件：用基线 HEAD → 当前 HEAD 的区间统计 */
+const numstatRange = (cwd: string, from: string, to: string, paths: string[]): Promise<{ added: number; removed: number }> =>
+  new Promise((resolve) => {
+    execFile('git', ['diff', '--numstat', from, to, '--', ...paths], { cwd, windowsHide: true, timeout: 15000, maxBuffer: 4 * 1024 * 1024 }, (_err, stdout) => {
+      let added = 0
+      let removed = 0
+      for (const line of stdout.toString().split('\n')) {
+        const [add, del] = line.split('\t')
+        if (/^\d+$/.test(add || '') && /^\d+$/.test(del || '')) {
+          added += Number(add)
+          removed += Number(del)
+        }
+      }
+      resolve({ added, removed })
+    })
+  })
+
+/** `git diff --name-status -z` → 路径与状态字母（重命名取新路径） */
+export function parseNameStatusZ(out: string): { path: string; status: string }[] {
+  const parts = out.split('\0').filter(Boolean)
+  const list: { path: string; status: string }[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const status = parts[i]
+    if (!/^[A-Z]\d*$/.test(status)) continue
+    const path = parts[i + 1]
+    if (!path) break
+    i += 1
+    if (status.startsWith('R') || status.startsWith('C')) {
+      const next = parts[i + 1]
+      if (next) { list.push({ path: next, status: status[0] }); i += 1 }
+      continue
+    }
+    list.push({ path, status })
+  }
+  return list
+}
+
 /** 新文件行数（二进制/不可读返回 0） */
 async function countLines(abs: string): Promise<number> {
   try {
@@ -148,7 +187,27 @@ async function countLines(abs: string): Promise<number> {
 export async function diffSinceBaseline(baseline: WorktreeBaseline): Promise<ChangeSummary | null> {
   const { cwd } = baseline
   if ((await gitOut(cwd, ['rev-parse', '--is-inside-work-tree'])).trim() !== 'true') return null
-  const current = parsePorcelainZ(await gitOut(cwd, ['status', '--porcelain=v1', '-z', '-uall']))
+  const statusOut = await gitOut(cwd, ['status', '--porcelain=v1', '-z', '-uall'])
+  const current = parsePorcelainZ(statusOut)
+  const headNow = (await gitOut(cwd, ['rev-parse', 'HEAD'])).trim()
+
+  // 签名只用"状态 + HEAD + 每个脏文件的 size/mtime"，不做内容读取：
+  // 没变化时直接复用上次结果，多轮会话不必反复 hash 全部脏文件。
+  const stamp = await Promise.all(current.slice(0, MAX_REPORT_FILES).map(async (entry) => {
+    try {
+      const st = await stat(join(cwd, entry.path))
+      return `${entry.path}:${st.size}:${st.mtimeMs}`
+    } catch {
+      return `${entry.path}:missing`
+    }
+  }))
+  const sig = sha1(Buffer.from(`${headNow}\n${statusOut}\n${stamp.join('\n')}`))
+  if (baseline.cache?.sig === sig) return baseline.cache.summary
+  const remember = (summary: ChangeSummary | null): ChangeSummary | null => {
+    baseline.cache = { sig, summary }
+    return summary
+  }
+
   const baseMap = new Map(baseline.files.map((f) => [f.path, f]))
   const changed: { path: string; status: string; base?: BaselineFile }[] = []
   const seen = new Set<string>()
@@ -167,11 +226,19 @@ export async function diffSinceBaseline(baseline: WorktreeBaseline): Promise<Cha
     if (fp.hash === base.hash) continue
     changed.push({ path: base.path, status: fp.hash === 'missing' ? 'D' : 'M', base })
   }
-  if (changed.length === 0) return null
+  // 会话期间被提交掉的改动：工作区已经干净，只看 git status 会整段漏掉
+  const committed: { path: string; status: string }[] = []
+  if (baseline.head && headNow && headNow !== baseline.head) {
+    const inWorktree = new Set(changed.map((c) => c.path))
+    for (const item of parseNameStatusZ(await gitOut(cwd, ['diff', '--name-status', '-z', baseline.head, headNow]))) {
+      if (!inWorktree.has(item.path)) committed.push(item)
+    }
+  }
+  if (changed.length === 0 && committed.length === 0) return remember(null)
 
   let added = 0
   let removed = 0
-  const paths: { path: string; status: string }[] = []
+  const paths: { path: string; status: string; committed?: boolean }[] = []
   const dir = await mkdtemp(join(tmpdir(), 'aiisland-baseline-'))
   const empty = join(dir, 'empty')
   const before = join(dir, 'before')
@@ -199,6 +266,13 @@ export async function diffSinceBaseline(baseline: WorktreeBaseline): Promise<Cha
       }
       paths.push({ path: item.path, status: item.status })
     }
+    if (committed.length > 0 && baseline.head) {
+      const slice = committed.slice(0, MAX_REPORT_FILES)
+      const sum = await numstatRange(cwd, baseline.head, headNow, slice.map((c) => c.path))
+      added += sum.added
+      removed += sum.removed
+      for (const item of slice) paths.push({ path: item.path, status: item.status, committed: true })
+    }
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {})
   }
@@ -209,5 +283,5 @@ export async function diffSinceBaseline(baseline: WorktreeBaseline): Promise<Cha
   const commits = baseline.head
     ? Number((await gitOut(cwd, ['rev-list', '--count', `${baseline.head}..HEAD`])).trim() || 0)
     : 0
-  return { files: paths.length, added, removed, commit, paths, commits: commits || undefined }
+  return remember({ files: paths.length, added, removed, commit, paths, commits: commits || undefined })
 }

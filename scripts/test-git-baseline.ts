@@ -59,6 +59,12 @@ async function run(): Promise<void> {
   // 同一基线重复计算应稳定（工作区没再变）
   const again = await diffSinceBaseline(baseline!)
   ok(again?.files === 5 && again?.added === 4, '同一基线重复计算稳定')
+  ok(again === summary, '工作区没变时命中缓存（返回同一结果）')
+
+  // 改动一个文件：签名变化，缓存失效并重算
+  writeFileSync(join(repo, 'c.txt'), 'c1\nc2\nc3\n')
+  const afterEdit = await diffSinceBaseline(baseline!)
+  ok(afterEdit !== again && afterEdit?.added === 5, '文件变化后缓存失效并重算')
 
   // 会话级追踪器：ensure 之后 summary 走基线
   const changes = new SessionChanges(captureBaseline, diffSinceBaseline)
@@ -77,6 +83,33 @@ async function run(): Promise<void> {
   changes.forget('claude-code:s1')
 
   rmSync(repo2, { recursive: true, force: true })
+
+  // 会话期间提交掉的改动：工作区已干净，仍要计入清单
+  const repo3 = mkdtempSync(join(tmpdir(), 'aiisland-baseline-test3-'))
+  const git3 = (...args: string[]): string => execFileSync('git', args, { cwd: repo3, encoding: 'utf8' })
+  git3('init', '-q')
+  git3('config', 'user.email', 'test@example.com')
+  git3('config', 'user.name', 'Test')
+  writeFileSync(join(repo3, 'c.txt'), 'c1\n')
+  git3('add', '-A')
+  git3('commit', '-qm', 'init')
+  const base3 = await captureBaseline(repo3)
+  writeFileSync(join(repo3, 'c.txt'), 'c1\nc2\n')
+  writeFileSync(join(repo3, 'new.txt'), 'n1\nn2\n')
+  git3('add', '-A')
+  git3('commit', '-qm', 'agent work')
+  const committedSummary = await diffSinceBaseline(base3!)
+  const committedPaths = (committedSummary?.paths || []).map((p) => p.path).sort()
+  ok(JSON.stringify(committedPaths) === JSON.stringify(['c.txt', 'new.txt']), `已提交的改动也进清单：${committedPaths.join(',')}`)
+  ok((committedSummary?.paths || []).every((p) => p.committed === true), '已提交文件带 committed 标记')
+  ok(committedSummary?.added === 3, `已提交改动行数正确（实际 ${committedSummary?.added}）`)
+  ok(committedSummary?.commits === 1, '提交数仍然如实记录')
+
+  // 提交后再改工作区：签名变化，旧缓存不能盖住新改动
+  writeFileSync(join(repo3, 'c.txt'), 'c1\nc2\nc3\n')
+  const afterCommitEdit = await diffSinceBaseline(base3!)
+  ok(afterCommitEdit !== committedSummary && afterCommitEdit?.added === 3, '提交后再改工作区仍能算出增量')
+  rmSync(repo3, { recursive: true, force: true })
 }
 
 run()

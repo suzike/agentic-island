@@ -21,7 +21,7 @@ try {
 }
 
 const plan = `## 目标
-为 API 网关增加请求限流，防止突发流量打垮下游服务。
+为 API 网关增加请求限流，防止突发流量打垮下游服务（SourceID: SWR-101）。
 
 ## 实施步骤
 1. **引入令牌桶中间件** —— 基于 Redis 的分布式令牌桶（\`rate-limiter-flexible\`）

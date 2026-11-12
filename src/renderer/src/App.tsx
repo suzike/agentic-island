@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import type { AgentCliEvent, ApprovalAuditEntry, ApprovalPolicy, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo, UpdateState } from '../../shared/protocol'
-import type { AcceptanceRecord, ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, AutomationRule, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
+import type { VerificationRules } from '../../shared/verification'
+import type { AcceptanceGate, AcceptanceRecord, ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, AutomationRule, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
 import { DEFAULT_QUICK_PROMPTS } from './logic/prompts'
@@ -36,7 +37,7 @@ import { DEFAULT_POMO, POMO_IDLE, nextPhase, startWork, phaseLabel, remainSecs, 
 import { todoSystemPrompt, parseAiTodos } from './logic/todoAi'
 import { AgentsTab } from './components/AgentsTab'
 import { AcceptTab } from './components/AcceptTab'
-import { archiveFromAgent, shouldArchive } from './logic/acceptance'
+import { archiveFromAgent, compactAcceptance, declaredVerifications, mergeFollowup, shouldArchive } from './logic/acceptance'
 import { AskTab } from './components/AskTab'
 import { TodoTab } from './components/TodoTab'
 import { NotesTab } from './components/NotesTab'
@@ -102,6 +103,10 @@ export function App(): React.JSX.Element {
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null)
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>({ enabled: false, rules: [] })
+  // 验收规则：内置判定之外的补充片段（全局 + 按项目），随 save-state 同步到主进程
+  const [verificationRules, setVerificationRules] = useState<VerificationRules>({})
+  // 验收门禁：退出码全 0 / 最少验证条数 / 受保护路径
+  const [acceptanceGate, setAcceptanceGate] = useState<AcceptanceGate>({ requireExitZero: false, minChecks: 0, forbiddenPaths: [] })
   const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>([])
   const [bridgeConnected, setBridgeConnected] = useState(false)
 
@@ -337,6 +342,8 @@ export function App(): React.JSX.Element {
         if (Array.isArray(s.repoBookmarks)) setRepoBookmarks(s.repoBookmarks as GitHubRepo[])
         if (Array.isArray(s.shortcuts)) setShortcuts(s.shortcuts as ShortcutDef[])
         if (s.approvalPolicy && typeof s.approvalPolicy === 'object') setApprovalPolicy(s.approvalPolicy as ApprovalPolicy)
+        if (s.verificationRules && typeof s.verificationRules === 'object') setVerificationRules(s.verificationRules as VerificationRules)
+        if (s.acceptanceGate && typeof s.acceptanceGate === 'object') setAcceptanceGate(s.acceptanceGate as AcceptanceGate)
         if (Array.isArray(s.automations)) setAutomations(normalizeAutomationRules(s.automations))
         if (s.askEngine === 'llm' || s.askEngine === 'claude' || s.askEngine === 'codex') setAskEngine(s.askEngine)
         if (typeof s.agentCwd === 'string') setAgentCwd(s.agentCwd)
@@ -398,6 +405,11 @@ export function App(): React.JSX.Element {
 
   const agents: AgentVM[] = useMemo(() => snap.agents.map((a) => ({ ...a })), [snap])
   const activeProject = useMemo(() => workbenchProjects.find((p) => p.id === activeProjectId), [workbenchProjects, activeProjectId])
+  // 验收规则可配置的项目名：工作台项目 + 留档记录里出现过的仓库
+  const knownProjects = useMemo(
+    () => [...new Set([...workbenchProjects.map((p) => p.name), ...acceptance.map((r) => r.proj)])].filter(Boolean).sort(),
+    [workbenchProjects, acceptance]
+  )
 
   const createWorkbenchProject = useCallback((name: string, repoPath = ''): void => {
     const existing = workbenchProjects.find((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase() || (!!repoPath.trim() && p.repoPath?.toLowerCase() === repoPath.trim().toLowerCase()))
@@ -482,8 +494,14 @@ export function App(): React.JSX.Element {
     const fresh = ended.filter(shouldArchive)
     if (fresh.length === 0) return
     setAcceptance((list) => {
+      const existing = new Map(list.map((r) => [r.id, r]))
+      // 同一会话续跑（补验证）后再次结束：并进原记录，保留原始计划与改动
+      const next = fresh.map((a) => {
+        const prevRecord = existing.get(a.id)
+        return prevRecord ? mergeFollowup(prevRecord, a) : archiveFromAgent(a)
+      })
       const ids = new Set(fresh.map((a) => a.id))
-      return [...fresh.map((a) => archiveFromAgent(a)), ...list.filter((r) => !ids.has(r.id))].slice(0, 60)
+      return [...next, ...list.filter((r) => !ids.has(r.id))].slice(0, 60)
     })
   }, [snap])
 
@@ -675,6 +693,8 @@ export function App(): React.JSX.Element {
     island.saveState({
       settings,
       approvalPolicy,
+      verificationRules,
+      acceptanceGate,
       automations,
       soundMap,
       activeMonitor,
@@ -720,7 +740,8 @@ export function App(): React.JSX.Element {
       // 复盘：活动流水（近 14 天封顶 300 条）+ 已生成的复盘/周报
       activityLog: activityLog.filter((a) => a.ts >= Date.now() - 14 * 86400_000).slice(0, 300),
       // 验收台：最近 60 条会话留档（含人工处置状态）
-      acceptance: acceptance.slice(0, 60),
+      // 只压持久化副本：最近 10 条保留全文，旧的截短计划/回复/输出，避免 config.json 无限膨胀
+      acceptance: compactAcceptance(acceptance),
       reviews,
       // 番茄钟：进行中的计时（跨重启续上）+ 每日完成计数
       pomo: pomo.phase === 'idle' ? undefined : pomo,
@@ -732,7 +753,7 @@ export function App(): React.JSX.Element {
         providerCatalogVersion: llm.providerCatalogVersion
       }
     })
-  }, [settings, approvalPolicy, automations, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, acceptance, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
+  }, [settings, approvalPolicy, verificationRules, acceptanceGate, automations, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, acceptance, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
 
   // 字体与缩放应用（--font 变量 + 主进程 zoomFactor）
   useEffect(() => {
@@ -976,6 +997,11 @@ export function App(): React.JSX.Element {
     setRevealed(true)
     if (target === 'studio') { setShotStudioMode('image'); setShotStudio(dataUrl) }
     else setShotImg(dataUrl)
+  }), [])
+  useEffect(() => island.onOpenRecorder(() => {
+    setRevealed(true)
+    setShotStudioMode('record')
+    setShotStudio(RECORDING_STUDIO_CONTEXT)
   }), [])
   /**
    * 抓一张整屏原生截图（主进程藏岛+挑源，渲染层用媒体流取像素）。
@@ -2854,11 +2880,41 @@ export function App(): React.JSX.Element {
               <AcceptTab
                 plans={pending.filter((a) => a.isPlan)}
                 records={acceptance}
+                gate={acceptanceGate}
                 onDecide={decide}
                 onJump={jump}
                 onJumpRecord={jumpRecord}
-                onMark={(id, status) => setAcceptance((list) => list.map((r) => r.id === id ? { ...r, status, markedAt: status === 'pending' ? undefined : Date.now() } : r))}
+                onMark={(id, status, violations) => setAcceptance((list) => list.map((r) => r.id === id ? {
+                  ...r,
+                  status,
+                  markedAt: status === 'pending' ? undefined : Date.now(),
+                  // 带未满足项仍然验收：留痕，后续复盘/凭证能看到
+                  gateOverride: status === 'accepted' && violations?.length ? { at: Date.now(), violations } : undefined
+                } : r))}
                 onRemove={(id) => setAcceptance((list) => list.filter((r) => r.id !== id))}
+                onPlanToTodos={(record, texts) => {
+                  const existing = new Set(todos.map((t) => t.text.trim()))
+                  const unique = [...new Set(texts.map((text) => text.trim()).filter(Boolean))].filter((text) => !existing.has(text))
+                  if (unique.length === 0) return 0
+                  // 计划声明的验证方式直接作为待办的验收标准，避免"做完了"没有判据
+                  const bar = declaredVerifications(record.plan?.text || '').join('；').slice(0, 300)
+                  todoBulkAdd(unique.map((text) => ({
+                    text: text.slice(0, 200),
+                    note: `来自验收计划 · ${record.proj}`,
+                    project: record.proj,
+                    acceptance: bar || undefined,
+                    tags: ['验收']
+                  })))
+                  return unique.length
+                }}
+                onSaveCertificate={(record, markdown) => {
+                  const now = Date.now()
+                  noteAddFull({
+                    id: now, emoji: '✅', title: `验收凭证 · ${record.proj}`.slice(0, 40),
+                    md: markdown, color: 'emerald', tags: ['验收', record.proj],
+                    createdAt: now, updatedAt: now
+                  })
+                }}
                 waitSecs={waitSecs}
               />
             )}
@@ -2974,6 +3030,7 @@ export function App(): React.JSX.Element {
                 pomoDone={pomoDone}
                 morning={morningInput}
                 reviews={reviews}
+                acceptance={acceptance}
                 onSaveReview={(k, md) => setReviews((r) => ({ ...r, [k]: md }))}
                 onGenerate={(system, user) => island.llmComplete({ baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: llm.model }, system, user, true)}
                 onSaveToNotes={(md) => {
@@ -3034,6 +3091,8 @@ export function App(): React.JSX.Element {
                 runtimeInfo={runtimeInfo} bridgeConnected={bridgeConnected}
                 updateState={updateState} onCheckUpdates={() => island.checkForUpdates()} onInstallUpdate={() => island.installUpdate()}
                 approvalPolicy={approvalPolicy} onSetApprovalPolicy={setApprovalPolicy} approvalAudit={approvalAudit}
+                verificationRules={verificationRules} onSetVerificationRules={setVerificationRules} knownProjects={knownProjects}
+                acceptanceGate={acceptanceGate} onSetAcceptanceGate={setAcceptanceGate}
                 activeAgents={agents.filter((a) => a.status !== 'done').length} totalAgents={agents.length}
                 settings={settings} onToggle={toggleSetting}
                 soundMap={soundMap} soundPickerOpen={soundPickerOpen} onToggleSoundPicker={() => settings.sound && setSoundPickerOpen((v) => !v)} onSetSound={setSoundFor} onPreviewSound={previewSound}

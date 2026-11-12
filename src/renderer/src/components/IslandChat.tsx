@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowUp, Brain, Camera, Check, ChevronDown, Copy, CornerDownRight, Database, Download, EyeOff, GitFork, GitMerge, Image as ImageIcon, Library, ListTree, MoreHorizontal, Paperclip, Pin, Quote, RefreshCw, Scale, Settings, ShieldCheck, Sparkles, Square, Users, WandSparkles, Wrench, X } from 'lucide-react'
+import { ArrowUp, ArrowUpRight, Brain, Camera, Check, ChevronDown, Copy, CornerDownRight, Database, Download, EyeOff, GitFork, GitMerge, Image as ImageIcon, Library, ListTree, MoreHorizontal, Paperclip, Pin, Quote, RefreshCw, Scale, Settings, ShieldCheck, Sparkles, Square, Users, WandSparkles, Wrench, X } from 'lucide-react'
 import type { AnswerAnalysis, AnswerAnalysisAction, Block, ChatMessage, ChatProps, QuoteRef } from '../types'
 import { Markdown, Collapsible } from './Markdown'
 import { blocksToText, conversationContextStats } from '../logic/chat'
@@ -201,15 +201,26 @@ function AnswerVariants({ variants, onAdopt }: { variants: NonNullable<ChatMessa
   if (!current) return <></>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 3, paddingTop: 7, borderTop: `0.5px solid ${hairline(0.09)}` }}>
-      <div className="ai-scroll" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 1 }}>
-        {variants.map((variant) => (
-          <Chip key={variant.id} active={variant.id === current.id} onClick={() => setActive(variant.id)} style={{ flex: 'none', maxWidth: 170 }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{variant.label}</span>
-          </Chip>
-        ))}
-        {onAdopt && <Chip icon={Check} onClick={() => onAdopt(current.id)} style={{ flex: 'none' }}>采用</Chip>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <div className="ai-scroll" style={{ display: 'flex', flex: 1, gap: 5, overflowX: 'auto', paddingBottom: 1, minWidth: 0 }}>
+          {variants.map((variant) => (
+            <Chip key={variant.id} active={variant.id === current.id} onClick={() => setActive(variant.id)} style={{ flex: 'none', maxWidth: 170 }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{variant.label}</span>
+            </Chip>
+          ))}
+        </div>
+        {onAdopt && (
+          <button
+            onClick={() => onAdopt(current.id)}
+            title="把这一版作为主回答，后续对话沿用它"
+            className="hv"
+            style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 3, border: 'none', background: 'transparent', color: accentText(0.88), fontSize: FS.tiny, fontWeight: 650, fontFamily: 'var(--font)', padding: '2px 6px', borderRadius: R.sm, cursor: 'pointer' }}
+          >
+            <Check size={10} strokeWidth={2.4} />采用
+          </button>
+        )}
       </div>
-      <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 7, background: fill(1), border: `0.5px solid ${hairline(0.06)}`, borderRadius: R.md }}>
         <AnswerBody blocks={current.blocks} />
       </div>
     </div>
@@ -223,7 +234,7 @@ function AnswerAnalyses({ items }: { items: AnswerAnalysis[] }): React.JSX.Eleme
   if (!current) return <></>
   const method = current.action === 'council' ? undefined : analysisMethodById(current.action)
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 8, ...surface.inset(), borderRadius: R.md }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 8, background: fill(1), border: `0.5px solid ${hairline(0.06)}`, borderRadius: R.md }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
         <ShieldCheck size={11} strokeWidth={1.9} style={{ color: accentText(), flex: 'none' }} />
         <span style={{ color: ink(2), fontSize: FS.tiny, fontWeight: 700 }}>气泡分析</span>
@@ -818,13 +829,13 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                     )
                   })()}
                   {(m.suggestions?.length || 0) > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 3 }}>
-                      <span style={{ ...text.overline() }}>可继续追问</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingTop: 3 }}>
+                      <span style={{ ...text.overline(), marginBottom: 2 }}>可继续追问</span>
                       {m.suggestions!.map((suggestion) => (
-                        <button key={suggestion} onClick={() => p.onUseSuggestion?.(suggestion)} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, border: 'none', background: fill(2), borderRadius: R.sm, color: ink(2), padding: '6px 8px', textAlign: 'left', fontSize: FS.tiny, lineHeight: 1.4, cursor: 'pointer', fontFamily: 'var(--font)' }}>
-                          <CornerDownRight size={10} strokeWidth={2} style={{ flex: 'none', marginTop: 2, color: accentText() }} />
-                          <span style={{ flex: 1 }}>{suggestion}</span>
-                          <span style={{ ...text.faint(), fontSize: 9, whiteSpace: 'nowrap' }}>填入主输入框</span>
+                        <button key={suggestion} onClick={() => p.onUseSuggestion?.(suggestion)} title="填入主输入框" className="hv" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', borderRadius: R.sm, color: ink(2), padding: '5px 6px', textAlign: 'left', fontSize: FS.tiny, lineHeight: 1.45, cursor: 'pointer', fontFamily: 'var(--font)' }}>
+                          <CornerDownRight size={10} strokeWidth={2} style={{ flex: 'none', color: accentText(0.82) }} />
+                          <span style={{ flex: 1, minWidth: 0 }}>{suggestion}</span>
+                          <ArrowUpRight size={11} strokeWidth={1.9} style={{ flex: 'none', color: ink(4) }} />
                         </button>
                       ))}
                     </div>
@@ -920,7 +931,6 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedAnswerMethod?.label || '默认回答'}</span>
               </Chip>
               {selectedAnswerMethod && <span style={{ minWidth: 0, flex: 1, ...text.faint(), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedAnswerMethod.outcome}</span>}
-              {!selectedAnswerMethod && <span style={{ flex: 1, ...text.faint(), fontSize: 9.5 }}>不套用方法模板</span>}
               {selectedAnswerMethod && <IconButton icon={X} title="恢复默认回答" size={22} onClick={() => p.onAnswerMethodChange?.(undefined)} style={{ flex: 'none' }} />}
             </div>
             {answerMethodOpen && (

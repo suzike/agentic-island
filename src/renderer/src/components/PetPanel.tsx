@@ -46,8 +46,10 @@ export function PetPanel({ pomoDone, todos, activities }: { pomoDone: Record<str
       {/* 进化路线 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'space-between' }}>
         {STAGES.map((s, i) => (
-          <div key={i} title={i <= pet.stage ? `${s.name} · Lv.${s.min}+（已解锁）` : `${s.name} · Lv.${s.min}+ 解锁`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: i <= pet.stage ? 1 : 0.3, filter: i <= pet.stage ? undefined : 'grayscale(1)' }}>
-            <span style={{ fontSize: i === pet.stage ? 18 : 14, lineHeight: 1, transition: 'all .3s' }}>{s.emoji}</span>
+          <div key={i} title={i <= pet.stage ? `${s.name} · Lv.${s.min}+（已解锁）` : `${s.name} · Lv.${s.min}+ 解锁`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, minHeight: 22 }}>
+            {i <= pet.stage
+              ? <span style={{ fontSize: i === pet.stage ? 18 : 13, lineHeight: 1, transition: 'all .3s' }}>{s.emoji}</span>
+              : <span style={{ width: 4, height: 4, borderRadius: 999, background: hairline(0.3) }} />}
             {i === pet.stage && <span style={{ width: 4, height: 4, borderRadius: 999, background: accent(.78) }} />}
           </div>
         ))}

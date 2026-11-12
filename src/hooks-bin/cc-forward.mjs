@@ -15,13 +15,14 @@ const BRIDGE_FILE = process.env.AIISLAND_BRIDGE_FILE || join(homedir(), '.agenti
 const EVENTS_LOG = join(homedir(), '.agentic-island', 'events.log')
 // 验证命令的起跑时刻：PreToolUse 落盘、PostToolUse 读取并删除，用来给"耗时"一个真实数字
 const TOOL_START_DIR = join(homedir(), '.agentic-island', 'tool-start')
-// 与 src/renderer/src/logic/acceptance.ts 的 CHECK_CMD 保持同步（这里只决定"值不值得记结果"）
-const VERIFY_CMD = /(npm (?:run )?(?:test|build)|pnpm (?:test|build)|yarn (?:test|build)|vitest|jest|pytest|playwright|go test|cargo (?:test|build)|tsc\b|typecheck|eslint|lint)/i
 // 目录里只留少量近期文件；超过 2 小时的起跑标记视为被拒绝/中断的残留
 const pruneToolStarts = () => {
   try {
+    const names = readdirSync(TOOL_START_DIR)
+    // 目录不大就不逐个 stat：每次 Bash 都会走到这里，避免高频 IO
+    if (names.length <= 200) return
     const cutoff = Date.now() - 2 * 60 * 60 * 1000
-    for (const name of readdirSync(TOOL_START_DIR)) {
+    for (const name of names) {
       const p = join(TOOL_START_DIR, name)
       try { if (statSync(p).mtimeMs < cutoff) unlinkSync(p) } catch { /* */ }
     }
@@ -179,7 +180,8 @@ async function main() {
     }
     // 验证/构建命令先记起跑时刻，PostToolUse 回来时才能给出真实耗时
     const cmd = tool === 'Bash' ? String((input.tool_input || {}).command || (input.tool_input || {}).cmd || '') : ''
-    if (cmd && VERIFY_CMD.test(cmd)) stampToolStart(cmd)
+    // 所有 Bash 命令都记起跑时刻：是不是"验证命令"由主进程按统一规则判定
+    if (cmd) stampToolStart(cmd)
     await report(bridge, { backend, kind: 'activity', sessionId, cwd, tool, detail: activityDetail(tool) })
     process.exit(0)
   }
@@ -264,7 +266,7 @@ async function main() {
     const tool = input.tool_name || ''
     const ti = input.tool_input || {}
     const cmd = tool === 'Bash' ? String(ti.command || ti.cmd || '') : ''
-    if (cmd && VERIFY_CMD.test(cmd)) {
+    if (cmd) {
       // Claude Code 的 tool_response 只有 stdout/stderr/interrupted/isImage —— 没有退出码，
       // 所以这里只填能拿到的字段；缺退出码就不编一个。
       const resp = input.tool_response || {}

@@ -7,6 +7,28 @@ export interface AgentVM extends AgentState {
   demo?: boolean
 }
 
+/** 验收门禁：项目级的最低要求，未满足时「标记已验收」需要二次确认 */
+export interface AcceptanceGate {
+  /** 有验证命令时必须全部退出 0 */
+  requireExitZero: boolean
+  /** 至少要有的验证记录条数（0 = 不要求） */
+  minChecks: number
+  /** 全局受保护路径（相对仓库根；目录以 / 结尾，或用 * 结尾表示前缀） */
+  forbiddenPaths: string[]
+  /** 项目 → 该项目额外的受保护路径 */
+  byProject?: Record<string, string[]>
+}
+
+/** 一次补验证（续跑同一会话）的增量证据 */
+export interface AcceptanceFollowup {
+  at: number
+  /** 岛内续跑进程的退出码 */
+  exitCode?: number
+  checks?: CommandRun[]
+  summary?: ChangeSummary
+  lastReply?: string
+}
+
 /** 验收台留档的一次 Agent 会话：会话从快照消失时落账，供"计划 → 实际改动 → 未验证项"对照 */
 export interface AcceptanceRecord {
   id: string
@@ -32,6 +54,12 @@ export interface AcceptanceRecord {
   /** 人工处置：pending=待核对 / accepted=已验收 / followup=待跟进 */
   status: 'pending' | 'accepted' | 'followup'
   markedAt?: number
+  /** 同一会话的后续补验证（Claude --resume / Codex exec resume 都复用同一 session id） */
+  followups?: AcceptanceFollowup[]
+  /** 岛接上时会话已在运行：基线晚于会话开始，清单可能不完整 */
+  baselineLate?: boolean
+  /** 门禁未满足但仍然验收：留痕（时间 + 当时未满足的项） */
+  gateOverride?: { at: number; violations: string[] }
 }
 
 /** 待办事项：到时自动弹岛提醒 */
