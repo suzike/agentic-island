@@ -38,11 +38,11 @@ interface ReviewTabProps {
 function Stat({ n, label }: { n: number | string; label: string }): React.JSX.Element {
   return (
     <div style={{
-      flex: 1, minWidth: 74, padding: '9px 10px', ...surface.inset(),
+      flex: 1, minWidth: 74, padding: '10px 11px', ...surface.card(),
       display: 'flex', flexDirection: 'column', gap: 3
     }}>
-      <span style={{ ...text.num(18), lineHeight: 1 }}>{n}</span>
-      <span style={{ ...text.faint(), fontSize: 10 }}>{label}</span>
+      <span style={{ ...text.num(19), lineHeight: 1 }}>{n}</span>
+      <span style={{ ...text.faint(), fontSize: 10.5 }}>{label}</span>
     </div>
   )
 }
@@ -115,9 +115,9 @@ export function ReviewTab(p: ReviewTabProps): React.JSX.Element {
         style={{
           padding: `${SP.md + 1}px ${SP.md + 2}px`,
           borderRadius: R.xl,
-          background: `linear-gradient(135deg, ${tintSurface('var(--th)', .72)}, ${tintSurface('var(--th2)', .5, true)})`,
-          border: `0.5px solid ${accent(0.65, 0.3)}`,
-          boxShadow: `0 8px 24px -12px ${accent(0.5, 0.4)}`,
+          background: `linear-gradient(135deg, ${tintSurface('var(--th)', .4)}, ${tintSurface('var(--th2)', .28, true)})`,
+          border: `0.5px solid ${accent(0.65, 0.18)}`,
+          boxShadow: `0 8px 24px -14px ${accent(0.5, 0.25)}`,
           display: 'flex',
           flexDirection: 'column',
           gap: SP.sm

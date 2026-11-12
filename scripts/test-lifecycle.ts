@@ -157,6 +157,13 @@ async function partA(): Promise<void> {
   const afterEnd = store.snapshot().agents
   check(!afterEnd.some((a) => a.id.endsWith(':s')) && afterEnd.length === 1, `SessionEnd → 立即移除（剩 ${afterEnd.length} 个，且不含已结束会话）`)
 
+  // Codex 关闭窗口不会补 SessionEnd：等待态超过 10 分钟必须自动回收，不能长期挂在 Agents。
+  store.handleSession({ backend: 'codex', sessionId: 'stale-codex', kind: 'session', cwd } as never)
+  const stale = store.snapshot().agents.find((a) => a.id === 'codex:stale-codex')
+  if (stale) { stale.status = 'waiting'; stale.updatedAt = Date.now() - 11 * 60 * 1000 }
+  ;(store as unknown as { prune(): boolean }).prune()
+  check(!store.snapshot().agents.some((a) => a.id === 'codex:stale-codex'), 'Codex 等待态超过 10 分钟自动回收（关闭窗口无 SessionEnd）')
+
   bridge.stop()
 }
 

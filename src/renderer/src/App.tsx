@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import type { AgentCliEvent, ApprovalAuditEntry, ApprovalPolicy, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo, UpdateState } from '../../shared/protocol'
-import type { ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, AutomationRule, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
+import type { AcceptanceRecord, ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, AutomationRule, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
 import { emptyComposer, DEFAULT_BAR_CONFIG } from './types'
 import { DEFAULT_QUICK_PROMPTS } from './logic/prompts'
@@ -35,7 +35,8 @@ import { dayKey, buildFacts, hasContent, reviewPrompt, REVIEW_SYSTEM, morningPro
 import { DEFAULT_POMO, POMO_IDLE, nextPhase, startWork, phaseLabel, remainSecs, fmtMMSS, type PomoState, type PomoConfig } from './logic/pomodoro'
 import { todoSystemPrompt, parseAiTodos } from './logic/todoAi'
 import { AgentsTab } from './components/AgentsTab'
-import { PlanTab } from './components/PlanTab'
+import { AcceptTab } from './components/AcceptTab'
+import { archiveFromAgent, shouldArchive } from './logic/acceptance'
 import { AskTab } from './components/AskTab'
 import { TodoTab } from './components/TodoTab'
 import { NotesTab } from './components/NotesTab'
@@ -54,13 +55,13 @@ import { captureScreenNative, cropDataUrlToRegion } from './logic/screenshot'
 import { startScrollCapture } from './logic/scroll-capture-session'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, BellOff, Camera, Check, ChevronDown, Download, Expand, Maximize2, Minimize2, Moon, Pin, Shrink, Timer, Video, Waves, X } from 'lucide-react'
-import { accentText, accent, fill, gradient, hairline, ink } from './ui/tokens'
+import { accentText, accent, fill, gradient, hairline, ink, semBg } from './ui/tokens'
 import { Ico } from './ui/icons'
 
-type Tab = 'agents' | 'plan' | 'ask' | 'shortcuts' | 'todos' | 'notes' | 'news' | 'review' | 'repos' | 'term' | 'settings'
+type Tab = 'agents' | 'accept' | 'ask' | 'shortcuts' | 'todos' | 'notes' | 'news' | 'review' | 'repos' | 'term' | 'settings'
 const TABS: { key: Tab; label: string; icon: (typeof Ico)[keyof typeof Ico] }[] = [
   { key: 'agents', label: 'Agents', icon: Ico.agent },
-  { key: 'plan', label: 'Plan', icon: Ico.plan },
+  { key: 'accept', label: '验收', icon: Ico.accept },
   { key: 'ask', label: '问答', icon: Ico.ask },
   { key: 'shortcuts', label: '快捷', icon: Ico.shortcuts },
   { key: 'todos', label: '待办', icon: Ico.todos },
@@ -263,6 +264,8 @@ export function App(): React.JSX.Element {
   // 复盘：Agent 活动流水（易逝快照 → 当天可复盘）+ 已生成的复盘/周报（键 d:/w: 前缀）
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([])
   const [reviews, setReviews] = useState<Record<string, string>>({})
+  // 验收台：会话结束时留档的计划/改动/回复/轨迹（人工处置状态随记录持久化）
+  const [acceptance, setAcceptance] = useState<AcceptanceRecord[]>([])
   // Tab 栏横滑：隐藏滚动条，用边缘渐隐暗示两侧还有可滑内容
   const [tabFade, setTabFade] = useState<{ l: boolean; r: boolean }>({ l: false, r: false })
   // 灵动岛整体宽度（标准模式面板宽，380–880）
@@ -369,6 +372,7 @@ export function App(): React.JSX.Element {
         if (typeof s.feedAiEnrich === 'boolean') setFeedAiEnrich(s.feedAiEnrich)
         if (Array.isArray(s.clipFavs)) setClips(s.clipFavs as ClipItem[])
         if (Array.isArray(s.activityLog)) setActivityLog(s.activityLog as ActivityEntry[])
+        if (Array.isArray(s.acceptance)) setAcceptance((s.acceptance as AcceptanceRecord[]).slice(0, 60))
         if (s.reviews && typeof s.reviews === 'object') setReviews(s.reviews as Record<string, string>)
         if (s.pomoDone && typeof s.pomoDone === 'object') setPomoDone(s.pomoDone as Record<string, number>)
         if (s.pomo && typeof s.pomo === 'object' && (s.pomo as PomoState).endsAt > Date.now()) setPomo(s.pomo as PomoState)
@@ -467,6 +471,22 @@ export function App(): React.JSX.Element {
     })
   }, [snap])
 
+  // 验收留档：会话从快照消失（SessionEnd / Codex 空闲回收 / done 清扫）时，
+  // 用最后看到的现场落账——计划、最后回复、git 文件清单、活动轨迹都随即销毁，事后再也补不回来。
+  const seenAgents = useRef<Map<string, AgentVM>>(new Map())
+  useEffect(() => {
+    const prev = seenAgents.current
+    const next = new Map(snap.agents.map((a) => [a.id, a]))
+    const ended = [...prev.values()].filter((a) => !next.has(a.id))
+    seenAgents.current = next
+    const fresh = ended.filter(shouldArchive)
+    if (fresh.length === 0) return
+    setAcceptance((list) => {
+      const ids = new Set(fresh.map((a) => a.id))
+      return [...fresh.map((a) => archiveFromAgent(a)), ...list.filter((r) => !ids.has(r.id))].slice(0, 60)
+    })
+  }, [snap])
+
   // Tab 栏溢出探测：据当前滚动位置决定左右渐隐（隐藏滚动条后靠此暗示可横滑）
   const measureTabs = useCallback((): void => {
     const el = tabBarRef.current
@@ -556,6 +576,34 @@ export function App(): React.JSX.Element {
   const anyOverlay = capsuleOpen || paletteOpen || brainOpen || kbOpen || !!studio || themeDesignerOpen || calcOpen || learnOpen || !!shotImg || !!shotStudio
   const overlayRef = useRef(false); overlayRef.current = anyOverlay
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  // 把面板真实矩形交给主进程做兜底命中测试。渲染层 mousemove 仍是主路径，
+  // 但面板刚出现/内容展开/鼠标未移动时，主进程也能在 80ms 内关闭点击穿透。
+  useEffect(() => {
+    let raf = 0
+    const send = (): void => {
+      const r = panelRef.current?.getBoundingClientRect()
+      island.setInteractiveRegion({
+        open: isShown || anyOverlay,
+        overlay: anyOverlay,
+        rect: r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null
+      })
+    }
+    const scheduleSend = (): void => {
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(send)
+    }
+    send()
+    const observer = new ResizeObserver(scheduleSend)
+    if (panelRef.current) observer.observe(panelRef.current)
+    window.addEventListener('resize', scheduleSend)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      observer.disconnect()
+      window.removeEventListener('resize', scheduleSend)
+    }
+  }, [isShown, anyOverlay, tab, settings.largeSize, fullscreen])
+
   const holdPanelForTerminal = useCallback((): void => {
     if (!revealedRef.current) return
     keyboardFocusRef.current = true
@@ -671,6 +719,8 @@ export function App(): React.JSX.Element {
       clipFavs: clips.filter((c) => c.fav).slice(0, 40),
       // 复盘：活动流水（近 14 天封顶 300 条）+ 已生成的复盘/周报
       activityLog: activityLog.filter((a) => a.ts >= Date.now() - 14 * 86400_000).slice(0, 300),
+      // 验收台：最近 60 条会话留档（含人工处置状态）
+      acceptance: acceptance.slice(0, 60),
       reviews,
       // 番茄钟：进行中的计时（跨重启续上）+ 每日完成计数
       pomo: pomo.phase === 'idle' ? undefined : pomo,
@@ -682,7 +732,7 @@ export function App(): React.JSX.Element {
         providerCatalogVersion: llm.providerCatalogVersion
       }
     })
-  }, [settings, approvalPolicy, automations, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
+  }, [settings, approvalPolicy, automations, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, acceptance, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
 
   // 字体与缩放应用（--font 变量 + 主进程 zoomFactor）
   useEffect(() => {
@@ -935,7 +985,9 @@ export function App(): React.JSX.Element {
     const prepared = await island.prepareScreenCapture().catch(() => ({ ok: false, sourceId: undefined as string | undefined, error: '截图准备失败' }))
     try {
       if (!prepared.ok || !prepared.sourceId) return null
-      return await captureScreenNative(prepared.sourceId)
+      const dataUrl = await captureScreenNative(prepared.sourceId)
+      void island.archiveScreenshot(dataUrl, 'screen').catch(() => {})
+      return dataUrl
     } catch {
       return null
     } finally {
@@ -965,6 +1017,7 @@ export function App(): React.JSX.Element {
         return
       }
       island.updateScrollHud({ state: 'done', segments: result.segments, height: result.height, message: `已拼成 ${result.width}×${result.height}` })
+      void island.archiveScreenshot(result.dataUrl, 'scroll').catch(() => {})
       setRevealed(true)
       setShotStudioMode('image')
       setShotStudio(result.dataUrl)
@@ -992,6 +1045,8 @@ export function App(): React.JSX.Element {
         if (!dataUrl) return
         // 带区域（应用内框选）时按区域裁剪再交给工坊：区域是 DIP、抓到的帧是物理像素，必须按 scaleFactor 换算
         const framed = region ? await cropDataUrlToRegion(dataUrl, region, region.scaleFactor ?? window.devicePixelRatio ?? 1).catch(() => null) ?? dataUrl : dataUrl
+        // 每一次抓取先进历史；用户没保存也不会丢（历史目录单独保留最近 120 张）。
+        void island.archiveScreenshot(framed, isScroll ? 'scroll' : 'snip').catch(() => {})
         setRevealed(true)
         if (target === 'studio') { setShotStudioMode('image'); setShotStudio(framed) }
         else setShotImg(framed)
@@ -1163,7 +1218,9 @@ export function App(): React.JSX.Element {
       if (hideTimer.current) return
       hideTimer.current = setTimeout(() => {
         hideTimer.current = undefined
-        if (panelHasKeyboardFocus() || keyboardFocusRef.current || forcedRef.current || pendingRef.current || overlayRef.current) return
+        // 面板内点击后 1.2s 内不自动收起：详情展开、列表重排会让指针"看起来"离开了旧矩形，
+        // 但这是用户刚点的内容，不能把面板当成失焦收回。
+        if (panelHasKeyboardFocus() || keyboardFocusRef.current || forcedRef.current || pendingRef.current || overlayRef.current || Date.now() - lastClickRef.current < 1200) return
         setRevealed(false)
       }, delay)
     }
@@ -2389,8 +2446,16 @@ export function App(): React.JSX.Element {
   const setSoundFor = (type: keyof SoundMap, k: string): void => { setSoundMap((m) => ({ ...m, [type]: k })); playSound(k) }
   const previewSound = (e: React.MouseEvent, k: string): void => { e.stopPropagation(); playSound(k) }
   const jump = (a: AgentVM): void => {
-    island.jumpToTerminal(a.id).then((ok) => {
+    island.jumpToTerminal(a.id, { termHwnd: a.termHwnd, ppid: a.ppid, proj: a.proj, backend: a.backend }).then((ok) => {
       setJumpToast(ok ? `已聚焦到 ${a.tool} 的终端窗口 · ${a.proj}` : `未找到 ${a.proj} 的终端窗口`)
+      clearTimeout(jumpTimer.current)
+      jumpTimer.current = setTimeout(() => setJumpToast(null), 2400)
+    })
+  }
+  // 验收记录里的会话已从快照移除：用留档的窗口句柄/进程号兜底跳转
+  const jumpRecord = (r: AcceptanceRecord): void => {
+    island.jumpToTerminal(r.id, { termHwnd: r.termHwnd, ppid: r.ppid, proj: r.proj, backend: r.backend }).then((ok) => {
+      setJumpToast(ok ? `已聚焦到 ${r.tool} 的终端窗口 · ${r.proj}` : `未找到 ${r.proj} 的终端窗口`)
       clearTimeout(jumpTimer.current)
       jumpTimer.current = setTimeout(() => setJumpToast(null), 2400)
     })
@@ -2594,7 +2659,11 @@ export function App(): React.JSX.Element {
         <div
           data-solid
           ref={panelRef}
-          onMouseDownCapture={() => { lastClickRef.current = Date.now() }}
+          onMouseDownCapture={() => {
+            lastClickRef.current = Date.now()
+            // 点击必须取消之前排好的收起计时器，否则展开资讯/打开详情后会在 260ms 内被旧计时器收回。
+            if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = undefined }
+          }}
           onDragOver={(e) => {
             e.preventDefault()
             if (!dropActive) setDropActive(true)
@@ -2620,8 +2689,9 @@ export function App(): React.JSX.Element {
             overflow: 'hidden',
             borderRadius: fullscreen ? 0 : undefined,
             clipPath: !fullscreen && panelHeight > 0 ? `path("${panelOutline(settings.largeSize ? 880 : islandWidth, panelHeight)}")` : undefined,
-            // 材质三层：顶部极光氛围光（主色相）+ 右上副色相补光 + 玻璃底
-            background: `radial-gradient(125% 60% at 50% 0%, ${accent(0.62, 0.14)} 0%, transparent 64%), radial-gradient(90% 42% at 88% 0%, oklch(calc(0.62 + var(--accent2-l-shift, 0)) var(--accent2-c) var(--th2) / 0.1) 0%, transparent 62%), oklch(var(--panel-l) var(--surface-c) var(--ths) / var(--glass-a))`,
+            // 材质三层：顶部极光氛围光（主色相）+ 右上副色相补光 + 玻璃底。
+            // 精修：氛围光压低一档，让内容与底色重新拉开，不再整屏泛蓝。
+            background: `radial-gradient(125% 60% at 50% 0%, ${accent(0.62, 0.08)} 0%, transparent 64%), radial-gradient(90% 42% at 88% 0%, oklch(calc(0.62 + var(--accent2-l-shift, 0)) var(--accent2-c) var(--th2) / 0.065) 0%, transparent 62%), oklch(var(--panel-l) var(--surface-c) var(--ths) / var(--glass-a))`,
             backdropFilter: 'blur(var(--glass-blur)) saturate(180%)',
             // Apple 式发型线边缘（0.5px 高明度线），不再用彩色 1px 描边
             borderLeft: `0.5px solid ${hairline(0.14)}`, borderRight: `0.5px solid ${hairline(0.14)}`,
@@ -2648,8 +2718,8 @@ export function App(): React.JSX.Element {
           )}
 
           {/* header */}
-          <div style={{ padding: '16px 16px 6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 13 }}>
+          <div style={{ padding: '16px 18px 6px' }}>
+            <div className="main-header" style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 13 }}>
               <div style={{ width: 24, height: 24, borderRadius: 8, background: gradient.brand(), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 3px 10px -2px ${accent(0.7, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.35)` }}>
                 {/* 岛标：胶囊岛 + 脉搏点（SVG 渐变不解析 var()，用 stopColor 内联） */}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -2658,17 +2728,18 @@ export function App(): React.JSX.Element {
                   <path d="M12 12.5h2l1.2-2.2 1.6 4 1.2-1.8h1.5" stroke="oklch(0.92 0.05 var(--th))" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
-              <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2, background: gradient.brand(), WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>Agentic-Island</span>
+              <span className="brand-word" style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.15, background: gradient.brand(), WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>Agentic-Island</span>
               <div
-                className="hv"
+                className="hv brand-version"
                 title="查看运行状态"
                 onClick={() => setTab('settings')}
-                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 999, cursor: 'pointer', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,0.06)', color: ink(3), fontSize: 9.5, fontFamily: 'ui-monospace,monospace' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 999, cursor: 'pointer', background: fill(1), border: `0.5px solid ${hairline(0.055)}`, color: ink(3), fontSize: 10, fontFamily: 'ui-monospace,monospace' }}
               >
                 <span style={{ width: 5, height: 5, borderRadius: 999, background: bridgeConnected ? 'oklch(0.78 0.14 150)' : 'oklch(0.75 0.13 75)', boxShadow: bridgeConnected ? '0 0 6px oklch(0.72 0.14 150 / .45)' : undefined }} />
                 v{runtimeInfo?.version || '…'}
               </div>
-              <span style={{ marginLeft: 'auto', color: ink(3), fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>{clock}</span>
+              <span className="header-spacer" style={{ flex: 1 }} />
+              <span className="header-clock" style={{ color: ink(2), fontSize: 11.5, fontVariantNumeric: 'tabular-nums', letterSpacing: '.01em' }}>{clock}</span>
               <HeaderBtn title="截图工坊（无损截图 + 高级边框美化）" onClick={() => island.triggerScreenshot('studio')}>
                 <Camera size={13} strokeWidth={1.75} />
               </HeaderBtn>
@@ -2712,13 +2783,13 @@ export function App(): React.JSX.Element {
             {/* Tab 栏：窄屏不换行不变形；隐藏滚动条，滚轮/拖拽横滑，边缘渐隐暗示更多 */}
             <div
               ref={tabBarRef}
-              className="noscrollbar"
+              className="noscrollbar main-tabs"
               role="tablist"
               aria-label="主功能"
               onScroll={measureTabs}
               onWheel={(e) => { const el = tabBarRef.current; if (el && el.scrollWidth > el.clientWidth) el.scrollLeft += e.deltaY }}
               style={{
-                display: 'flex', gap: 5, marginBottom: 14, flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 2,
+                display: 'flex', gap: 4, marginBottom: 13, flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 2,
                 WebkitMaskImage: tabFade.l && tabFade.r
                   ? 'linear-gradient(to right, transparent, #000 22px, #000 calc(100% - 22px), transparent)'
                   : tabFade.r
@@ -2745,11 +2816,11 @@ export function App(): React.JSX.Element {
                     {active && (
                       <motion.span
                         layoutId="tab-active-pill"
-                        transition={{ type: 'spring', stiffness: 480, damping: 38 }}
+                        transition={{ type: 'spring', stiffness: 420, damping: 34 }}
                         style={{
                           position: 'absolute', inset: 0, borderRadius: 999,
                           background: gradient.primary(),
-                          boxShadow: `0 3px 12px -4px ${accent(0.7, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.28)`
+                          boxShadow: `0 2px 10px -5px ${accent(0.7, 0.42)}, inset 0 0.5px 0 rgba(255,255,255,0.24)`
                         }}
                       />
                     )}
@@ -2757,7 +2828,7 @@ export function App(): React.JSX.Element {
                       <TabIcon size={12} strokeWidth={1.9} style={{ flex: 'none' }} />
                       {label}
                       {key === 'agents' && (hasPending || hasWaiting) && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
-                      {key === 'plan' && pending.some((a) => a.isPlan) && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
+                      {key === 'accept' && pending.some((a) => a.isPlan) && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
                       {key === 'todos' && hasDueTodo && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
                       {key === 'todos' && !hasDueTodo && todos.filter((t) => !t.done).length > 0 && (
                         <span style={{ marginLeft: 2, fontSize: 9.5, opacity: 0.75 }}>{todos.filter((t) => !t.done).length}</span>
@@ -2768,9 +2839,9 @@ export function App(): React.JSX.Element {
               })}
             </div>
             {/* 签名分割线：Tab 栏下一道主题渐变光线（岛的"记忆点"） */}
-            <div style={{ height: 1, margin: '-6px 6px 10px', background: 'linear-gradient(90deg, transparent 2%, oklch(0.72 var(--accent-c) var(--th) / 0.34) 30%, oklch(0.72 var(--accent2-c) var(--th2) / 0.3) 68%, transparent 98%)', pointerEvents: 'none' }} />
+            <div style={{ height: 1, margin: '-5px 6px 10px', background: 'linear-gradient(90deg, transparent 2%, oklch(0.72 var(--accent-c) var(--th) / 0.24) 30%, oklch(0.72 var(--accent2-c) var(--th2) / 0.2) 68%, transparent 98%)', pointerEvents: 'none' }} />
           </div>
-          <div className="ai-scroll" style={{ padding: '0 8px 16px 16px', margin: '0 4px 0 0', maxHeight: fullscreen ? 'calc(100vh - 130px)' : settings.largeSize ? 'min(844px, calc(100vh - 175px))' : 500, overflowY: 'auto' }}>
+          <div className="ai-scroll" style={{ padding: '0 10px 18px 18px', margin: '0 4px 0 0', maxHeight: fullscreen ? 'calc(100vh - 130px)' : settings.largeSize ? 'min(844px, calc(100vh - 175px))' : 500, overflowY: 'auto' }}>
             <div id="main-tab-panel" role="tabpanel" data-main-tab-content>
             {tab === 'agents' && (
               <AgentsTab
@@ -2779,7 +2850,18 @@ export function App(): React.JSX.Element {
                 onJump={jump} onCopyCommit={copyCommit} copiedId={copiedId} waitSecs={waitSecs}
               />
             )}
-            {tab === 'plan' && <PlanTab plans={pending.filter((a) => a.isPlan)} onDecide={decide} onJump={jump} waitSecs={waitSecs} />}
+            {tab === 'accept' && (
+              <AcceptTab
+                plans={pending.filter((a) => a.isPlan)}
+                records={acceptance}
+                onDecide={decide}
+                onJump={jump}
+                onJumpRecord={jumpRecord}
+                onMark={(id, status) => setAcceptance((list) => list.map((r) => r.id === id ? { ...r, status, markedAt: status === 'pending' ? undefined : Date.now() } : r))}
+                onRemove={(id) => setAcceptance((list) => list.filter((r) => r.id !== id))}
+                waitSecs={waitSecs}
+              />
+            )}
             {tab === 'ask' && (
               <AskTab
                 modelLabel={askModelLabel} onOpenLlmSettings={() => { setTab('settings'); setLlm((s) => ({ ...s, open: true })) }}
@@ -2988,7 +3070,7 @@ export function App(): React.JSX.Element {
         </div>
       )}
       {jumpToast && (
-        <div style={{ position: 'fixed', top: 'calc(100vh - 78px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 999, background: 'oklch(var(--overlay-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a))', backdropFilter: 'blur(var(--glass-blur))', border: `1px solid ${accent(.7, .3)}`, color: ink(1), fontSize: 12, boxShadow: '0 14px 34px rgb(0 0 0 / calc(.5 * var(--shadow-k)))' }}>
+        <div style={{ position: 'fixed', top: 'calc(100vh - 78px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 999, background: 'oklch(var(--overlay-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a))', backdropFilter: 'blur(var(--glass-blur))', border: `0.5px solid ${accent(.7, .24)}`, color: ink(1), fontSize: 12, boxShadow: '0 14px 34px rgb(0 0 0 / calc(.5 * var(--shadow-k)))' }}>
           <ArrowUpRight size={13} strokeWidth={2} style={{ color: accentText() }} />{jumpToast}
         </div>
       )}
@@ -3147,35 +3229,35 @@ const panelOutline = (bodyW: number, height: number): string => {
 const toastStyle: React.CSSProperties = {
   position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 10,
   padding: '11px 16px', borderRadius: 999, background: 'oklch(var(--panel-l) calc(0.02 * var(--css, 1)) var(--ths) / var(--glass-a))', backdropFilter: 'blur(var(--glass-blur)) saturate(160%)',
-  border: `1px solid ${accent(.7, .35)}`, boxShadow: '0 18px 40px rgb(0 0 0 / calc(.5 * var(--shadow-k)))', animation: 'ai-toast .34s cubic-bezier(.34,1.3,.64,1)'
+  border: `0.5px solid ${accent(.7, .24)}`, boxShadow: '0 18px 40px rgb(0 0 0 / calc(.5 * var(--shadow-k)))', animation: 'ai-toast .34s cubic-bezier(.34,1.3,.64,1)'
 }
 function tabStyle(active: boolean): React.CSSProperties {
   return {
     position: 'relative',
     appearance: 'none', border: 0, background: 'transparent',
-    padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 650, fontFamily: 'var(--font)', cursor: 'pointer',
+    padding: '6.5px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 650, letterSpacing: '-.004em', fontFamily: 'var(--font)', cursor: 'pointer',
     transition: 'color .18s ease',
     flex: 'none', whiteSpace: 'nowrap', // 窄屏下不许换行/压缩变形
     color: active ? gradient.onPrimary() : ink(2)
   }
 }
 
-/** 头部右侧图标按钮：统一 26px 方钮 + 物理按压反馈 */
+/** 头部右侧图标按钮：统一 28px 方钮 + 克制的物理按压反馈 */
 function HeaderBtn(props: { title: string; active?: boolean; onClick?: () => void; children: React.ReactNode }): React.JSX.Element {
   const { title, active, onClick, children } = props
   return (
     <motion.div
-      whileHover={{ scale: 1.08 }}
-      whileTap={{ scale: 0.9 }}
-      transition={{ type: 'spring', stiffness: 520, damping: 26 }}
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.94 }}
+      transition={{ type: 'spring', stiffness: 480, damping: 28 }}
       title={title}
       onClick={onClick}
       style={{
-        width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-        background: active ? accent(0.78, .22) : fill(1),
-        border: active ? `1px solid ${accent(0.7, 0.3)}` : '1px solid transparent',
-        color: active ? accentText(0.85) : ink(3),
-        transition: 'background .18s ease, color .18s ease'
+        width: 28, height: 28, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+        background: active ? semBg(accent(), .16) : fill(1),
+        border: active ? `0.5px solid ${accent(0.7, 0.24)}` : `0.5px solid ${hairline(0.04)}`,
+        color: active ? accentText(0.85) : ink(2),
+        transition: 'background .18s ease, color .18s ease, border-color .18s ease'
       }}
     >
       {children}

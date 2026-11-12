@@ -161,6 +161,38 @@ try {
 
   await sleep(900)
   await evaluate(`window.__shotAuditErrors=[];window.addEventListener('error',(event)=>window.__shotAuditErrors.push(event.message));window.addEventListener('unhandledrejection',(event)=>window.__shotAuditErrors.push(String(event.reason)));true`)
+
+  // 高清截图门禁：直接走产品同一条 prepareScreenCapture → 媒体流取帧链路，
+  // 断言拿到的视频轨是显示器物理像素，而不是 DIP/逻辑尺寸。
+  const nativeCapture = await evaluate(`(async () => {
+    const displays = await window.island.getDisplays()
+    const display = displays.find((item) => item.primary) || displays[0]
+    const prepared = await window.island.prepareScreenCapture()
+    if (!prepared.ok || !prepared.sourceId) return { ok: false, error: prepared.error || 'prepare failed', displays }
+    let stream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: prepared.sourceId } }
+      })
+      const video = document.createElement('video')
+      video.srcObject = stream
+      video.muted = true
+      video.playsInline = true
+      await video.play()
+      return { ok: true, width: video.videoWidth, height: video.videoHeight, display }
+    } finally {
+      try { stream?.getTracks().forEach((track) => track.stop()) } catch {}
+      await window.island.finishScreenCapture().catch(() => {})
+    }
+  })()`)
+  assert.equal(nativeCapture.ok, true, `原生截图准备失败：${nativeCapture.error || ''}`)
+  const expectedW = Math.round(nativeCapture.display.width * nativeCapture.display.scaleFactor)
+  const expectedH = Math.round(nativeCapture.display.height * nativeCapture.display.scaleFactor)
+  console.log(`截图原生帧: ${nativeCapture.width}×${nativeCapture.height} · 显示器 ${nativeCapture.display.width}×${nativeCapture.display.height} @${nativeCapture.display.scaleFactor}x → 期望 ${expectedW}×${expectedH}`)
+  assert.ok(nativeCapture.width >= expectedW - 2 && nativeCapture.height >= expectedH - 2, `截图必须拿到显示器物理像素（实测 ${nativeCapture.width}×${nativeCapture.height}，期望约 ${expectedW}×${expectedH}）`)
+  assert.ok(nativeCapture.display.scaleFactor <= 1.01 || nativeCapture.width > nativeCapture.display.width, '高 DPI 屏不得把物理像素截成 DIP 尺寸')
+
   // 先确保岛是展开的（收起状态没有头部按钮）
   await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'\\u0060',ctrlKey:true,bubbles:true}));true`)
   await sleep(700)
@@ -238,6 +270,21 @@ try {
   const quick = await evaluate(`window.island.saveImageQuick('data:image/png;base64,' + ${JSON.stringify((await readFile(sourcePaths[0])).toString('base64'))}, 'audit-single', 'png')`)
   assert.equal(quick?.ok, true, `快存应成功：${JSON.stringify(quick)}`)
   assert.ok(String(quick.path).startsWith(exportDir), `快存应落到隔离目录，实际 ${quick.path}`)
+
+  // 截图历史：归档 → 列表读回缩略图与原图，确认新入口不是只画了个按钮
+  const historySeed = `data:image/png;base64,${(await readFile(sourcePaths[0])).toString('base64')}`
+  const archived = await evaluate(`window.island.archiveScreenshot(${JSON.stringify(historySeed)}, 'audit-history')`)
+  assert.equal(archived?.ok, true, `历史归档应成功：${JSON.stringify(archived)}`)
+  const history = await evaluate('window.island.screenshotHistory(5)')
+  assert.equal(history?.ok, true, `历史列表应成功：${JSON.stringify(history)}`)
+  const entry = history.entries?.find((item) => item.name.includes('audit-history'))
+  assert.ok(entry, `历史列表应包含刚归档的截图：${JSON.stringify(history.entries?.map((item) => item.name))}`)
+  assert.equal(entry.width, SOURCE_WIDTH, `历史原图宽度应为 ${SOURCE_WIDTH}`)
+  assert.equal(entry.height, SOURCE_HEIGHT, `历史原图高度应为 ${SOURCE_HEIGHT}`)
+  assert.match(entry.thumb, /^data:image\/png;base64,/, '历史列表应返回可渲染缩略图')
+  const reread = await evaluate(`window.island.readScreenshotHistory(${JSON.stringify(entry.path)})`)
+  assert.equal(reread?.ok, true, '历史原图应能按路径读回')
+  assert.match(reread.dataUrl, /^data:image\/png;base64,/, '读回内容应为 PNG data URL')
 
   assert.deepEqual(await evaluate('window.__shotAuditErrors || []'), [], '批量美化期间不得出现 renderer 未处理异常')
   process.stdout.write('screenshot studio batch audit passed\n')

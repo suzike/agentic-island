@@ -13,12 +13,24 @@ import { homedir } from 'os'
 import type { AgentsStore } from './agents-store'
 import type { BridgeEvent, ChangeSummary } from '../shared/protocol'
 
-type Summarizer = (cwd: string) => Promise<ChangeSummary | null>
+type Summarizer = (cwd: string, agentId: string) => Promise<ChangeSummary | null>
+
+// 与 src/renderer/src/logic/acceptance.ts 的 CHECK_CMD 保持同步（只决定"值不值得记结果"）
+const VERIFY_CMD = /(npm (?:run )?(?:test|build)|pnpm (?:test|build)|yarn (?:test|build)|vitest|jest|pytest|playwright|go test|cargo (?:test|build)|tsc\b|typecheck|eslint|lint)/i
 
 interface Ctx {
   sessionId: string
   cwd: string
   entry: string // 'cli'（codex-tui）或其它宿主 → 桌面端
+  /** call_id → 命令与发起时刻，用于给 function_call_output 补退出码/耗时 */
+  calls?: Map<string, { command: string; at: number }>
+}
+
+interface CodexTailOptions {
+  /** 普通运行态：多久没有新 rollout 数据就视为会话已结束 */
+  idleMs?: number
+  /** task_complete 后的等待态：短一些，避免已关闭的会话长期占着 Agents */
+  waitingIdleMs?: number
 }
 
 // 尊重 Codex 官方 CODEX_HOME 环境变量（用户可能自定义 codex 主目录）
@@ -39,16 +51,22 @@ export class CodexTail {
   private endedIdle = new Set<string>() // 已按空闲归档过的会话（新数据到来时移除，可复活）
   private knownFiles = new Set<string>() // 周期性扫描发现的近期 rollout 文件
   private lastScan = 0
+  private idleMs: number
+  private waitingIdleMs: number
 
   /** rollout 无"会话结束"信号（关终端不会写任何东西）——超过此时长无新数据即视为已结束 */
   private static IDLE_END_MS = 15 * 60 * 1000
+  /** Codex 的 task_complete 只是"本轮完成、等待输入"，关闭会话不会补写事件；等待态更短超时 */
+  private static WAITING_END_MS = 3 * 60 * 1000
   /** 全树扫描间隔：活跃文件仍每秒跟随，新文件最多延迟几秒出现，避免历史多时每秒递归扫盘 */
   private static SCAN_MS = 5000
 
-  constructor(store: AgentsStore, summarize?: Summarizer, root: string = DEFAULT_SESSIONS_ROOT) {
+  constructor(store: AgentsStore, summarize?: Summarizer, root: string = DEFAULT_SESSIONS_ROOT, options: CodexTailOptions = {}) {
     this.store = store
     this.summarize = summarize
     this.root = root
+    this.idleMs = options.idleMs ?? CodexTail.IDLE_END_MS
+    this.waitingIdleMs = options.waitingIdleMs ?? CodexTail.WAITING_END_MS
   }
 
   /** 供测试：直接跑一次轮询（跳过定时器） */
@@ -66,6 +84,9 @@ export class CodexTail {
       for (const f of this.knownFiles) {
         this.ctxs.set(f, this.readHeadCtx(f))
         this.offsets.set(f, this.sizeOf(f))
+        // 岛启动前已有的文件也需要一个空闲基准，否则 lastGrow 缺失会让
+        // hook 创建出来的旧会话卡片永远不会被 checkIdle 归档。
+        this.lastGrow.set(f, this.mtimeOf(f))
       }
     } catch { /* 忽略首扫异常 */ }
     this.timer = setInterval(() => {
@@ -82,6 +103,10 @@ export class CodexTail {
 
   private sizeOf(f: string): number {
     try { return statSync(f).size } catch { return 0 }
+  }
+
+  private mtimeOf(f: string): number {
+    try { return statSync(f).mtimeMs } catch { return Date.now() }
   }
 
   // 递归收集近 RECENT_MS 内修改过的 rollout JSONL
@@ -159,10 +184,15 @@ export class CodexTail {
   private checkIdle(f: string, now: number): void {
     const ctx = this.ctxs.get(f)
     if (!ctx?.sessionId || this.endedIdle.has(ctx.sessionId)) return
-    const grow = this.lastGrow.get(f)
-    if (!grow || now - grow < CodexTail.IDLE_END_MS) return
     const agent = this.store.snapshot().agents.find((a) => a.id === `codex:${ctx.sessionId}`)
     if (!agent || agent.status === 'done') { this.endedIdle.add(ctx.sessionId); return }
+    let grow = this.lastGrow.get(f)
+    if (!grow) {
+      grow = this.mtimeOf(f)
+      this.lastGrow.set(f, grow)
+    }
+    const limit = agent.status === 'waiting' ? this.waitingIdleMs : this.idleMs
+    if (now - grow < limit) return
     this.endedIdle.add(ctx.sessionId)
     this.store.handleEnd(this.ev(ctx, 'end', { detail: '会话已结束（长时间无活动）' }))
   }
@@ -223,7 +253,36 @@ export class CodexTail {
       if (p.type === 'function_call' && p.name === 'shell_command') {
         let cmd = ''
         try { cmd = String((JSON.parse(String(p.arguments || '{}')) as { command?: string }).command || '') } catch { /* */ }
+        // 记下验证命令的 call_id：输出回来时要靠它补退出码
+        if (cmd && VERIFY_CMD.test(cmd)) {
+          ctx.calls = ctx.calls || new Map()
+          ctx.calls.set(String(p.call_id || ''), { command: cmd.slice(0, 400), at: Date.now() })
+          if (ctx.calls.size > 12) ctx.calls.delete(ctx.calls.keys().next().value as string)
+        }
         this.store.handleActivity(this.ev(ctx, 'activity', { tool: 'Bash', detail: cmd ? `运行命令：${truncate(cmd)}` : '正在运行命令…' }))
+      } else if (p.type === 'function_call_output') {
+        const call = ctx.calls?.get(String(p.call_id || ''))
+        if (call) {
+          ctx.calls!.delete(String(p.call_id || ''))
+          const output = String(p.output || '')
+          // Codex 的 shell 输出自带这两行（实测）：用它拿真实退出码与墙钟耗时
+          const exit = /Process exited with code (-?\d+)/i.exec(output)
+          const wall = /Wall time:\s*([\d.]+)\s*seconds/i.exec(output)
+          const exitCode = exit ? Number(exit[1]) : undefined
+          const failed = exitCode !== undefined && exitCode !== 0
+          this.store.handleActivity(this.ev(ctx, 'activity', {
+            tool: 'Bash',
+            detail: `验证完成：${truncate(call.command, 60)}${exitCode !== undefined ? ` · 退出 ${exitCode}` : ''}`,
+            check: {
+              command: call.command,
+              at: Date.now(),
+              exitCode,
+              ms: wall ? Math.round(Number(wall[1]) * 1000) : undefined,
+              ok: exit ? exitCode === 0 : undefined,
+              outputTail: failed ? output.slice(-400) : undefined
+            }
+          }))
+        }
       } else if (p.type === 'custom_tool_call' && p.name === 'apply_patch') {
         this.store.handleActivity(this.ev(ctx, 'activity', { tool: 'Edit', detail: '正在修改文件…' }))
       }
@@ -249,11 +308,12 @@ export class CodexTail {
       case 'task_complete': {
         const last = String(p.last_agent_message || '')
         const ev = this.ev(ctx, 'notification', {
-          detail: last ? `本轮完成 · 等待你的回复\n\n${truncate(last, 400)}` : '本轮完成 · 等待你的回复…'
+          detail: last ? `本轮完成 · 等待你的回复\n\n${truncate(last, 400)}` : '本轮完成 · 等待你的回复…',
+          lastReply: last ? last.slice(0, 6000) : undefined
         })
         this.store.handleNotification(ev)
         // 轮次结束 → 采集真实 git 变更小结（与 Claude Code 一致）
-        this.summarize?.(ctx.cwd).then((s) => { if (s) this.store.attachSummary(ev, s) }).catch(() => {})
+        this.summarize?.(ctx.cwd, `codex:${ctx.sessionId}`).then((s) => { if (s) this.store.attachSummary(ev, s) }).catch(() => {})
         break
       }
       case 'token_count': {

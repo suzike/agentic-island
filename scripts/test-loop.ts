@@ -47,6 +47,29 @@ async function run(): Promise<void> {
     console.log(`[forwarder] ✓ PreToolUse 非阻塞（${elapsed}ms，无决定、无审批卡）`)
   }
 
+  // ===== 场景 0b：PostToolUse 把验证命令的真实结果带回岛（耗时来自 Pre→Post 之间） =====
+  {
+    const runForward = (event: string, payload: Record<string, unknown>): Promise<void> =>
+      new Promise((resolve) => {
+        const child = spawn('node', [script, 'claude-code', event], { stdio: ['pipe', 'pipe', 'pipe'] })
+        child.stdin.write(JSON.stringify(payload))
+        child.stdin.end()
+        child.on('close', () => resolve())
+      })
+    const base2 = { session_id: 'check-sess', cwd: process.cwd(), tool_name: 'Bash', tool_input: { command: 'npm test' } }
+    await runForward('PreToolUse', base2)
+    await sleep(120)
+    await runForward('PostToolUse', { ...base2, tool_response: { stdout: 'ok', stderr: '', interrupted: false } })
+    await sleep(200)
+    const probed = store.snapshot().agents.find((a) => a.id === 'claude-code:check-sess')
+    const run = probed?.checks?.[0]
+    if (!run || run.command !== 'npm test' || !run.ms || run.ms < 100 || run.exitCode !== undefined) {
+      console.error(`❌ 验证命令结果未正确留档：${JSON.stringify(probed?.checks)}`)
+      process.exit(1)
+    }
+    console.log(`[island] ✓ PostToolUse 记录 npm test 耗时 ${run.ms}ms（Claude 不回传退出码，如实留空）`)
+  }
+
   // 启动真实转发脚本，喂入 PermissionRequest（Claude Code 真正准备弹权限时才会触发）
   const child = spawn('node', [script, 'claude-code', 'PermissionRequest'], { stdio: ['pipe', 'pipe', 'pipe'] })
   let stdout = ''
@@ -130,6 +153,33 @@ async function run(): Promise<void> {
     process.exit(1)
   }
   console.log('[island] ✓ Stop 事件已补齐卡片：model=claude-sonnet-4-5 · 上下文 15504 tok')
+
+  // ===== 场景 4：最后回复与计划留档（验收台依赖这两项，会话结束后就再也拿不到了） =====
+  if (withMeta?.lastReply !== '最终回复') {
+    console.error(`❌ Stop 未留档最后回复：${JSON.stringify(withMeta?.lastReply)}`)
+    process.exit(1)
+  }
+  console.log('[island] ✓ Stop 已留档最后回复')
+
+  const planStore = new AgentsStore()
+  const planText = '## 计划\n- [ ] 加限流\n\n## 验证方式\n- 单测覆盖桶耗尽'
+  const planPending = planStore.handlePermission({
+    token: 't', backend: 'claude-code', kind: 'permission', sessionId: 'plan-sess',
+    cwd: process.cwd(), tool: 'ExitPlanMode', command: planText, isPlan: true
+  })
+  const planAgent = planStore.snapshot().agents.find((a) => a.id === 'claude-code:plan-sess')
+  if (!planAgent?.requestId || planAgent.plan?.text !== planText) {
+    console.error(`❌ 计划全文未留档：${JSON.stringify(planAgent?.plan)}`)
+    process.exit(1)
+  }
+  planStore.decide(planAgent.requestId, 'deny', '先补测试')
+  await planPending
+  const decidedPlan = planStore.snapshot().agents.find((a) => a.id === 'claude-code:plan-sess')?.plan
+  if (decidedPlan?.decision !== 'deny' || decidedPlan?.reason !== '先补测试') {
+    console.error(`❌ 计划裁决未留档：${JSON.stringify(decidedPlan)}`)
+    process.exit(1)
+  }
+  console.log('[island] ✓ 计划全文与裁决（deny + 理由）已留档')
 
   bridge.stop()
   console.log('\n✅ M1 + 接力 steer 验证通过：PreToolUse 零阻塞，PermissionRequest 裁决与拒绝理由双向回传成立')

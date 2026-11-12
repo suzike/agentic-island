@@ -1,8 +1,9 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, safeStorage, screen, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
-import { copyFile, mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from 'fs/promises'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { copyFile, mkdir, mkdtemp, open, readFile, readdir as readdirP, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { basename, extname, join } from 'path'
+import { basename, extname, join, sep } from 'path'
 import { pathToFileURL } from 'url'
 import ffmpegStatic from 'ffmpeg-static'
 import { AgentsStore } from './agents-store'
@@ -18,11 +19,13 @@ import {
 } from './hook-installer'
 import { complete as llmComplete, test as llmTest, embed as llmEmbed, listModels as llmListModels } from './llm-proxy'
 import { agentCliStream, agentCliCancel, agentCliCheck, type AgentEngine } from './agent-cli'
+import { startFollowup, cancelFollowup, killAllFollowups } from './agent-followup'
 import * as kb from './kb'
 import { playSound } from './sound'
 import { loadState, saveState } from './settings-store'
 import { focusByHwnd, focusByPid, focusByTitle, focusAnyByTitle, selectWtTab } from './terminal-jump'
-import { gitSummary } from './git-summary'
+import { SessionChanges } from './session-changes'
+import { captureBaseline, diffSinceBaseline } from './git-baseline'
 import { fetchIcs, parseIcs } from './calendar-ics'
 import { fetchCaldav } from './calendar-caldav'
 import { getMediaInfo, mediaKey } from './media'
@@ -45,7 +48,7 @@ import { sniffRecordingContainer } from '../shared/recording-format'
 import { RecordingSessionStore } from './recording-session-store'
 import { RecordingProjectStore } from './recording-project-store'
 import { transcribeRecordingFile } from './recording-transcription'
-import type { DecisionMessage, LlmRequestConfig, PinnedShotPayload, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotSnipRegion, ScreenshotTarget, ScrollHudState, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
+import type { DecisionMessage, FollowupRequest, LlmRequestConfig, PinnedShotPayload, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotSnipRegion, ScreenshotTarget, ScrollHudState, TerminalJumpHint, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
 import { recordingWindowHandle } from '../shared/recording-source'
 
 // 允许 WebAudio 无需用户手势即可播放（提示音/试听）
@@ -57,11 +60,24 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 // 铺满后：面板大小纯属渲染层布局（largeSize/islandWidth/fullscreen 都只改 CSS），点击穿透仍由命中检测决定。
 
 let win: BrowserWindow | null = null
+let hitTestTimer: NodeJS.Timeout | null = null
+let lastInteractiveIgnore: boolean | null = null
+let interactiveRegion: { open: boolean; overlay: boolean; rect: { x: number; y: number; width: number; height: number } | null } = {
+  open: false,
+  overlay: false,
+  rect: null
+}
 let externalYield: ExternalYieldController | null = null
 let rendererDialogRelease: (() => void) | null = null
 const store = new AgentsStore()
-// 审批策略钩子装配：命中规则/本会话放行即自动放行并记审计；会话结束清理临时放行
-store.setPolicyHooks({ autoDecision: policyAutoDecision, onSessionEnd: clearSessionAllows })
+// 会话级改动归属：会话开始时给工作区拍基线，之后只把"基线之后变化的文件"算作本次产出
+const sessionChanges = new SessionChanges(captureBaseline, diffSinceBaseline)
+// 审批策略钩子装配：命中规则/本会话放行即自动放行并记审计；会话结束清理临时放行与基线
+store.setPolicyHooks({
+  autoDecision: policyAutoDecision,
+  onSessionStart: (agentId, cwd) => sessionChanges.ensure(agentId, cwd),
+  onSessionEnd: (agentId) => { sessionChanges.forget(agentId); clearSessionAllows(agentId) }
+})
 
 // 统一发送通道：退出收尾期窗口可能已销毁，裸 `win?.` 判空挡不住 "Object has been destroyed"
 const safeSend = (channel: string, ...args: unknown[]): void => {
@@ -73,9 +89,15 @@ const terminalWorkspace = createTerminalWorkspaceStore({
   decrypt: (cipher) => safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(Buffer.from(cipher, 'base64')) : cipher
 })
 // 文档截图、安装验证和审计实例必须能隔离 discovery，避免覆盖真实 bridge.json。
-const bridge = new BridgeServer(store, gitSummary, process.env.AIISLAND_BRIDGE_FILE || undefined)
+const bridge = new BridgeServer(
+  store,
+  sessionChanges.summary.bind(sessionChanges),
+  process.env.AIISLAND_BRIDGE_FILE || undefined,
+  // 审批放行前先把基线拍完：用户可能瞬间批准，基线必须早于 Agent 的任何改动
+  (event) => sessionChanges.ready(`${event.backend}:${event.sessionId || event.cwd}`, event.cwd)
+)
 // Codex 实时接入：跟随其 rollout 会话日志（Windows 上 hooks/notify 都不通，这是唯一可靠通道）
-const codexTail = new CodexTail(store, gitSummary)
+const codexTail = new CodexTail(store, sessionChanges.summary.bind(sessionChanges))
 const recordingExportJobs = new Map<string, ChildProcess>()
 const recordingPreviewDirs = new Map<string, string>()
 let recordingSessions: RecordingSessionStore
@@ -275,6 +297,7 @@ let snipWin: BrowserWindow | null = null
 let scrollHudWin: BrowserWindow | null = null
 let snipTarget: ScreenshotTarget = 'ask'
 let snipMode: 'snip' | 'scroll' = 'snip'
+let snipConfig: { displayId: string; scaleFactor: number; width: number; height: number; mode: 'snip' | 'scroll' } | null = null
 
 /** 显示器热插拔 / 分辨率 / DPI 缩放变化：重定位全部岛系窗口（否则岛会偏、不再居中/铺满） */
 function onDisplayChange(): void {
@@ -414,6 +437,32 @@ function createWindow(): void {
 
   // 默认整窗点击穿透，转发鼠标移动以便渲染层做命中检测
   win.setIgnoreMouseEvents(true, { forward: true })
+  interactiveRegion = { open: false, overlay: false, rect: null }
+  lastInteractiveIgnore = true
+  if (hitTestTimer) clearInterval(hitTestTimer)
+  // 渲染层 mousemove 是主路径；这里按面板矩形做 80ms 兜底，
+  // 避免面板刚出现、列表展开或鼠标没移动时第一下点击穿透到桌面。
+  hitTestTimer = setInterval(() => {
+    if (!win || win.isDestroyed()) return
+    let ignore = true
+    if (interactiveRegion.open) {
+      if (interactiveRegion.overlay || !interactiveRegion.rect) ignore = false
+      else {
+        const cursor = screen.getCursorScreenPoint()
+        const bounds = win.getBounds()
+        const x = cursor.x - bounds.x
+        const y = cursor.y - bounds.y
+        const r = interactiveRegion.rect
+        ignore = !(x >= r.x - 8 && x <= r.x + r.width + 8 && y >= r.y - 8 && y <= r.y + r.height + 8)
+      }
+    }
+    if (ignore !== lastInteractiveIgnore) {
+      lastInteractiveIgnore = ignore
+      if (ignore) win.setIgnoreMouseEvents(true, { forward: true })
+      else win.setIgnoreMouseEvents(false)
+    }
+  }, 80)
+  hitTestTimer.unref?.()
   externalYield?.dispose()
   externalYield = createExternalYieldController({
     collapse: () => safeSend('external-yield'),
@@ -490,9 +539,16 @@ function openSnipOverlay(target: ScreenshotTarget, mode: 'snip' | 'scroll' = 'sn
   hardenWindow(overlay)
   overlay.setAlwaysOnTop(true, 'screen-saver')
   overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  snipConfig = { displayId: String(display.id), scaleFactor, width: bounds.width, height: bounds.height, mode }
+  overlay.webContents.on('did-finish-load', () => {
+    // 兜底推送；正常路径由 SnipOverlay 的 snip-ready 握手取配置，避免 React 尚未挂 listener。
+    overlay.webContents.send('snip-config', snipConfig)
+    overlay.show()
+    overlay.focus()
+    overlay.moveTop()
+  })
   loadRenderer(overlay, 'snip')
-  overlay.webContents.on('did-finish-load', () => overlay.webContents.send('snip-config', { displayId: String(display.id), scaleFactor, width: bounds.width, height: bounds.height, mode }))
-  overlay.on('closed', () => { snipWin = null })
+  overlay.on('closed', () => { snipWin = null; snipConfig = null })
   snipWin = overlay
   snipWin.focus()
   snipTarget = target
@@ -891,6 +947,16 @@ function wireIpc(): void {
     if (ignore) win?.setIgnoreMouseEvents(true, { forward: true })
     else win?.setIgnoreMouseEvents(false)
   })
+  ipcMain.on('set-interactive-region', (_e, state: typeof interactiveRegion) => {
+    if (!state || typeof state !== 'object') return
+    interactiveRegion = {
+      open: state.open === true,
+      overlay: state.overlay === true,
+      rect: state.rect && Number.isFinite(state.rect.x) && Number.isFinite(state.rect.y) && Number.isFinite(state.rect.width) && Number.isFinite(state.rect.height)
+        ? { x: state.rect.x, y: state.rect.y, width: Math.max(0, state.rect.width), height: Math.max(0, state.rect.height) }
+        : null
+    }
+  })
 
   // Chromium 的 <input type="file"> 不经过 Electron dialog API，由渲染层显式标记其生命周期。
   ipcMain.on('set-native-dialog-open', (_e, active: boolean) => {
@@ -1152,7 +1218,7 @@ function wireIpc(): void {
       return { ok: true, state: terminalWorkspace.save(raw) }
     } catch (error) { return { ok: false, error: String(error) } }
   })
-  app.on('will-quit', () => { flushState(); stopClipboardWatch?.(); ptyKillAll(); globalShortcut.unregisterAll() })
+  app.on('will-quit', () => { flushState(); stopClipboardWatch?.(); ptyKillAll(); killAllFollowups(); globalShortcut.unregisterAll() })
 
   // 智能勿扰：渲染层把最终勿扰态告知主进程（真则不自动弹窗/响铃）
   ipcMain.on('set-dnd', (_e, active: boolean) => { dndActive = !!active })
@@ -1212,8 +1278,13 @@ function wireIpc(): void {
   //  1) 已捕获窗口句柄 → 聚焦(最小化自动还原) + WT 多标签时 UIA 精确切到该会话的标签页
   //  2) 进程链反查 → 同上
   //  3) 终端标题含项目名 → 4) 桌面端应用窗口（Claude/Codex/ChatGPT，任意进程按标题/进程名，最小化还原）
-  ipcMain.handle('jump-to-terminal', async (_e, agentId: string) => {
-    const agent = store.snapshot().agents.find((a) => a.id === agentId)
+  ipcMain.handle('jump-to-terminal', async (_e, agentId: string, hint?: TerminalJumpHint) => {
+    // 会话结束后 Agent 已从快照移除：用验收记录留存的线索兜底（终端窗口通常仍然开着）
+    const live = store.snapshot().agents.find((a) => a.id === agentId)
+    const agent: { proj: string; backend: 'claude-code' | 'codex'; termHwnd?: string; ppid?: number } | null =
+      live ?? (hint
+        ? { proj: hint.proj || '', backend: hint.backend || 'claude-code', termHwnd: hint.termHwnd, ppid: hint.ppid }
+        : null)
     if (!agent) return false
     yieldToExternalApp()
     const tabHints = [agent.proj, agent.backend === 'codex' ? 'codex' : 'claude'].filter(Boolean)
@@ -1230,6 +1301,11 @@ function wireIpc(): void {
     }
     return false
   })
+
+  // 让原会话继续补验证：claude --resume / codex exec resume，输出经 followup-event 流回卡片
+  ipcMain.handle('agent-followup', (_e, req: FollowupRequest) =>
+    startFollowup(req, (ev) => safeSend('followup-event', ev)))
+  ipcMain.on('agent-followup-cancel', (_e, runId: string) => cancelFollowup(String(runId || '')))
 
   ipcMain.on('set-autostart', (_e, on: boolean) => {
     app.setLoginItemSettings({ openAtLogin: on })
@@ -1358,21 +1434,105 @@ function wireIpc(): void {
       const target = join(dir, `${safeName(name, 'screenshot')}.${ext}`)
       const bytes = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64')
       await writeFile(target, bytes)
+      // 写盘成功不等于图片正确：读回真实像素尺寸，界面据此显示并发现"导出被缩小"的回归。
+      const decoded = nativeImage.createFromBuffer(bytes)
+      const size = decoded.isEmpty() ? { width: 0, height: 0 } : decoded.getSize()
+      return { ok: true, path: target, width: size.width, height: size.height }
+    } catch (error) {
+      return { ok: false, error: String(error instanceof Error ? error.message : error) }
+    }
+  })
+  // 截图历史：与「图片/Agentic-Island」分开，避免用户清理导出目录时把回看记录一起删掉。
+  // 只归档图片本身，不写数据库；列表按 mtime 倒序，缩略图由主进程缩放，渲染层不读全图。
+  const screenshotHistoryDir = join(app.getPath('userData'), 'screenshot-history')
+  const safeHistoryPath = (path: string): string => {
+    const normalized = path.replace(/\//g, '\\')
+    const base = screenshotHistoryDir.replace(/\//g, '\\')
+    return normalized.startsWith(base + sep) ? normalized : ''
+  }
+  const pruneScreenshotHistory = async (keep = 120): Promise<void> => {
+    try {
+      const names = await readdirP(screenshotHistoryDir)
+      const files = await Promise.all(names.filter((name) => /\.(?:png|jpe?g|webp)$/i.test(name)).map(async (name) => {
+        const path = join(screenshotHistoryDir, name)
+        const info = await stat(path).catch(() => null)
+        return info ? { path, mtime: info.mtimeMs } : null
+      }))
+      const stale = files.filter((file): file is { path: string; mtime: number } => !!file).sort((a, b) => b.mtime - a.mtime).slice(keep)
+      for (const file of stale) await rm(file.path, { force: true }).catch(() => {})
+    } catch { /* 目录不存在或清理失败不影响截图 */ }
+  }
+  ipcMain.handle('archive-screenshot', async (_e, dataUrl: string, name: string) => {
+    try {
+      if (!validImageData(dataUrl)) return { ok: false, error: '图片数据无效或超过 160MB' }
+      await mkdir(screenshotHistoryDir, { recursive: true })
+      const ext = /^data:image\/jpe?g/i.test(dataUrl) ? 'jpg' : /^data:image\/webp/i.test(dataUrl) ? 'webp' : 'png'
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const target = join(screenshotHistoryDir, `${stamp}_${safeName(name, 'screenshot')}.${ext}`)
+      await writeFile(target, Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64'))
+      await pruneScreenshotHistory()
       return { ok: true, path: target }
     } catch (error) {
       return { ok: false, error: String(error instanceof Error ? error.message : error) }
     }
   })
+  ipcMain.handle('screenshot-history', async (_e, limit?: number) => {
+    try {
+      await mkdir(screenshotHistoryDir, { recursive: true })
+      const names = (await readdirP(screenshotHistoryDir)).filter((name) => /\.(?:png|jpe?g|webp)$/i.test(name))
+      const files = await Promise.all(names.map(async (name) => {
+        const path = join(screenshotHistoryDir, name)
+        const info = await stat(path).catch(() => null)
+        return info ? { path, name, mtime: info.mtimeMs, bytes: info.size } : null
+      }))
+      const entries = []
+      for (const file of files.filter((item): item is { path: string; name: string; mtime: number; bytes: number } => !!item).sort((a, b) => b.mtime - a.mtime).slice(0, Math.max(1, Math.min(200, Number(limit) || 40)))) {
+        const image = nativeImage.createFromPath(file.path)
+        if (image.isEmpty()) continue
+        const size = image.getSize()
+        const thumb = image.resize({ width: Math.min(320, Math.max(1, size.width)) }).toDataURL()
+        entries.push({ path: file.path, name: file.name, thumb, width: size.width, height: size.height, bytes: file.bytes, mtime: file.mtime })
+      }
+      return { ok: true, entries, dir: screenshotHistoryDir }
+    } catch (error) {
+      return { ok: false, error: String(error instanceof Error ? error.message : error) }
+    }
+  })
+  ipcMain.handle('read-screenshot-history', async (_e, path: string) => {
+    try {
+      const target = safeHistoryPath(String(path || ''))
+      if (!target || !existsSync(target)) return { ok: false, error: '历史截图不存在或路径不合法' }
+      const info = await stat(target)
+      if (info.size > 160_000_000) return { ok: false, error: '历史截图超过 160MB' }
+      const ext = extname(target).toLowerCase()
+      const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png'
+      return { ok: true, dataUrl: `data:${mime};base64,${(await readFile(target)).toString('base64')}`, name: basename(target) }
+    } catch (error) {
+      return { ok: false, error: String(error instanceof Error ? error.message : error) }
+    }
+  })
+  ipcMain.handle('reveal-screenshot-history', async (_e, path: string) => {
+    const target = safeHistoryPath(String(path || ''))
+    if (!target || !existsSync(target)) return { ok: false, error: '历史截图不存在或路径不合法' }
+    shell.showItemInFolder(target)
+    return { ok: true }
+  })
   ipcMain.on('snip-complete', (_e, region: ScreenshotSnipRegion) => {
+    // 区域坐标来自叠层的 DIP 坐标系；缩放因子以主进程创建叠层时记录的显示器值为准。
+    // 不能只信渲染层回传（配置事件曾可能丢失），否则 150% 屏会按 1x/DPR 估错，裁出来的像素偏少、放大后发糊。
+    const scaleFactor = snipConfig?.scaleFactor ?? (Number(region?.scaleFactor) || undefined)
     void completeSnip({
       x: Number(region?.x) || 0,
       y: Number(region?.y) || 0,
       width: Math.max(0, Number(region?.width) || 0),
       height: Math.max(0, Number(region?.height) || 0),
-      scaleFactor: Number(region?.scaleFactor) || undefined
+      scaleFactor
     })
   })
   ipcMain.on('snip-cancel', () => { closeSnipOverlay() })
+  ipcMain.on('snip-ready', () => {
+    if (snipWin && !snipWin.isDestroyed() && snipConfig) snipWin.webContents.send('snip-config', snipConfig)
+  })
   // 滚动截图：进度上报（渲染层 → 小窗）与用户动作（小窗 → 渲染层）
   ipcMain.on('scroll-hud-open', () => { openScrollHud() })
   ipcMain.on('scroll-hud-update', (_e, state: ScrollHudState) => {
@@ -1907,6 +2067,25 @@ const verifyRecordingOutput = async (ffmpegPath: string, outputPath: string, req
 const auditUserData = process.env['AIISLAND_AUDIT_USER_DATA']?.trim()
 const allowAuditInstance = process.env['AIISLAND_ALLOW_AUDIT_INSTANCE'] === '1' && Boolean(auditUserData)
 if (allowAuditInstance) app.setPath('userData', auditUserData!)
+
+// Chromium 的 GPU/代码缓存跨 Electron 升级后偶发损坏，会在创建透明窗口前直接 FATAL。
+// 只清理可重建的 Chromium 缓存，保留 config、录屏、附件、终端现场和知识库。
+function prepareChromiumCacheForVersion(userData: string, version: string): void {
+  const marker = join(userData, '.chromium-cache-version')
+  try {
+    if (readFileSync(marker, 'utf8').trim() === version) return
+  } catch { /* 首次或标记丢失：执行一次清理 */ }
+  const cacheNames = [
+    'GPUCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'Code Cache', 'Cache',
+    'Session Storage', 'Local State', 'Preferences', 'Dictionaries', 'Shared Dictionary'
+  ]
+  for (const name of cacheNames) {
+    try { rmSync(join(userData, name), { recursive: true, force: true }) } catch { /* 单个失败不影响启动 */ }
+  }
+  try { writeFileSync(marker, version) } catch { /* 下次再试 */ }
+}
+prepareChromiumCacheForVersion(app.getPath('userData'), app.getVersion())
+
 if (!allowAuditInstance && !app.requestSingleInstanceLock()) {
   app.quit()
 } else if (!allowAuditInstance) {

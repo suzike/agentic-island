@@ -9,6 +9,8 @@ import type { AgentState, Backend, BridgeEvent, ChangeSummary, Decision, IslandS
 /** 审批策略钩子（依赖注入，保持本模块 raw-node 可加载）：主进程注入 policyAutoDecision/clearSessionAllows */
 export interface PolicyHooks {
   autoDecision?: (agentId: string, command?: string) => ApprovalAuditEntry | null
+  /** 会话第一次出现：此刻还没跑任何工具，可用于拍工作区基线 */
+  onSessionStart?: (agentId: string, cwd: string) => void
   onSessionEnd?: (agentId: string) => void
 }
 
@@ -62,6 +64,16 @@ export class AgentsStore extends EventEmitter {
   private static APPROVAL_TIMEOUT = 5 * 60 * 1000
   /** 已结束的会话在岛上保留的时长（之后自动隐藏，避免堆积） */
   private static DONE_LINGER = 3 * 60 * 1000
+  /**
+   * 无活动会话的兜底回收。
+   * Codex 关闭窗口不会写 SessionEnd，hook 仍可能留下一张"等待回复/运行中"卡片；
+   * 等待态给 10 分钟（足够用户回来接着说），运行态给 60 分钟（避免误删长构建）。
+   * Claude Code 有明确的 SessionEnd/Stop，阈值放宽，只清理真正被遗弃的会话。
+   */
+  private static STALE_IDLE: Record<Backend, number> = {
+    codex: 10 * 60 * 1000,
+    'claude-code': 60 * 60 * 1000
+  }
 
   constructor() {
     super()
@@ -82,6 +94,7 @@ export class AgentsStore extends EventEmitter {
       backend: e.backend,
       tool: toolLabel(e),
       proj: projOf(e.cwd),
+      cwd: e.cwd || prev?.cwd,
       status: 'running',
       detail: '',
       updatedAt: Date.now(),
@@ -91,12 +104,29 @@ export class AgentsStore extends EventEmitter {
       ppid: e.ppid || prev?.ppid,
       startedAt: prev?.startedAt || Date.now()
     }
+    // 本轮最终回复：停止/完成事件携带，验收台在会话结束时留档
+    if (e.lastReply) next.lastReply = e.lastReply.slice(0, 8000)
+    // 验证证据：保留最近 12 条命令结果（跨轮累计，验收时按会话整体看）
+    if (e.check) next.checks = [...(prev?.checks || []), e.check].slice(-12)
+    // 计划全文：ExitPlanMode 的 command 就是计划；同一份计划重复上报时保留原裁决
+    if (e.isPlan && e.command) {
+      const prevPlan = prev?.plan
+      const same = prevPlan?.text === e.command
+      next.plan = {
+        text: e.command.slice(0, 20000),
+        at: same && prevPlan ? prevPlan.at : Date.now(),
+        decision: same ? prevPlan?.decision : undefined,
+        reason: same ? prevPlan?.reason : undefined
+      }
+    }
     // 活动轨迹：状态描述变化时记录时间线（取首行，最多 10 条）
     const line = (patch.detail || '').split('\n')[0].trim()
     if (line && line !== (prev?.detail || '').split('\n')[0].trim()) {
       next.history = [...(prev?.history || []), { ts: Date.now(), text: line.slice(0, 80) }].slice(-10)
     }
     this.agents.set(key, next)
+    // 会话第一次出现：通知主线拍"Agent 动手前"的工作区基线（失败无副作用）
+    if (!prev) this.policyHooks?.onSessionStart?.(key, e.cwd)
     this.prune()
     this.emit('change')
     return next
@@ -106,6 +136,21 @@ export class AgentsStore extends EventEmitter {
   private prune(): boolean {
     const now = Date.now()
     let removed = false
+    // 先回收没有活动、也没有挂起审批的会话。挂起审批必须留着等用户裁决，
+    // 其余卡片只要超过阈值就移除；下一次真实事件会按同一个 sessionId 重新建卡。
+    for (const [id, agent] of this.agents) {
+      if (agent.status === 'done') continue
+      if (agent.status === 'needs_approval' && agent.requestId) continue
+      const idleLimit = agent.status === 'running'
+        ? AgentsStore.STALE_IDLE[agent.backend] * 6
+        : AgentsStore.STALE_IDLE[agent.backend]
+      if (now - agent.updatedAt <= idleLimit) continue
+      const queue = this.queues.get(id)
+      if (queue) for (const requestId of [...queue]) this.resolvePending(requestId, 'ask')
+      this.queues.delete(id)
+      this.agents.delete(id)
+      removed = true
+    }
     const done = [...this.agents.values()].filter((a) => a.status === 'done').sort((a, b) => b.updatedAt - a.updatedAt)
     for (const a of done) {
       if (now - a.updatedAt > AgentsStore.DONE_LINGER) { this.agents.delete(a.id); removed = true }
@@ -178,6 +223,7 @@ export class AgentsStore extends EventEmitter {
       command: p.command,
       requestId: next,
       isPlan: p.isPlan,
+      plan: p.isPlan && p.command ? { text: p.command.slice(0, 20000), at: Date.now() } : agent.plan,
       updatedAt: Date.now()
     })
     this.emit('change')
@@ -211,6 +257,10 @@ export class AgentsStore extends EventEmitter {
             : '已允许，继续执行中…',
         command: undefined,
         requestId: undefined,
+        // 计划裁决留档：验收台据此区分"批过再改"与"打回了却仍有改动"
+        plan: p.isPlan && agent.plan
+          ? { ...agent.plan, decision, reason: reason?.slice(0, 1000) }
+          : agent.plan,
         updatedAt: Date.now()
       })
       this.emit('change')

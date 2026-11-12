@@ -4,7 +4,7 @@
 //
 // 关键：任何异常都必须 fail-open（静默 exit 0）—— 岛没开/桥不可达时绝不能卡住用户的 CLI。
 
-import { readFileSync, appendFileSync, writeFileSync, renameSync, openSync, readSync, closeSync, statSync, existsSync } from 'fs'
+import { readFileSync, appendFileSync, writeFileSync, renameSync, openSync, readSync, closeSync, statSync, existsSync, mkdirSync, unlinkSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { request } from 'http'
@@ -13,6 +13,20 @@ import { execFile } from 'child_process'
 // AIISLAND_BRIDGE_FILE：测试专用的发现文件覆盖（避免测试桥覆盖真实 bridge.json）
 const BRIDGE_FILE = process.env.AIISLAND_BRIDGE_FILE || join(homedir(), '.agentic-island', 'bridge.json')
 const EVENTS_LOG = join(homedir(), '.agentic-island', 'events.log')
+// 验证命令的起跑时刻：PreToolUse 落盘、PostToolUse 读取并删除，用来给"耗时"一个真实数字
+const TOOL_START_DIR = join(homedir(), '.agentic-island', 'tool-start')
+// 与 src/renderer/src/logic/acceptance.ts 的 CHECK_CMD 保持同步（这里只决定"值不值得记结果"）
+const VERIFY_CMD = /(npm (?:run )?(?:test|build)|pnpm (?:test|build)|yarn (?:test|build)|vitest|jest|pytest|playwright|go test|cargo (?:test|build)|tsc\b|typecheck|eslint|lint)/i
+// 目录里只留少量近期文件；超过 2 小时的起跑标记视为被拒绝/中断的残留
+const pruneToolStarts = () => {
+  try {
+    const cutoff = Date.now() - 2 * 60 * 60 * 1000
+    for (const name of readdirSync(TOOL_START_DIR)) {
+      const p = join(TOOL_START_DIR, name)
+      try { if (statSync(p).mtimeMs < cutoff) unlinkSync(p) } catch { /* */ }
+    }
+  } catch { /* 目录不存在时跳过 */ }
+}
 const T0 = Date.now()
 // 延迟诊断日志：记录 hook 启动与桥响应耗时（排查"终端先弹、岛后弹"用）；超 1MB 轮转为 .old，不无限增长
 const trace = (msg) => {
@@ -97,6 +111,32 @@ async function main() {
     return `正在使用 ${tool}…`
   }
 
+  // 验证命令的起跑/收尾标记：Claude Code 的 PostToolUse 不回传退出码，但耗时可以自己量
+  const hashCmd = (text) => {
+    let h = 5381
+    for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) >>> 0
+    return h.toString(36)
+  }
+  const startFile = (cmd) => join(TOOL_START_DIR, `${String(sessionId).replace(/[^\w-]/g, '')}-${hashCmd(cmd)}.json`)
+  const stampToolStart = (cmd) => {
+    try {
+      mkdirSync(TOOL_START_DIR, { recursive: true })
+      pruneToolStarts()
+      writeFileSync(startFile(cmd), JSON.stringify({ ts: Date.now() }))
+    } catch { /* 量不到耗时不影响主流程 */ }
+  }
+  const takeToolStart = (cmd) => {
+    try {
+      const f = startFile(cmd)
+      if (!existsSync(f)) return 0
+      const ts = Number(JSON.parse(readFileSync(f, 'utf8')).ts) || 0
+      unlinkSync(f)
+      return ts
+    } catch {
+      return 0
+    }
+  }
+
   // 工具 → 审批卡展示的 { command(展示在等宽框), detail(一句说明) }
   const describeTool = (tool, input) => {
     const ti = input.tool_input || {}
@@ -137,6 +177,9 @@ async function main() {
       ])
       process.exit(0)
     }
+    // 验证/构建命令先记起跑时刻，PostToolUse 回来时才能给出真实耗时
+    const cmd = tool === 'Bash' ? String((input.tool_input || {}).command || (input.tool_input || {}).cmd || '') : ''
+    if (cmd && VERIFY_CMD.test(cmd)) stampToolStart(cmd)
     await report(bridge, { backend, kind: 'activity', sessionId, cwd, tool, detail: activityDetail(tool) })
     process.exit(0)
   }
@@ -198,6 +241,7 @@ async function main() {
   let kind = 'notification'
   let detail = input.message ? String(input.message) : '等待你的回复…'
   let withTermInfo = false
+  let check
   if (eventName === 'SessionStart') { kind = 'session'; detail = '会话已开始，待命中…'; withTermInfo = true }
   else if (eventName === 'UserPromptSubmit') { kind = 'prompt'; detail = '对话中 · 正在处理你的消息…' }
   else if (eventName === 'Stop') {
@@ -208,15 +252,37 @@ async function main() {
     withTermInfo = true
     // 标记轮次结束：岛端据此采集 git 变更小结；顺带携带模型/上下文占用（岛卡片展示）
     const usage = lastUsage(input.transcript_path) || {}
-    const jobs2 = [report(bridge, { backend, kind, sessionId, cwd, detail, turnEnd: true, model: usage.model, contextTokens: usage.contextTokens }), ensureTermInfo(bridge, backend, sessionId, cwd)]
+    const jobs2 = [report(bridge, { backend, kind, sessionId, cwd, detail, turnEnd: true, model: usage.model, contextTokens: usage.contextTokens, lastReply: last ? last.slice(0, 6000) : undefined }), ensureTermInfo(bridge, backend, sessionId, cwd)]
     await Promise.all(jobs2)
     process.exit(0)
   }
   else if (eventName === 'SubagentStop') { kind = 'activity'; detail = '子任务完成…' }
   else if (eventName === 'SessionEnd') { kind = 'end'; detail = '会话已结束' }
-  else if (eventName === 'PostToolUse') { kind = 'activity'; detail = activityDetail(input.tool_name || '') }
+  else if (eventName === 'PostToolUse') {
+    kind = 'activity'
+    detail = activityDetail(input.tool_name || '')
+    const tool = input.tool_name || ''
+    const ti = input.tool_input || {}
+    const cmd = tool === 'Bash' ? String(ti.command || ti.cmd || '') : ''
+    if (cmd && VERIFY_CMD.test(cmd)) {
+      // Claude Code 的 tool_response 只有 stdout/stderr/interrupted/isImage —— 没有退出码，
+      // 所以这里只填能拿到的字段；缺退出码就不编一个。
+      const resp = input.tool_response || {}
+      const started = takeToolStart(cmd)
+      const interrupted = resp.interrupted === true || resp.is_error === true
+      const errText = String(resp.stderr || '')
+      const outText = String(resp.stdout || '')
+      check = {
+        command: cmd.slice(0, 400),
+        at: Date.now(),
+        ms: started ? Math.max(0, Date.now() - started) : undefined,
+        ok: interrupted ? false : undefined,
+        outputTail: interrupted ? (errText || outText || '用户中断').slice(-400) : undefined
+      }
+    }
+  }
 
-  const jobs = [report(bridge, { backend, kind, sessionId, cwd, detail })]
+  const jobs = [report(bridge, { backend, kind, sessionId, cwd, detail, check })]
   if (withTermInfo) jobs.push(ensureTermInfo(bridge, backend, sessionId, cwd))
   await Promise.all(jobs)
   process.exit(0)

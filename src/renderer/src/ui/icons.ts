@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Circle,
   CircleDot,
+  ClipboardCheck,
   ClipboardList,
   Clock,
   Copy,
@@ -75,6 +76,7 @@ export const Ico = {
 
   // 分区
   plan: ClipboardList, // Plan 审阅
+  accept: ClipboardCheck, // 验收台
   ask: MessageSquare, // 问答
   shortcuts: Zap, // 快捷
   todos: ListTodo, // 待办

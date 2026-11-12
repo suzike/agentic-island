@@ -1,10 +1,37 @@
 // 渲染层内部数据模型（聊天/附件/富文本块）。移植自原型的 threads/composers/blocks 结构。
 
-import type { AgentState } from '../../shared/protocol'
+import type { AgentState, Backend, ChangeSummary, CommandRun } from '../../shared/protocol'
 
 /** 岛内 Agent 视图模型：真实快照 + demo 演示态统一表示 */
 export interface AgentVM extends AgentState {
   demo?: boolean
+}
+
+/** 验收台留档的一次 Agent 会话：会话从快照消失时落账，供"计划 → 实际改动 → 未验证项"对照 */
+export interface AcceptanceRecord {
+  id: string
+  backend: Backend
+  tool: string
+  proj: string
+  /** 会话工作目录（续跑补验证用） */
+  cwd?: string
+  startedAt: number
+  endedAt: number
+  model?: string
+  termHwnd?: string
+  ppid?: number
+  /** 计划全文与裁决（未走计划模式时为空） */
+  plan?: AgentState['plan']
+  /** 最近一轮的最终回复 */
+  lastReply?: string
+  summary?: ChangeSummary
+  /** 会话内执行过的验证/构建命令结果（退出码/耗时能拿到就有） */
+  checks?: CommandRun[]
+  /** 活动轨迹（"运行命令：npm test" 这类记录是执行证据） */
+  history?: { ts: number; text: string }[]
+  /** 人工处置：pending=待核对 / accepted=已验收 / followup=待跟进 */
+  status: 'pending' | 'accepted' | 'followup'
+  markedAt?: number
 }
 
 /** 待办事项：到时自动弹岛提醒 */

@@ -67,7 +67,7 @@ function CodeBlock({ code }: { code: string }): React.JSX.Element {
   const lt = useContext(LightCtx)
   return (
     <div className="code-block" style={{ position: 'relative', margin: '4px 0' }}>
-      <div className="ai-scroll" style={{ fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 11, lineHeight: 1.55, color: lt ? '#2f3b47' : ink(2), background: lt ? 'rgba(0,0,0,.05)' : surface.inset().background, border: lt ? 'none' : `0.5px solid ${hairline(.06)}`, padding: '7px 9px', paddingRight: 30, borderRadius: 7, overflowX: 'auto', whiteSpace: 'pre' }}>
+      <div className="ai-scroll" style={{ fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 11.5, lineHeight: 1.6, color: lt ? '#2f3b47' : ink(2), background: lt ? 'rgba(0,0,0,.05)' : surface.inset().background, border: lt ? 'none' : `0.5px solid ${hairline(.05)}`, padding: '8px 10px', paddingRight: 30, borderRadius: 7, overflowX: 'auto', whiteSpace: 'pre' }}>
         {code}
       </div>
       {/* 复制按钮：默认隐藏，悬停/键盘聚焦浮现（见 index.html .code-copy）。
@@ -97,9 +97,9 @@ function MarkdownImpl({ text, onWikiLink, reader, light }: { text: string; onWik
   let key = 0
   let hIdx = 0 // 标题序号（供工作台 TOC 定位滚动）
   // 阅读版放大排版，紧凑版沿用岛内小字
-  const bodyFz = reader ? 15 : 11.5
-  const lh = reader ? 1.8 : 1.6
-  const hFz = (lv: number): number => (reader ? [26, 21, 17.5, 15.5, 14, 13][lv - 1] : lv <= 2 ? 12.5 : 11.5)
+  const bodyFz = reader ? 15 : 12.5
+  const lh = reader ? 1.8 : 1.65
+  const hFz = (lv: number): number => (reader ? [26, 21, 17.5, 15.5, 14, 13][lv - 1] : lv <= 2 ? 14 : 12.5)
   const hMargin = reader ? '20px 0 9px' : '6px 0 2px'
   // 明暗配色
   const cBody = light ? '#2b2b2b' : ink(1)
@@ -137,7 +137,7 @@ function MarkdownImpl({ text, onWikiLink, reader, light }: { text: string; onWik
       while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(splitRow(lines[i])); i++ }
       out.push(
         <div key={key++} className="ai-scroll" style={{ overflowX: 'auto', margin: reader ? '12px 0' : '5px 0' }}>
-          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: reader ? 13.5 : 11 }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: reader ? 13.5 : 12 }}>
             <thead>
               <tr>{header.map((c, j) => <th key={j} style={{ textAlign: 'left', padding: reader ? '7px 11px' : '4px 8px', borderBottom: '2px solid oklch(0.6 calc(0.1 * var(--cs, 1)) var(--th) / .4)', color: cTh, fontWeight: 700 }}><Inline text={c} /></th>)}</tr>
             </thead>
@@ -259,7 +259,9 @@ export function Collapsible({ children, collapsedHeight = 120 }: { children: Rea
         ref={ref}
         className="ai-scroll"
         style={{
-          maxHeight: open ? 320 : collapsedHeight,
+          // 展开必须真的变高。此前固定 320px，长总结点“展开全部”几乎看不出变化，
+          // 用户会以为详情又被收回去了。外层岛面板自己滚动，这里给到 70vh 的上限即可。
+          maxHeight: open ? 'min(70vh, 760px)' : collapsedHeight,
           overflowY: open ? 'auto' : 'hidden',
           position: 'relative',
           transition: 'max-height .2s ease'
@@ -272,7 +274,8 @@ export function Collapsible({ children, collapsedHeight = 120 }: { children: Rea
       </div>
       {overflowing && (
         <div
-          onClick={() => setOpen((v) => !v)}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); setOpen((v) => !v) }}
           style={{ textAlign: 'center', padding: '4px 0 1px', color: 'oklch(0.8 calc(0.08 * var(--cs, 1)) var(--th))', fontSize: 10.5, fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
         >
           {open ? '收起 ▴' : '展开全部 ▾'}

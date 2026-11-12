@@ -176,7 +176,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
             style={{ maxWidth: 190 }}
           >
             <span style={{ width: 5, height: 5, flex: 'none', borderRadius: 999, background: accent(), boxShadow: `0 0 6px ${accent()}` }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 10 }}>{p.modelLabel}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "ui-monospace,'Cascadia Code',monospace", fontSize: 10.5 }}>{p.modelLabel}</span>
             {p.models.length > 0 && <ChevronDown size={9} strokeWidth={2} style={{ opacity: 0.7 }} />}
           </Chip>
         )}
@@ -421,7 +421,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
             <div style={{ width: 42, height: 42, borderRadius: 13, background: gradient.brand(), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 4px 18px ${accent(0.7, 0.35)}, inset 0 1px 0 rgba(255,255,255,0.3)`, color: gradient.onPrimary() }}>
               <Sparkles size={20} strokeWidth={1.75} />
             </div>
-            <div style={{ ...text.title(), fontSize: 14 }}>工作助手</div>
+            <div style={{ ...text.title(), fontSize: 15 }}>工作助手</div>
             <div style={{ ...text.dim(), textAlign: 'center', lineHeight: 1.6 }}>
               从一个明确问题开始 · {p.engine === 'llm' ? (p.kbMode ? '仅依据我的知识库' : p.mode === 'deep' ? '深度回答' : '快速回答') : p.engine === 'claude' ? '交给本机 Claude' : '交给本机 Codex'}
             </div>
@@ -433,13 +433,13 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
               {p.prompts.map((q) => (
                 <motion.div
                   key={q.id}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
+                  whileHover={{ scale: 1.015 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => p.conv.onText(q.text)}
                   style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '11px 6px', borderRadius: R.lg, background: fill(2), cursor: 'pointer' }}
                 >
                   <span style={{ fontSize: 16 }}>{q.icon}</span>
-                  <span style={{ color: ink(1), fontSize: 10.5, fontWeight: 600 }}>{q.label}</span>
+                  <span style={{ color: ink(1), fontSize: 11, fontWeight: 600 }}>{q.label}</span>
                 </motion.div>
               ))}
             </div>
@@ -456,7 +456,7 @@ export function AskTab(p: AskTabProps): React.JSX.Element {
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.985 }}
                 onClick={s.go}
-                style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 38, padding: '8px 12px', borderRadius: R.lg, background: fill(2), color: ink(2), fontSize: 11.5, cursor: 'pointer', boxSizing: 'border-box' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 40, padding: '9px 12px', borderRadius: R.lg, background: fill(2), color: ink(2), fontSize: 12, cursor: 'pointer', boxSizing: 'border-box' }}
               >
                 <Lightbulb size={12} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>

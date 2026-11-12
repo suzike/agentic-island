@@ -57,15 +57,15 @@ export const staggerItem: Variants = {
 
 /** 可按压：iOS 式 opacity 下沉 + 0.98 微缩（不再做明显的 scale 弹跳） */
 export const pressable = {
-  whileHover: { opacity: 0.82 },
-  whileTap: { opacity: 0.55, scale: 0.98 },
+  whileHover: { opacity: 0.9 },
+  whileTap: { opacity: 0.74, scale: 0.985 },
   transition: { duration: 0.12 },
 } as const
 
 /** 温和按压（大卡片：只降透明度） */
 export const pressableGentle = {
-  whileHover: { opacity: 0.9 },
-  whileTap: { opacity: 0.7 },
+  whileHover: { opacity: 0.96 },
+  whileTap: { opacity: 0.84 },
   transition: { duration: 0.12 },
 } as const
 

@@ -83,13 +83,13 @@ function ThinkBlock({ text: thinkText, live, collapsed }: { text: string; live?:
       </div>
       {streaming ? (
         // 进行中：只露最近几行，随流式自动"滚动"（column-reverse 让底部对齐）
-        <div style={{ maxHeight: 108, overflow: 'hidden', display: 'flex', flexDirection: 'column-reverse', opacity: 0.78 }}>
+        <div style={{ maxHeight: 108, overflow: 'hidden', display: 'flex', flexDirection: 'column-reverse', opacity: 0.84 }}>
           <div><Markdown text={thinkText} /></div>
         </div>
       ) : (
         <div
           className="ai-scroll"
-          style={{ maxHeight: open ? 320 : collapsedH, overflowY: open ? 'auto' : 'hidden', position: 'relative', transition: 'max-height .22s ease', opacity: 0.72 }}
+          style={{ maxHeight: open ? 320 : collapsedH, overflowY: open ? 'auto' : 'hidden', position: 'relative', transition: 'max-height .22s ease', opacity: 0.8 }}
         >
           <Markdown text={thinkText} />
           {!open && thinkText.length > 120 && (
@@ -107,7 +107,7 @@ function AgentLiveBody({ live }: { live: NonNullable<ChatMessage['live']> }): Re
   return (
     <>
       {live.status && (
-        <div style={{ ...text.mono(9), color: ink(3), display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ ...text.mono(9.5), color: ink(3), display: 'flex', alignItems: 'center', gap: 4 }}>
           <Settings size={9} strokeWidth={1.75} style={{ flex: 'none' }} />
           {live.status}
         </div>
@@ -187,7 +187,7 @@ function AnswerBody({ blocks }: { blocks?: Block[] }): React.JSX.Element {
 function ModelStamp({ label }: { label?: string }): React.JSX.Element | null {
   if (!label) return null
   return (
-    <div title="本条回答实际使用的模型" style={{ display: 'flex', alignItems: 'center', gap: 4, color: ink(3), fontSize: 9.5, lineHeight: 1.2 }}>
+    <div title="本条回答实际使用的模型" style={{ display: 'flex', alignItems: 'center', gap: 4, color: ink(3), fontSize: 10, lineHeight: 1.2 }}>
       <Brain size={10} strokeWidth={1.8} style={{ flex: 'none' }} />
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
     </div>
@@ -258,7 +258,7 @@ function ContextStatus({ mode }: { mode?: ChatMessage['contextMode'] }): React.J
   if (!mode || mode === 'normal') return null
   const excluded = mode === 'excluded'
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', alignSelf: 'flex-start', gap: 4, padding: '2px 7px', borderRadius: R.pill, background: semBg(excluded ? sem.warn : accent(), 0.12), color: excluded ? sem.warn : accent(0.84), fontSize: 9, fontWeight: 650 }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', alignSelf: 'flex-start', gap: 4, padding: '2.5px 7px', borderRadius: R.pill, background: semBg(excluded ? sem.warn : accent(), 0.12), color: excluded ? sem.warn : accent(0.84), fontSize: 9.5, fontWeight: 650 }}>
       {excluded ? <EyeOff size={9} strokeWidth={2} /> : <Pin size={9} strokeWidth={2} />}
       {excluded ? '不发送给模型' : '重要上下文'}
     </span>
@@ -670,7 +670,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                 {!!m.text && (
                   <div
                     onContextMenu={p.enableQuote ? onAiSelect : undefined}
-                    style={{ padding: '8px 12px', borderRadius: '14px 14px 4px 14px', background: `linear-gradient(180deg, ${accent(0.52)}, ${accent(0.44)})`, color: solidInk(), fontSize: FS.small, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', boxShadow: `0 3px 12px -4px ${accent(0.5, 0.35)}, inset 0 1px 0 rgba(255,255,255,0.12)`, userSelect: p.enableQuote ? 'text' : undefined, cursor: p.enableQuote ? 'text' : undefined }}
+                    style={{ padding: '9px 13px', borderRadius: '14px 14px 4px 14px', background: `linear-gradient(180deg, ${accent(0.52)}, ${accent(0.44)})`, color: solidInk(), fontSize: FS.body, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word', boxShadow: `0 3px 12px -4px ${accent(0.5, 0.35)}, inset 0 1px 0 rgba(255,255,255,0.12)`, userSelect: p.enableQuote ? 'text' : undefined, cursor: p.enableQuote ? 'text' : undefined }}
                   >
                     {m.text}
                   </div>
@@ -704,7 +704,7 @@ export function IslandChat(p: ChatProps): React.JSX.Element {
                 </div>
                 <div
                   onContextMenu={p.enableQuote && !m.typing ? onAiSelect : undefined}
-                  style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '11px 13px', ...surface.card(), border: 'none', boxShadow: '0 6px 18px -8px rgba(0, 0, 0, 0.4)', borderRadius: '4px 14px 14px 14px', minWidth: 0, userSelect: p.enableQuote ? 'text' : undefined, cursor: p.enableQuote && !m.typing ? 'text' : undefined }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 14px', ...surface.card(), border: 'none', boxShadow: '0 8px 22px -12px rgba(0, 0, 0, 0.35)', borderRadius: '4px 15px 15px 15px', minWidth: 0, userSelect: p.enableQuote ? 'text' : undefined, cursor: p.enableQuote && !m.typing ? 'text' : undefined }}
                 >
                   {m.typing && <TypingDots />}
                   {m.live && <AgentLiveBody live={m.live} />}

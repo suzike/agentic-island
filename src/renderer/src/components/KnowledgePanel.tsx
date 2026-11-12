@@ -168,11 +168,11 @@ export function KnowledgePanel({ open, onClose, embedCfg, onSetEmbedConfig, onCh
                   {busy === 'wiki' ? '合成中…' : wiki ? '重新生成' : <><Sparkles size={11} strokeWidth={2} />生成总览</>}
                 </span>
               </div>
-              {!wiki && <div style={{ color: ink(3), fontSize: 10, lineHeight: 1.5 }}>把整库综合成一页结构化 Wiki（主题/术语/可问的问题），编译一次长期复用；资料更新后可重新生成。</div>}
+              {!wiki && <div style={{ color: ink(3), fontSize: 10.5, lineHeight: 1.55 }}>把整库综合成一页结构化 Wiki（主题/术语/可问的问题），编译一次长期复用；资料更新后可重新生成。</div>}
               {wiki && wikiOpen && (
                 <div style={{ ...surface.inset(), padding: '9px 11px', fontSize: FS.small, lineHeight: 1.6, maxHeight: 260, overflowY: 'auto' }} className="ai-scroll"><Markdown text={wiki} /></div>
               )}
-              {wiki && wikiAt > 0 && <div style={{ color: ink(4), fontSize: 9 }}>更新于 {new Date(wikiAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>}
+              {wiki && wikiAt > 0 && <div style={{ color: ink(4), fontSize: 10 }}>更新于 {new Date(wikiAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>}
             </motion.div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -199,7 +199,7 @@ export function KnowledgePanel({ open, onClose, embedCfg, onSetEmbedConfig, onCh
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: ink(1), fontSize: FS.small, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</div>
-                  <div style={{ ...text.mono(9), color: ink(4), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.target}</div>
+                  <div style={{ ...text.mono(10), color: ink(4), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.target}</div>
                 </div>
                 <Badge style={{ height: 17, padding: '0 8px', flex: 'none' }}>{s.docCount} 块</Badge>
                 <IconButton icon={Trash2} onClick={() => remove(s.id)} title="移除该源及其索引" size={24} color={sem.danger} style={{ flex: 'none' }} />

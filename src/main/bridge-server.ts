@@ -12,7 +12,10 @@ import type { AgentsStore } from './agents-store'
 import type { BridgeEvent, ChangeSummary } from '../shared/protocol'
 
 /** 完成时用于计算变更小结的注入函数（由 index.ts 注入 gitSummary，测试可省略） */
-export type Summarizer = (cwd: string) => Promise<ChangeSummary | null>
+export type Summarizer = (cwd: string, agentId: string) => Promise<ChangeSummary | null>
+
+// 与 agents-store 的 agentKey 同构；本文件被 raw-node 测试直接加载，不能用运行时 import
+const eventKey = (e: BridgeEvent): string => `${e.backend}:${e.sessionId || e.cwd}`
 
 export const BRIDGE_DIR = join(homedir(), '.agentic-island')
 export const BRIDGE_FILE = join(BRIDGE_DIR, 'bridge.json')
@@ -33,14 +36,17 @@ export class BridgeServer {
   readonly token = randomBytes(24).toString('hex')
   private store: AgentsStore
   private summarize?: Summarizer
+  /** 放行前必须完成的准备（拍工作区基线）：避免基线晚于 Agent 的首次改动 */
+  private prepare?: (event: BridgeEvent) => Promise<void>
   /** 发现文件路径：测试传临时路径，绝不能覆盖真实岛的 bridge.json（曾致全部 hook 打到死端口） */
   private discoveryFile: string
   private keepalive: NodeJS.Timeout | null = null
 
-  constructor(store: AgentsStore, summarize?: Summarizer, discoveryFile: string = BRIDGE_FILE) {
+  constructor(store: AgentsStore, summarize?: Summarizer, discoveryFile: string = BRIDGE_FILE, prepare?: (event: BridgeEvent) => Promise<void>) {
     this.store = store
     this.summarize = summarize
     this.discoveryFile = discoveryFile
+    this.prepare = prepare
   }
 
   async start(): Promise<{ port: number; token: string }> {
@@ -101,6 +107,8 @@ export class BridgeServer {
 
     try {
       if (event.kind === 'permission') {
+        // 先等基线落定再登记审批：用户可能瞬间批准，基线必须早于任何改动
+        await this.prepare?.(event).catch(() => {})
         // 阻塞直到用户裁决；reason 会回传给 CLI 作为 deny 理由
         const result = await this.store.handlePermission(event)
         reply({ decision: result.decision, reason: result.reason })
@@ -108,7 +116,7 @@ export class BridgeServer {
         this.store.handleStop(event)
         reply({ ok: true })
         // 异步补充真实 git 变更小结（注入的 summarizer）
-        this.summarize?.(event.cwd)
+        this.summarize?.(event.cwd, eventKey(event))
           .then((sum) => { if (sum) this.store.attachSummary(event, sum) })
           .catch(() => {})
       } else {
@@ -126,7 +134,7 @@ export class BridgeServer {
           if (event.model || typeof event.contextTokens === 'number') {
             this.store.attachMeta(event, { model: event.model, contextTokens: event.contextTokens })
           }
-          this.summarize?.(event.cwd)
+          this.summarize?.(event.cwd, eventKey(event))
             .then((sum) => { if (sum) this.store.attachSummary(event, sum) })
             .catch(() => {})
         }

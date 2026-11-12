@@ -42,19 +42,19 @@ export const SP = {
 /** 字号阶梯（SF Text 阶梯） */
 export const FS = {
   /** caption2：键提示、最弱辅助 */
-  tiny: 10,
+  tiny: 10.5,
   /** caption1/footnote：元信息、辅助说明 */
-  small: 11,
+  small: 11.5,
   /** subhead/正文小 */
-  body: 12.5,
+  body: 13,
   /** callout/小标题 */
-  subtitle: 13.5,
+  subtitle: 14,
   /** title3/节标题 */
-  title: 15,
+  title: 15.5,
   /** title2/大标题 */
-  big: 19,
+  big: 20,
   /** title1/特大数字 */
-  hero: 24,
+  hero: 26,
 } as const
 
 /* ---------------- 颜色（消费 OKLCH 主题变量） ---------------- */
@@ -160,9 +160,11 @@ export const surface = {
     background: highlight
       ? 'linear-gradient(180deg, oklch(0.3 0.06 75 / 0.2), oklch(0.25 0.045 75 / 0.11))'
       : fill(2),
-    border: highlight ? '0.5px solid oklch(0.8 0.13 75 / 0.4)' : `0.5px solid ${hairline(0.05)}`,
+    border: highlight ? '0.5px solid oklch(0.8 0.13 75 / 0.4)' : `0.5px solid ${hairline(0.035)}`,
     borderRadius: R.lg,
-    boxShadow: highlight ? '0 8px 24px -10px oklch(0.6 0.12 75 / 0.3)' : 'none',
+    boxShadow: highlight
+      ? '0 8px 24px -10px oklch(0.6 0.12 75 / 0.3)'
+      : 'inset 0 0.5px 0 oklch(var(--fill-l, 0.96) 0 var(--th) / 0.035)',
   }),
   /** 内嵌井：输入框、代码块（比面板深，下凹感） */
   inset: (): React.CSSProperties => ({
@@ -207,10 +209,10 @@ export const text = {
   /** 小组标签（iOS 分组头：footnote 大写宽字距，quaternary） */
   overline: (): React.CSSProperties => ({
     fontSize: FS.tiny,
-    fontWeight: 500,
+    fontWeight: 600,
     color: ink(3),
     textTransform: 'uppercase',
-    letterSpacing: '0.07em',
+    letterSpacing: '0.055em',
   }),
   /** 数字（等宽数字） */
   num: (size: number = FS.big): React.CSSProperties => ({ fontSize: size, fontWeight: 700, color: ink(1), fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.014em' }),

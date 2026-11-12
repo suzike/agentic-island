@@ -71,10 +71,10 @@
       @keyframes ai-attention {
         0%,
         100% {
-          box-shadow: 0 0 30px oklch(0.8 0.13 75 / 0.35);
+          box-shadow: 0 0 18px oklch(0.8 0.13 75 / 0.2);
         }
         50% {
-          box-shadow: 0 0 58px oklch(0.8 0.13 75 / 0.7);
+          box-shadow: 0 0 38px oklch(0.8 0.13 75 / 0.42);
         }
       }
       @keyframes ai-toast {
@@ -276,7 +276,7 @@
         left: -35%;
         width: 34%;
         pointer-events: none;
-        background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--ambient-state) 31%, transparent), rgba(255,255,255,.055), transparent);
+        background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--ambient-state) 22%, transparent), rgba(255,255,255,.04), transparent);
         transform: skewX(-18deg);
         animation: ambient-surface-drift 9s ease-in-out infinite;
       }
@@ -285,7 +285,7 @@
         z-index: -2;
         inset: 0;
         pointer-events: none;
-        opacity: .13;
+        opacity: .09;
         background-image:
           repeating-linear-gradient(90deg, transparent 0 15px, color-mix(in oklch, var(--ambient-state) 22%, transparent) 15px 16px),
           repeating-linear-gradient(0deg, transparent 0 8px, rgba(255,255,255,.035) 8px 9px);
@@ -312,7 +312,7 @@
         pointer-events: none;
         background: linear-gradient(90deg, transparent, var(--ambient-state) 24%, color-mix(in oklch, var(--ambient-state) 72%, white) 50%, var(--ambient-state) 76%, transparent);
         box-shadow: 0 0 9px color-mix(in oklch, var(--ambient-state) 45%, transparent);
-        animation: ambient-rail-breathe 3.4s ease-in-out infinite;
+        animation: ambient-rail-breathe 4.6s ease-in-out infinite;
       }
       .ambient-telemetry {
         position: absolute;
@@ -325,7 +325,7 @@
         align-items: flex-end;
         gap: 3px;
         pointer-events: none;
-        opacity: .42;
+        opacity: .24;
       }
       .ambient-telemetry > span {
         width: 2px;
@@ -567,10 +567,10 @@
         transition: filter 0.15s ease, transform 0.1s ease, background 0.15s ease;
       }
       .hv:hover {
-        filter: brightness(1.22);
+        filter: brightness(1.08);
       }
       .hv:active {
-        transform: scale(0.97);
+        transform: scale(0.985);
       }
       /* 代码块复制按钮：默认隐藏，悬停代码块或键盘聚焦时浮现。
          必须同时带 :focus-within —— 只做悬停会把键盘用户挡在外面；
@@ -603,7 +603,7 @@
         transition: background 0.18s ease;
       }
       .ai-card:hover {
-        background: oklch(var(--fill-l) 0.006 var(--th) / calc(0.1 * var(--fill-k))) !important;
+        background: oklch(var(--fill-l) 0.006 var(--th) / calc(0.07 * var(--fill-k))) !important;
       }
       /* 悬停显隐的行内操作（待办行等）：平时隐藏，悬停浮现 */
       .row-acts {
@@ -676,7 +676,7 @@
         bottom: -40%;
         left: -30%;
         width: 34%;
-        background: linear-gradient(100deg, transparent, rgba(255,255,255,.32), transparent);
+        background: linear-gradient(100deg, transparent, rgba(255,255,255,.2), transparent);
         transform: translateX(-160%) skewX(-18deg);
         transition: transform .6s cubic-bezier(.22,.61,.36,1);
         pointer-events: none;
@@ -695,10 +695,23 @@
       .ui-attention { animation: ai-attention 1.8s ease-in-out infinite; }
       /* 状态点声呐环（待处理计数等） */
       @keyframes ui-sonar {
-        0% { box-shadow: 0 0 0 0 oklch(0.8 0.13 75 / .5); }
-        100% { box-shadow: 0 0 0 7px oklch(0.8 0.13 75 / 0); }
+        0% { box-shadow: 0 0 0 0 oklch(0.8 0.13 75 / .38); }
+        100% { box-shadow: 0 0 0 5px oklch(0.8 0.13 75 / 0); }
       }
-      .ui-sonar { animation: ui-sonar 1.6s cubic-bezier(.22,.61,.36,1) infinite; }
+      .ui-sonar { animation: ui-sonar 2.2s cubic-bezier(.22,.61,.36,1) infinite; }
+      /* 窄面板（默认 468px）优先保住品牌与操作可达性：版本号与时钟让位，
+         九个头部按钮仍全部保留，避免为了"看起来完整"把功能藏起来。 */
+      @media (max-width: 660px) {
+        .brand-word, .brand-version, .header-clock { display: none !important; }
+        .main-header { gap: 6px !important; }
+        .main-tabs { gap: 4px 3px !important; flex-wrap: wrap !important; overflow-x: visible !important; }
+        .main-tabs [role="tab"] { padding-left: 9px !important; padding-right: 9px !important; }
+        .todo-ai-strip { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+        .notes-tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+        .notes-power-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+        .notes-grid { column-count: 1 !important; }
+        .settings-status-grid, .settings-theme-grid { grid-template-columns: 1fr !important; }
+      }
       @media (prefers-reduced-motion: reduce) {
         .ui-attention, .ui-sonar { animation: none !important; }
         .ui-shine::after { display: none; }

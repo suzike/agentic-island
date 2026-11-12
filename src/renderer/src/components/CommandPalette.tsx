@@ -87,7 +87,7 @@ export function CommandPalette({ open, commands, onClose }: { open: boolean; com
             placeholder="搜索分区 / 动作 / 主题…"
             style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: ink(1), fontSize: FS.subtitle, fontFamily: 'var(--font)' }}
           />
-          <span style={{ ...text.faint(), fontSize: 9.5, flex: 'none' }}>↑↓ 选择 · Enter 执行 · Esc 关闭</span>
+          <span style={{ ...text.faint(), fontSize: 10, flex: 'none' }}>↑↓ 选择 · Enter 执行 · Esc 关闭</span>
         </div>
         {/* 命令列表 */}
         <div ref={listRef} className="ai-scroll" style={{ overflowY: 'auto', padding: SP.sm - 2 }}>
@@ -106,7 +106,7 @@ export function CommandPalette({ open, commands, onClose }: { open: boolean; com
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
-                    padding: `${SP.sm}px ${SP.md - 1}px`,
+                    padding: `${SP.sm + 1}px ${SP.md}px`,
                     borderRadius: R.md,
                     cursor: 'pointer',
                     background: active ? semBg(accent(), 0.14) : 'transparent',
@@ -114,12 +114,12 @@ export function CommandPalette({ open, commands, onClose }: { open: boolean; com
                   }}
                 >
                   {/* icon 字段是调用方传入的 emoji 字符串数据，保持原样渲染 */}
-                  <span style={{ flex: 'none', width: 24, height: 24, display: 'grid', placeItems: 'center', fontSize: 14, borderRadius: R.sm - 2, background: active ? semBg(accent(), 0.16) : fill(1) }}>{c.icon}</span>
+                  <span style={{ flex: 'none', width: 26, height: 26, display: 'grid', placeItems: 'center', fontSize: 14, borderRadius: R.sm, background: active ? semBg(accent(), 0.16) : fill(1) }}>{c.icon}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ ...text.body(), fontWeight: 600, color: active ? accent(0.88) : ink(1), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
+                    <div style={{ ...text.body(), fontWeight: 600, color: active ? accentText(0.85) : ink(1), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
                     {c.hint && <div style={{ ...text.faint(), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.hint}</div>}
                   </div>
-                  <span style={{ flex: 'none', ...text.faint(), fontSize: 9.5, fontWeight: 600, padding: '2px 7px', borderRadius: R.sm - 2, background: fill(1) }}>{c.group}</span>
+                  <span style={{ flex: 'none', ...text.faint(), fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: R.sm, background: fill(1) }}>{c.group}</span>
                 </div>
               )
             })

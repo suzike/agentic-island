@@ -118,7 +118,7 @@ export function BrainSearch({ open, sources, onClose, onGenerate, onJump, llmRea
             </div>
           )}
           {mode && (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: mode === '语义' ? accent(0.82, 0.8) : ink(3), fontSize: FS.tiny - 1 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: mode === '语义' ? accent(0.82, 0.8) : ink(3), fontSize: FS.tiny }}>
               {mode === '语义'
                 ? <><Ico.ai size={11} strokeWidth={2} />语义向量召回</>
                 : <><Type size={11} strokeWidth={2} />关键词召回（向量不可用，已回退）</>}
@@ -147,9 +147,9 @@ export function BrainSearch({ open, sources, onClose, onGenerate, onJump, llmRea
                   variants={staggerItem}
                   className="hv"
                   onClick={() => { onJump(d.tab); onClose() }}
-                  style={{ display: 'flex', alignItems: 'center', gap: SP.sm, padding: '7px 10px', borderRadius: R.md, cursor: 'pointer', background: fill(1) }}
+                  style={{ display: 'flex', alignItems: 'center', gap: SP.sm, padding: '8px 11px', borderRadius: R.md, cursor: 'pointer', background: fill(1) }}
                 >
-                  <span style={{ flex: 'none', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accentText(0.85) }}>{d.source}</span>
+                  <span style={{ flex: 'none', fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accentText(0.85) }}>{d.source}</span>
                   <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: ink(2), fontSize: FS.small }}>{d.title}</span>
                   <ArrowUpRight size={12} strokeWidth={2} style={{ flex: 'none', color: ink(3) }} />
                 </motion.div>

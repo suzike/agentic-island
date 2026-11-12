@@ -6,7 +6,7 @@
 //    （子任务：进度条 / 连续快速添加 / AI 一键拆解 / 备注 Markdown / 专注）
 
 import { useMemo, useRef, useState } from 'react'
-import { Check, SkipForward, Undo2 } from 'lucide-react'
+import { Check, ChevronDown, SkipForward, Undo2 } from 'lucide-react'
 import type { TodoItem, WorkbenchProject } from '../types'
 import type { CalendarEvent } from '../../../shared/protocol'
 import { Markdown } from './Markdown'
@@ -118,6 +118,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
   const [priority, setPriority] = useState<1 | 2 | 3>(3)
   const [repeat, setRepeat] = useState<TodoItem['repeat']>('none')
   const [view, setView] = useState<'plan' | 'active' | 'done' | 'board'>('active')
+  const [showUpcoming, setShowUpcoming] = useState(false)
   const [capacityMinutes, setCapacityMinutes] = useState(360)
   const [projectFilter, setProjectFilter] = useState<string | null>(null)
   const [dragId, setDragId] = useState<number | null>(null)
@@ -453,7 +454,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
         detail="新建任务自动进入当前项目，旧任务保持原归属"
       />
       {/* ① 顶部日历卡：日期 + 进度环 + 统计 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: SP.md, padding: `${SP.md}px ${SP.lg - 1}px`, ...surface.card(), background: `linear-gradient(135deg, ${accent(0.7, 0.16)}, ${accent2(0.6, 0.1)})`, border: `0.5px solid ${accent(0.6, 0.3)}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: SP.md, padding: `${SP.md}px ${SP.lg - 1}px`, ...surface.card(), background: `linear-gradient(135deg, ${accent(0.7, 0.1)}, ${accent2(0.6, 0.065)})`, border: `0.5px solid ${accent(0.6, 0.2)}` }}>
         <ProgressRing pct={pct} />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -485,7 +486,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
       </div>
 
       {/* AI 执行指挥条：规划、排期、风险、汇报形成闭环 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 5 }}>
+      <div className="todo-ai-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 2, padding: 3, ...surface.inset(), borderRadius: R.lg }}>
         {([
           ['plan', '目标拆解', Ico.plan], ['schedule', '智能排期', Ico.calendar], ['focus', '今日聚焦', Ico.focus],
           ['risk', '风险诊断', Ico.approval], ['standup', '生成站会', Ico.review], ['week', '本周计划', Ico.grid]
@@ -496,10 +497,10 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
             className="hv"
             onClick={() => openAi(key)}
             title={label}
-            style={{ minWidth: 0, height: 34, padding: '0 6px', borderRadius: R.md, border: `0.5px solid ${aiTool === key ? accent(0.72, 0.5) : hairline(0.07)}`, background: aiTool === key ? semBg(accent(), 0.2) : fill(1), color: ink(1), cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontFamily: 'var(--font)', transition: transition('background, border-color') }}
+            style={{ minWidth: 0, height: 30, padding: '0 6px', borderRadius: R.md, border: 'none', background: aiTool === key ? semBg(accent(), 0.14) : 'transparent', color: aiTool === key ? accentText(0.88) : ink(2), cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontFamily: 'var(--font)', transition: transition('background, color') }}
           >
-            <Icon size={12} strokeWidth={1.75} style={{ color: accentText(), flex: 'none' }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 650 }}>{label}</span>
+            <Icon size={12} strokeWidth={1.75} style={{ color: aiTool === key ? accentText() : ink(3), flex: 'none' }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 650 }}>{label}</span>
           </button>
         ))}
       </div>
@@ -557,12 +558,14 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
       {/* ② 近期日程（7 天）：飞书日历 */}
       {upcoming.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 3px' }}>
+          <div className="hv" onClick={() => setShowUpcoming((value) => !value)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 3px', cursor: 'pointer', userSelect: 'none' }}>
             <Ico.calendar size={11} strokeWidth={2} style={{ color: ink(3), flex: 'none' }} />
             <span style={txt.overline()}>近期日程</span>
+            <span style={{ color: ink(3), fontSize: FS.tiny }}>{upcoming.length}</span>
             <span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} />
+            <ChevronDown size={11} strokeWidth={2} style={{ color: ink(3), transform: showUpcoming ? 'rotate(180deg)' : 'none', transition: transition('transform') }} />
           </div>
-          {upcoming.map((m) => {
+          {showUpcoming && upcoming.map((m) => {
             const ongoing = m.start <= now
             return (
               <div key={m.id} className="ai-card" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: R.md, background: ongoing ? semBg(sem.warn, 0.14) : fill(1), border: `0.5px solid ${ongoing ? semBg(sem.warn, 0.45) : hairline(0.06)}` }}>
@@ -646,7 +649,7 @@ export function TodoTab(p: TodoTabProps): React.JSX.Element {
         )}
       </div>
 
-      {(view === 'active' || view === 'plan') && (projects.length > 0 || projectStats.some((x) => x.project === '未归属')) && (
+      {(view === 'active' || view === 'plan') && (projects.length > 1 || projectFilter !== null || projectStats.some((x) => x.project === '未归属')) && (
         <div className="noscrollbar" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 1 }}>
           <Chip active={projectFilter === null} onClick={() => setProjectFilter(null)}>全部项目</Chip>
           {projectStats.map((x) => (

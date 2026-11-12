@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
-import { Aperture, AppWindow, Bot, Camera, Check, CircleStop, Clock3, Copy, Crop, Download, Eye, EyeOff, FileText, Film, FlipHorizontal2, FlipVertical2, FolderKanban, Gauge, GripVertical, Image as ImageIcon, Layers, LayoutGrid, List, ListChecks, Lock, Magnet, Maximize2, Mic, MicOff, Minimize2, Monitor, MousePointer2, Network, Pause, Play, Plus, Redo2, RefreshCw, RotateCw, Save, Scissors, Search, Shield, SlidersHorizontal, Sparkles, Split, Square, Star, Tag, Timer, Trash2, Type, Undo2, Unlock, Upload, UserRound, Video, Volume2, VolumeX, WandSparkles, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
+import { Aperture, AppWindow, Bot, Camera, Check, CircleStop, Clock3, Copy, Crop, Download, Eye, EyeOff, FileText, Film, FlipHorizontal2, FlipVertical2, FolderKanban, Gauge, GripVertical, Image as ImageIcon, Languages, Layers, LayoutGrid, List, ListChecks, Lock, Magnet, Maximize2, Mic, MicOff, Minimize2, Monitor, MousePointer2, Network, Pause, Play, Plus, Redo2, RefreshCw, RotateCw, Save, Scissors, Search, Shield, SlidersHorizontal, Sparkles, Split, Square, Star, Tag, Timer, Trash2, Type, Undo2, Unlock, Upload, UserRound, Video, Volume2, VolumeX, WandSparkles, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
 import type { LlmRequestConfig, RecordingAnimeModel, RecordingCursorSample, RecordingEditSegment, RecordingEditSettings, RecordingExportFormat, RecordingExportProgress, RecordingExportQuality, RecordingProjectDocument, RecordingProjectSaveInput, RecordingProjectSummary, RecordingSessionManifest, RecordingSource, RecordingTranscriptSegment } from '../../../shared/protocol'
 import { recordingSourceLabel } from '../../../shared/recording-source'
 import { island } from '../bridge'
@@ -10,8 +10,8 @@ import { RecordingNeuralStyle } from '../logic/recording-neural-style'
 import type { NeuralStyleStatus } from '../logic/recording-neural-style'
 import { deleteRecordingAvatar, loadRecordingAvatar, saveRecordingAvatar } from '../logic/recording-avatar'
 import { formatBytes } from '../logic/screenshot'
-import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingCursorPath, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, remapRecordingMotionFrames, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
-import type { RecordingAnimePalette, RecordingAspect, RecordingCaptureMode, RecordingClickSample, RecordingMotion, RecordingMotionKeyframe, RecordingResolution } from '../logic/recording'
+import { clampRecordingBarPosition, formatRecordingTime, parseRecordingAiEditPlan, recordingBilingualSrt, recordingBilingualVtt, recordingCursorPath, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTrackSummary, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, remapRecordingMotionFrames, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition } from '../logic/recording'
+import type { RecordingAnimePalette, RecordingAspect, RecordingCaptureMode, RecordingClickSample, RecordingMotion, RecordingMotionKeyframe, RecordingResolution, RecordingTrackStats, RecordingTrackSummary } from '../logic/recording'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accentText, accent, FS, hairline, ink, R, sem, semBg, SP, surface, text } from '../ui/tokens'
@@ -192,10 +192,10 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [recordingPreset, setRecordingPreset] = useState<RecordingPreset>('custom')
   const [fps, setFps] = useState(30)
   const [captureQuality, setCaptureQuality] = useState<CaptureQuality>('high')
-  const [motionMode, setMotionMode] = useState<RecordingMotion>('gentle')
+  const [motionMode, setMotionMode] = useState<RecordingMotion>('off')
   const [motionStrength, setMotionStrength] = useState(0.68)
   const [maxZoom, setMaxZoom] = useState(1.45)
-  const [cursorHalo, setCursorHalo] = useState(true)
+  const [cursorHalo, setCursorHalo] = useState(false)
   const [cursorHaloSize, setCursorHaloSize] = useState(0.13)
   const [cursorHaloColor, setCursorHaloColor] = useState<'gold' | 'blue' | 'white'>('gold')
   const [cursorTrail, setCursorTrail] = useState(false)
@@ -251,6 +251,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [elapsed, setElapsed] = useState(0)
   const [recordedBytes, setRecordedBytes] = useState(0)
   const [health, setHealth] = useState(() => recordingHealth({ active: false, elapsedMs: 0, bytes: 0, chunkGapMs: 0, writeLatencyMs: 0, droppedFrames: 0, totalFrames: 0 }))
+  const [trackStats, setTrackStats] = useState<RecordingTrackSummary | null>(null)
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
   const [keyframes, setKeyframes] = useState<Keyframe[]>([])
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null)
@@ -300,6 +301,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [exportSubtitleMode, setExportSubtitleMode] = useState<'none' | 'embedded'>('none')
   const [exportProgress, setExportProgress] = useState<RecordingExportProgress | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [lastExport, setLastExport] = useState<{ path: string; summary?: string; ok: boolean } | null>(null)
   const [toast, setToast] = useState('')
   const [aiBusy, setAiBusy] = useState('')
   const [aiResults, setAiResults] = useState<AiResult[]>([])
@@ -307,6 +309,8 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [transcriptModel, setTranscriptModel] = useState(() => localStorage.getItem('recording-transcript-model') || 'whisper-1')
   const [transcriptLanguage, setTranscriptLanguage] = useState<'auto' | 'zh' | 'en'>('auto')
   const [transcriptSegments, setTranscriptSegments] = useState<RecordingTranscriptSegment[]>([])
+  const [translatedLines, setTranslatedLines] = useState<string[]>([])
+  const [translateBusy, setTranslateBusy] = useState(false)
   const [cursorTrack, setCursorTrack] = useState<RecordingCursorSample[]>([])
   const [clickTrack, setClickTrack] = useState<RecordingClickSample[]>([])
   const [keyTrack, setKeyTrack] = useState<Array<{ t: number; label: string }>>([])
@@ -315,7 +319,8 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const [idleTrimPlan, setIdleTrimPlan] = useState<{ cutMs: number; keepMs: number; segments: RecordingEditSegment[] } | null>(null)
   // 导出期运镜：素材必须"画面稳定"（录制时运镜关闭）才允许，否则会与烤进画面的运镜叠加
   const [exportMotionReady, setExportMotionReady] = useState(false)
-  const [exportMotionEnabled, setExportMotionEnabled] = useState(false)
+  const [exportMotionEnabled, setExportMotionEnabled] = useState(true)
+  const [clickFocus, setClickFocus] = useState(true)
   // 导出画幅必须由导出页自己决定、默认"跟随素材"：若沿用采集页的画面比例，用户为下一段录制
   // 改了竖屏，回头导出既有 16:9 素材就会被莫名其妙地重新裁一次。
   const [exportAspect, setExportAspect] = useState<RecordingAspect>('source')
@@ -327,7 +332,9 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   // 导出期运镜必须有自己的档位：能走这条路的素材，录制时运镜一定是"关闭"（否则画面里已烤进运镜），
   // 所以不能借用采集页的档位——那会永远得到一条 zoom=1 的平路，开关等于没接。
   const [exportMotionMode, setExportMotionMode] = useState<RecordingMotion>('gentle')
-  const [captureMode, setCaptureMode] = useState<RecordingCaptureMode>('composite')
+  // 默认原始采集：桌面轨直接进编码器，避免 2560×1600 画布合成把 30fps 压到 20fps 左右。
+  // 需要区域/画中画/水印/隐私条时，start 会自动回退到 composite（recordingRawModeBlockers）。
+  const [captureMode, setCaptureMode] = useState<RecordingCaptureMode>('raw')
   const [projectId, setProjectId] = useState('')
   const [recordingProjects, setRecordingProjects] = useState<RecordingProjectSummary[]>([])
   const [projectSaveState, setProjectSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -340,6 +347,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
   const sourceStreamRef = useRef<MediaStream | null>(null)
   const sourcePreviewStreamRef = useRef<MediaStream | null>(null)
   const sourcePreviewVideoRef = useRef<HTMLVideoElement | null>(null)
+  const outputStreamRef = useRef<MediaStream | null>(null)
   const sourcePreviewRequestRef = useRef(0)
   const sourcePreviewWantedRef = useRef(false)
   const micStreamRef = useRef<MediaStream | null>(null)
@@ -460,10 +468,16 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
         if (cursor.clicks?.length && statusRef.current !== 'paused') {
           for (const click of cursor.clicks) {
             if (clickSamplesRef.current.length >= MAX_CURSOR_SAMPLES) break
-            if (source.displayId && cursor.displayId !== source.displayId) continue
-            const clickX = Math.max(0, Math.min(1, (click.x - bounds.x) / bounds.width))
-            const clickY = Math.max(0, Math.min(1, (click.y - bounds.y) / bounds.height))
-            clickSamplesRef.current.push({ t: Math.round(at), x: Number(clickX.toFixed(4)), y: Number(clickY.toFixed(4)), button: click.button })
+            // uiohook 给的是**物理像素**，光标轨迹是 DIP。混用会让 150% 屏上的点击位置偏 1.5 倍，
+            // 导出期"点哪里推近哪里"就会推错位置。用光标所在显示器的 scaleFactor 换算回 DIP。
+            const scale = Math.max(1, Number(cursor.scaleFactor) || 1)
+            const clickDipX = click.x / scale
+            const clickDipY = click.y / scale
+            const clickX = Math.max(0, Math.min(1, (clickDipX - bounds.x) / bounds.width))
+            const clickY = Math.max(0, Math.min(1, (clickDipY - bounds.y) / bounds.height))
+            // 点击发生在两次 80ms 轮询之间：按事件真实时间回推，避免章节/强调整体晚一拍。
+            const clickAt = Math.max(0, Math.round(at - Math.max(0, Date.now() - click.at)))
+            clickSamplesRef.current.push({ t: clickAt, x: Number(clickX.toFixed(4)), y: Number(clickY.toFixed(4)), button: click.button })
           }
         }
         if (statusRef.current === 'paused') return
@@ -707,6 +721,39 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
 
   useEffect(() => { statusRef.current = status }, [status])
 
+  // 采集轨真实统计：目标 30fps 不等于实际 30fps。每 1.2s 读一次 MediaStreamTrack.getStats()，
+  // 把实际帧率/丢帧/像素尺寸放到录制条上；看不到真实帧率就无法解释"录出来为什么卡"。
+  useEffect(() => {
+    if (status !== 'recording' && status !== 'paused') { setTrackStats(null); return }
+    let dead = false
+    const sample = async (): Promise<void> => {
+      const track = outputStreamRef.current?.getVideoTracks()[0] as (MediaStreamTrack & { getStats?: () => Promise<RTCStatsReport> }) | undefined
+      if (!track?.getStats) return
+      try {
+        const report = await track.getStats()
+        let best: RecordingTrackStats | null = null
+        report.forEach((raw) => {
+          const item = raw as Record<string, unknown>
+          const isVideo = item.kind === 'video' || item.mediaType === 'video' || typeof item.frameWidth === 'number'
+          if (!isVideo) return
+          const candidate: RecordingTrackStats = {
+            framesPerSecond: Number(item.framesPerSecond) || undefined,
+            frames: Number(item.frames) || undefined,
+            framesDropped: Number(item.framesDropped) || undefined,
+            frameWidth: Number(item.frameWidth) || undefined,
+            frameHeight: Number(item.frameHeight) || undefined,
+            totalFramesDuration: Number(item.totalFramesDuration) || undefined
+          }
+          if (!best || (candidate.framesPerSecond || 0) > (best.framesPerSecond || 0)) best = candidate
+        })
+        if (!dead && best) setTrackStats(recordingTrackSummary(best, fps))
+      } catch { /* getStats 在某些合成轨上不可用，保持"待采样" */ }
+    }
+    void sample()
+    const timer = window.setInterval(() => void sample(), 1200)
+    return () => { dead = true; window.clearInterval(timer) }
+  }, [status, fps])
+
   useEffect(() => {
     document.body.classList.toggle('recording-compact-active', compact)
     if (!compact) return
@@ -773,9 +820,11 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     cursorPollPendingRef.current = false
     stopCursorLog()
     sourceStreamRef.current?.getTracks().forEach((track) => track.stop())
+    outputStreamRef.current?.getTracks().forEach((track) => track.stop())
     micStreamRef.current?.getTracks().forEach((track) => track.stop())
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop())
     sourceStreamRef.current = null
+    outputStreamRef.current = null
     micStreamRef.current = null
     cameraStreamRef.current = null
     if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null
@@ -1129,6 +1178,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
       }
 
       const output = raw ? new MediaStream(desktopStream.getVideoTracks()) : canvas.captureStream(fps)
+      outputStreamRef.current = output
       const audioTracks: MediaStreamTrack[] = [...desktopStream.getAudioTracks()]
       if (microphone) {
         setStartupMessage('正在连接麦克风…')
@@ -1503,7 +1553,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     if (!cursorTrack.length) { flash('这次录制没有光标轨迹，无法生成运镜点（窗口来源或旧工程不采集轨迹）'); return }
     const segments = editSegments.filter((segment) => segment.enabled !== false)
     const times = recordingMotionFrameTimes(segments, { fps, speed: playbackRate })
-    const path = recordingMotionFrames(cursorTrack, segments, { fps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate })
+    const path = recordingMotionFrames(cursorTrack, segments, { fps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate, clicks: clickTrack, clickFocus })
     const points = recordingMotionKeyframes(path, times)
     if (points.length <= 1) { flash('这段素材没有明显的推近，运镜点只会有一个开场锚点'); }
     setMotionKeyframes(points)
@@ -1793,7 +1843,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     // 人工编辑过运镜点就用它；否则按光标轨迹自动生成
     const motionPath = motionKeyframes.length
       ? recordingMotionFramesFromKeyframes(motionKeyframes, keptSegments, { fps: outputFps, strength: motionStrength, maxZoom, speed: playbackRate })
-      : recordingMotionFrames(cursorTrack, keptSegments, { fps: outputFps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate })
+      : recordingMotionFrames(cursorTrack, keptSegments, { fps: outputFps, motion: exportMotionMode, strength: motionStrength, maxZoom, speed: playbackRate, clicks: clickTrack, clickFocus })
     // 导出期光标光晕：光斑是"又大又软"的圆，可用折线航点表达式跟随；细光环做不到（需逐帧精确跟踪）
     const glowPath = exportGlowEnabled && cursorTrack.length && (format === 'mp4' || format === 'webm')
       ? recordingCursorPath(cursorTrack, keptSegments, { fps: outputFps, speed: playbackRate })
@@ -1849,6 +1899,7 @@ export function ScreenRecorderStudio({ contextDataUrl, llmReady, llmConfig, onBa
     if (result.ok) {
       // 自检结论直接摆在成功提示里：文件名之外还要说清"成品是不是请求的那条片子"
       const check = result.check
+      setLastExport({ path: result.path || '', summary: check?.summary, ok: check ? check.ok : true })
       if (check && !check.ok) flash(`已导出 ${result.path || ''}，但自检有疑问：${check.warnings[0]}`)
       else flash(`已导出 ${result.path || ''}${check?.summary && check.summary !== '未自检' ? ` · 自检通过（${check.summary}）` : ''}`)
     } else if (!result.canceled) flash(result.error || '导出失败')
@@ -1917,6 +1968,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
       const result = await island.transcribeRecordingSession(recordingSessionId, llmConfig, transcriptModel, transcriptLanguage)
       if (!result.ok || !result.segments?.length) throw new Error(result.error || '转写端点没有返回带时间戳文本')
       setTranscriptSegments(result.segments)
+      setTranslatedLines([])
       const text = result.text || result.segments.map((item) => item.text).join('\n')
       setAiResults((items) => [{ id: Date.now(), label: `真实音频转写 · ${transcriptModel}`, text: `${result.segments!.length} 个时间戳片段\n\n${text}` }, ...items])
       flash(`转写完成：${result.segments.length} 个字幕片段`)
@@ -1927,11 +1979,44 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
     } finally { setAiBusy('') }
   }
 
-  const saveTranscript = async (format: 'srt' | 'vtt'): Promise<void> => {
+  /** 把逐条字幕翻成另一种语言；按 40 条分块，避免长录制一次输出被 token 上限截断。 */
+  const translateTranscript = async (): Promise<void> => {
+    if (!transcriptSegments.length || translateBusy || !llmReady) return
+    setTranslateBusy(true)
+    const target = transcriptLanguage === 'zh' ? 'English' : '简体中文'
+    const lines: string[] = []
+    try {
+      for (let start = 0; start < transcriptSegments.length; start += 40) {
+        const chunk = transcriptSegments.slice(start, start + 40).map((item) => item.text)
+        const result = await island.llmComplete(
+          llmConfig,
+          '你是专业字幕翻译。逐条翻译，保留语气与术语，不增删信息；只返回与输入等长的 JSON 字符串数组，不要 Markdown 或解释。',
+          `把下面 JSON 数组逐条翻译成${target}，只返回 JSON 数组：\n${JSON.stringify(chunk)}`,
+          false
+        )
+        if (!result.ok || !result.text) throw new Error(result.error || '翻译模型没有返回结果')
+        const match = result.text.match(/\[[\s\S]*\]/)
+        const parsed = JSON.parse(match ? match[0] : result.text) as unknown
+        if (!Array.isArray(parsed) || parsed.length !== chunk.length) throw new Error('翻译结果条数与字幕不一致，请重试')
+        lines.push(...parsed.map((item) => String(item ?? '')))
+      }
+      setTranslatedLines(lines)
+      flash(`双语字幕已生成：${lines.length} 条（${target}）`)
+    } catch (error) {
+      flash(error instanceof Error ? error.message : String(error))
+    } finally { setTranslateBusy(false) }
+  }
+
+  const saveTranscript = async (format: 'srt' | 'vtt' | 'srt-bi' | 'vtt-bi'): Promise<void> => {
     if (!transcriptSegments.length) return
-    const content = format === 'srt' ? recordingTranscriptToSrt(transcriptSegments) : recordingTranscriptToVtt(transcriptSegments)
-    const result = await island.saveText(content, `${recordingName}_字幕`, format)
-    if (result.ok) flash(`${format.toUpperCase()} 字幕已保存`)
+    const bilingual = format === 'srt-bi' || format === 'vtt-bi'
+    if (bilingual && translatedLines.length !== transcriptSegments.length) { flash('请先生成双语字幕'); return }
+    const ext = format.startsWith('srt') ? 'srt' : 'vtt'
+    const content = bilingual
+      ? ext === 'srt' ? recordingBilingualSrt(transcriptSegments, translatedLines) : recordingBilingualVtt(transcriptSegments, translatedLines)
+      : ext === 'srt' ? recordingTranscriptToSrt(transcriptSegments) : recordingTranscriptToVtt(transcriptSegments)
+    const result = await island.saveText(content, `${recordingName}_字幕${bilingual ? '_双语' : ''}`, ext)
+    if (result.ok) flash(`${bilingual ? '双语 ' : ''}${ext.toUpperCase()} 字幕已保存`)
     else flash(result.error || '字幕保存失败')
   }
 
@@ -1967,6 +2052,8 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
     || exportFps !== 'source'
     || exportSubtitleMode === 'embedded'
   const estimatedMbPerMinute = recordingVideoBitrate(recordingSize.width, recordingSize.height, fps, captureQuality) * 60 / 8 / 1_000_000
+  const recorderMime = selectRecorderMime((mime) => MediaRecorder.isTypeSupported(mime), recordingHasAudio)
+  const encoderLabel = recorderMime.includes('mp4') ? 'H.264' : recorderMime.includes('vp9') ? 'VP9' : recorderMime.includes('vp8') ? 'VP8' : 'WebM'
   const windowSourceSelected = selectedSource?.kind === 'window'
   const cameraVisualReady = !webcam || (cameraEffect === 'avatar' ? Boolean(avatarDataUrl) : cameraDevices.length > 0)
   const cameraVisualStatus = !webcam
@@ -2061,7 +2148,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
               <span style={{ color: paused ? sem.warn : sem.danger, fontSize: 11, fontWeight: 700 }}>{paused ? '录制已暂停' : '正在录制'}</span>
               <span style={{ ...text.faint(), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{recordingSourceLabel(selectedSource)}</span>
             </div>
-            <div style={{ ...text.faint(), fontSize: 9.5, marginTop: 3, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><span style={{ color: paused ? sem.warn : health.level === 'critical' ? sem.danger : health.level === 'warning' ? sem.warn : sem.calm }}>{paused ? '采集已暂停' : health.message}</span><span>· {health.bitrateMbps.toFixed(1)} Mb/s · {recordingSize.width}×{recordingSize.height} · {fps} FPS · {formatBytes(recordedBytes)}</span></div>
+            <div style={{ ...text.faint(), fontSize: 9.5, marginTop: 3, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><span style={{ color: paused ? sem.warn : health.level === 'critical' ? sem.danger : health.level === 'warning' ? sem.warn : sem.calm }}>{paused ? '采集已暂停' : health.message}</span><span>· {health.bitrateMbps.toFixed(1)} Mb/s · {recordingSize.width}×{recordingSize.height} · {trackStats ? trackStats.message : `${fps} FPS 目标`} · {encoderLabel} · {formatBytes(recordedBytes)}</span></div>
           </div>
           {systemAudio && <IconButton icon={systemMuted ? VolumeX : Volume2} onClick={() => setSystemMuted((value) => !value)} title={systemMuted ? '恢复系统声音' : '静音系统声音'} size={30} />}
           {microphone && <IconButton icon={micMuted ? MicOff : Mic} onClick={() => setMicMuted((value) => !value)} title={micMuted ? '恢复麦克风' : '静音麦克风'} size={30} />}
@@ -2187,7 +2274,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                       {status === 'paused' ? <Pause size={24} /> : <Video size={24} />}
                     </div>
                     <div style={{ ...text.title(), color: ink(1), fontVariantNumeric: 'tabular-nums' }}>{formatRecordingTime(elapsed)}</div>
-                    <div style={{ color: status === 'paused' ? sem.warn : health.level === 'critical' ? sem.danger : health.level === 'warning' ? sem.warn : sem.calm, fontSize: 10.5 }}>{status === 'paused' ? '录制已暂停' : `${health.message} · ${health.bitrateMbps.toFixed(1)} Mb/s${health.droppedPercent > 0 ? ` · 丢帧 ${health.droppedPercent.toFixed(1)}%` : ''}`}</div>
+                    <div style={{ color: status === 'paused' ? sem.warn : trackStats?.level === 'warning' || health.level !== 'healthy' ? sem.warn : sem.calm, fontSize: 10.5, textAlign: 'center', lineHeight: 1.6 }}>{status === 'paused' ? '录制已暂停' : `${health.message} · ${health.bitrateMbps.toFixed(1)} Mb/s · ${encoderLabel}${trackStats ? ` · ${trackStats.message}` : ''}`}</div>
                   </div>
                 )}
                 {status === 'ready' && previewError && (
@@ -2558,7 +2645,11 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                   <div style={controlRow}><span style={{ ...text.faint(), width: 44 }}>模型</span><Input value={transcriptModel} onChange={(value) => { setTranscriptModel(value); localStorage.setItem('recording-transcript-model', value) }} placeholder="whisper-1" style={{ flex: 1 }} /></div>
                   <Segmented value={transcriptLanguage} onChange={setTranscriptLanguage} options={[{ key: 'auto', label: '自动识别' }, { key: 'zh', label: '中文' }, { key: 'en', label: '英文' }]} />
                   <Button variant="tinted" icon={FileText} disabled={!!aiBusy || !recordingSessionId || !recordingHasAudio || !llmConfig.apiKey || !llmConfig.baseUrl || !transcriptModel.trim()} onClick={() => void runAudioTranscription()}>{aiBusy === 'AI 音频转写' ? '正在提取并转写音轨' : transcriptSegments.length ? '重新转写音轨' : '提取音轨并生成字幕'}</Button>
-                  {transcriptSegments.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}><Button sm variant="ghost" icon={Download} onClick={() => void saveTranscript('srt')}>导出 SRT</Button><Button sm variant="ghost" icon={Download} onClick={() => void saveTranscript('vtt')}>导出 VTT</Button></div>}
+                  {transcriptSegments.length > 0 && <>
+                    <Button sm variant="ghost" icon={Languages} disabled={translateBusy || !llmReady} onClick={() => void translateTranscript()}>{translateBusy ? '正在翻译字幕…' : translatedLines.length === transcriptSegments.length ? '重新生成双语字幕' : `翻译成${transcriptLanguage === 'zh' ? '英文' : '中文'}（双语对照）`}</Button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}><Button sm variant="ghost" icon={Download} onClick={() => void saveTranscript('srt')}>导出 SRT</Button><Button sm variant="ghost" icon={Download} onClick={() => void saveTranscript('vtt')}>导出 VTT</Button></div>
+                    {translatedLines.length === transcriptSegments.length && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}><Button sm variant="ghost" icon={Download} onClick={() => void saveTranscript('srt-bi')}>双语 SRT</Button><Button sm variant="ghost" icon={Download} onClick={() => void saveTranscript('vtt-bi')}>双语 VTT</Button></div>}
+                  </>}
                   <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.55 }}>音频先在本地切分压缩，再发送到所配置端点的 `/audio/transcriptions`。转写模型与聊天模型独立；端点不兼容时会返回原始错误。</div>
                 </div>
                 <div style={labelStyle}>录制前导演</div>
@@ -2632,6 +2723,7 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                       <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>把一枚软光斑按录制期采到的光标轨迹叠到成片上（{cursorTrack.length} 个轨迹点）。光斑大而软，所以能用折线航点跟随；细光环需要逐帧精确跟踪，那要等应用内离线渲染。开启后需重编码。</div>
                     </>}
                     {exportMotionEnabled && exportMotionReady && <Segmented value={exportMotionMode} onChange={(value) => setExportMotionMode(value as RecordingMotion)} options={[{ key: 'gentle', label: '柔和聚焦' }, { key: 'dynamic', label: '动态跟随' }]} />}
+                    {exportMotionEnabled && exportMotionReady && <div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><Zap size={12} />点击强调（点哪里推近哪里）</span><Switch on={clickFocus} onChange={setClickFocus} /></div>}
                     <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>{exportMotionReady ? `按录制期采到的 ${cursorTrack.length} 个光标轨迹点重建跟随运镜，跟随速度与最大放大沿用"运镜"页的 ${Math.round(motionStrength * 100)}% / ${maxZoom.toFixed(2)}×：改完重导出即可，不必重录。开启后需重编码。` : '录制时运镜是开着的，画面里已经带着当时的推近与平移。想事后改运镜，请先在"运镜"页把跟随关掉再录一段。'}</div>
                   </div>}
                   {(format === 'mp4' || format === 'webm') && <div style={{ ...surface.inset(), padding: '8px 9px', display: 'flex', flexDirection: 'column', gap: 7 }}><div style={{ ...controlRow, justifyContent: 'space-between' }}><span style={{ ...controlRow, color: ink(2), fontSize: 10.5 }}><Type size={12} />字幕轨</span><span style={{ ...text.num(9), color: transcriptSegments.length ? sem.calm : ink(3) }}>{transcriptSegments.length} 段</span></div><Segmented value={exportSubtitleMode} onChange={setExportSubtitleMode} options={[{ key: 'none', label: '不内嵌' }, { key: 'embedded', label: '内嵌可开关' }]} /><div style={{ ...text.faint(), fontSize: 9 }}>MP4 使用 mov_text，WebM 使用 WebVTT；字幕会按剪辑片段和播放速度自动重排时间码。</div></div>}
@@ -2644,6 +2736,19 @@ segments 必须按时间递增、互不重叠、至少保留一段，每段不�
                   {exporting && <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}><div style={{ ...controlRow }}><Gauge size={13} color={accentText()} /><span style={{ color: ink(2), fontSize: 10.5 }}>{exportProgress?.message || '正在本地转码'}</span><span style={{ marginLeft: 'auto', ...text.num(10) }}>{Math.round(progress * 100)}%</span></div><div style={{ height: 5, borderRadius: R.pill, background: surface.inset().background, overflow: 'hidden' }}><div style={{ width: `${progress * 100}%`, height: '100%', background: accent(), transition: 'width .2s ease' }} /></div></div>}
                   <Button variant="primary" icon={Save} onClick={() => void exportRecording()} disabled={exporting || (format === 'mp3' && !recordingHasAudio) || (exportSubtitleMode === 'embedded' && !transcriptSegments.length)}>{exporting ? '正在导出' : `导出 ${format.toUpperCase()}`}</Button>
                   {exporting && <Button variant="ghost" icon={X} onClick={() => exportProgress && island.cancelRecordingExport(exportProgress.jobId)}>取消转码</Button>}
+                  {lastExport && <div style={{ ...surface.inset(), padding: '9px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    <div style={{ ...controlRow, color: lastExport.ok ? sem.calm : sem.warn, fontSize: 10 }}><Check size={12} />{lastExport.ok ? '成品已落盘并读回校验' : '成品已落盘，自检有疑问'}{lastExport.summary ? ` · ${lastExport.summary}` : ''}</div>
+                    <div style={{ color: ink(3), fontSize: 9, wordBreak: 'break-all' }}>{lastExport.path}</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                      <Button sm variant="ghost" icon={FolderKanban} onClick={() => island.openFolder(lastExport.path.replace(/[\\/][^\\/]+$/, ''))}>打开文件夹</Button>
+                      <Button sm variant="ghost" icon={Copy} onClick={() => void navigator.clipboard.writeText(lastExport.path).then(() => flash('路径已复制')).catch(() => {})}>复制路径</Button>
+                      <Button sm variant="ghost" icon={Sparkles} onClick={() => {
+                        const chapters = timeline.filter((item) => item.type === 'marker').slice(0, 8).map((item) => `${formatRecordingTime(item.at)} ${item.label}`).join('\n')
+                        const text = `${recordingName}\n${formatRecordingTime(trimDuration)} · ${exportOutputSize.width}×${exportOutputSize.height} · ${encoderLabel}\n${chapters}`.trim()
+                        void navigator.clipboard.writeText(text).then(() => flash('分享文案已复制（标题/时长/章节）')).catch(() => {})
+                      }}>复制分享文案</Button>
+                    </div>
+                  </div>}
                   <div style={{ ...text.faint(), fontSize: 9.5, lineHeight: 1.6 }}>{trimDuration < elapsed ? `将按启用片段输出 ${formatRecordingTime(trimDuration)} 成片。` : ''}{format === 'gif' ? 'GIF 使用两阶段调色板与差分抖动，适合短演示。' : format === 'mp3' ? 'MP3 会沿用片段、速度、音量和淡入淡出设置。' : exportQuality === 'lossless' ? '无损归档保留每个视频像素，文件可能大于视觉无损版本。' : '可独立控制分辨率、帧率与可开关字幕轨；小体积适合聊天和文档附件。'}</div>
                 </>}
               </>

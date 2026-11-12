@@ -19,7 +19,7 @@ export function PetPanel({ pomoDone, todos, activities }: { pomoDone: Record<str
     activities.filter((a) => dayKey(a.ts) === today).length * 3
 
   return (
-    <div style={{ padding: '13px 14px', borderRadius: 15, background: `linear-gradient(160deg, ${tintSurface('var(--th)', .62)}, ${tintSurface('var(--th2)', .46, true)})`, border: `0.5px solid ${hairline(.12)}`, display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ padding: '13px 14px', borderRadius: 15, background: `linear-gradient(160deg, ${tintSurface('var(--th)', .32)}, ${fill(2)})`, border: `0.5px solid ${hairline(.08)}`, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div
           className="hv"
@@ -30,16 +30,16 @@ export function PetPanel({ pomoDone, todos, activities }: { pomoDone: Record<str
         >{pet.emoji}</div>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
-            <span style={{ color: ink(1), fontSize: 14, fontWeight: 800 }}>{pet.name}</span>
-            <span style={{ color: accentText(.78), fontSize: 11, fontWeight: 700 }}>Lv.{pet.level}</span>
+            <span style={{ color: ink(1), fontSize: 15, fontWeight: 800 }}>{pet.name}</span>
+            <span style={{ color: accentText(.78), fontSize: 11.5, fontWeight: 700 }}>Lv.{pet.level}</span>
             <span style={{ flex: 1 }} />
-            {todayXp > 0 && <span style={{ color: sem.calm, fontSize: 10.5, fontWeight: 700 }}>今日 +{todayXp} XP</span>}
+            {todayXp > 0 && <span style={{ color: sem.calm, fontSize: 11, fontWeight: 700 }}>今日 +{todayXp} XP</span>}
           </div>
           {/* 经验条 */}
           <div style={{ height: 9, borderRadius: 999, background: fill(3), overflow: 'hidden' }}>
             <div style={{ width: `${Math.max(3, Math.min(100, pet.progress * 100))}%`, height: '100%', borderRadius: 999, background: `linear-gradient(90deg, ${accent2(.72)}, ${accent(.82)})`, transition: 'width .4s' }} />
           </div>
-          <span style={{ color: ink(3), fontSize: 9.5 }}>共 {pet.xp} XP · 距下一级还差 {pet.toNext} XP（专注1个番茄=+10）</span>
+          <span style={{ color: ink(3), fontSize: 10.5 }}>共 {pet.xp} XP · 距下一级还差 {pet.toNext} XP（专注1个番茄=+10）</span>
         </div>
       </div>
 

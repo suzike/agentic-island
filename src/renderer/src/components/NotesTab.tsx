@@ -117,27 +117,27 @@ const dayLabel = (ts: number): string => {
   return `${d.getMonth() + 1} 月 ${d.getDate()} 日`
 }
 
-/** 卡片配色：便签用户数据色（note.color → 色相 h）→ 玻璃渐变填充 + 标题色（填充制，无描边；pinned 填充更深） */
+/** 卡片配色：中性纸面 + 3px 色相边。保留便签颜色的识别性，但不再让整张卡变成彩色块。 */
 const cardStyle = (h: number, pinned?: boolean): React.CSSProperties => ({
+  ...surface.card(),
   breakInside: 'avoid',
   marginBottom: SP.sm + 1,
   padding: `${SP.md - 1}px ${SP.md}px`,
-  borderRadius: R.lg,
-  background: pinned
-    ? `linear-gradient(160deg, ${tintSurface(String(h), .78)}, ${tintSurface(String(h), .56, true)})`
-    : `linear-gradient(160deg, ${tintSurface(String(h), .6)}, ${tintSurface(String(h), .4, true)})`,
+  background: `linear-gradient(90deg, oklch(0.72 0.12 ${h} / ${pinned ? 0.9 : 0.62}) 0, oklch(0.72 0.12 ${h} / ${pinned ? 0.9 : 0.62}) 3px, ${fill(pinned ? 3 : 2)} 3px)`,
   display: 'flex',
   flexDirection: 'column',
-  gap: 6
+  gap: 6,
+  transition: 'background .18s ease, box-shadow .18s ease'
 })
 
-/** 标签小胶囊（跟随便签色相） */
-const chip = (h: number): React.CSSProperties => ({
-  padding: '2px 8px',
+/** 标签小胶囊：中性底，颜色只留在卡片边缘与图标上。 */
+const chip = (_h: number): React.CSSProperties => ({
+  padding: '2.5px 8px',
   borderRadius: R.pill,
-  background: tintSurface(String(h), .55, true),
-  color: hueAccent(String(h), .1),
-  fontSize: FS.tiny - 1,
+  background: fill(2),
+  border: `0.5px solid ${hairline(0.05)}`,
+  color: ink(3),
+  fontSize: FS.tiny,
   fontWeight: 600,
   cursor: 'pointer',
   whiteSpace: 'nowrap'
@@ -740,7 +740,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
       </div>
 
       {/* 次级工具条：剪藏 / 模板 / 关系图 / 周回顾 / 问便签 / 日记 / 闪卡 / 放映 / 统计 / 工具箱 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+      <div className="noscrollbar notes-tool-rail" style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 2 }}>
         {([
           [Link, '剪藏网址', '把剪贴板里的网址抓成便签', () => void clipUrl(), false],
           [LayoutTemplate, '模板', '从模板新建结构化便签', () => setTplOpen((v) => !v), tplOpen],
@@ -763,7 +763,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
       {/* AI 工具箱：全库级智能 */}
       {toolsOpen && (
         <motion.div variants={fadeScaleIn} initial={false} animate="animate" style={aiPanel}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 5 }}>
+          <div className="notes-tool-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 5 }}>
             {NOTE_TOOLS.map((t) => (
               <div key={t.key} className="hv" title={t.hint} onClick={() => void runTool(t.key)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '9px 4px', borderRadius: R.md, cursor: 'pointer', background: toolBusy === t.key ? semBg(accent(), 0.16) : fill(2), border: toolBusy === t.key ? `0.5px solid ${accent(0.7, 0.3)}` : 'none' }}>
                 <t.Icon size={15} strokeWidth={1.75} style={{ color: accentText(0.82, toolBusy === t.key ? 1 : 0.7) }} />
@@ -799,7 +799,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
             <span style={{ flex: 1 }} />
             <span style={text.faint()}>本地处理 · {NOTE_POWER_ACTIONS.length} 项</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 5 }}>
+          <div className="notes-power-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 5 }}>
             {NOTE_POWER_ACTIONS.filter((x) => x.group === powerGroup).map((action) => (
               <button key={action.id} type="button" className="hv" onClick={() => void runPowerTool(action.id)} title={action.hint} style={{ height: 30, minWidth: 0, padding: '0 6px', borderRadius: R.sm, border: powerBusy === action.id ? `0.5px solid ${accent(0.7, 0.3)}` : 'none', background: powerBusy === action.id ? semBg(accent(), 0.16) : fill(2), color: ink(1), cursor: 'pointer', fontFamily: 'inherit', fontSize: FS.tiny - 1, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{powerBusy === action.id ? '处理中…' : action.label}</button>
             ))}
@@ -953,7 +953,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
       {aiIds && <div style={{ color: accentText(0.8, 0.9), fontSize: FS.tiny - 0.5 }}><Sparkles size={10} strokeWidth={2} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 3 }} />AI 找到 {filtered.length} 条相关便签（<span className="hv" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setAiIds(null)}>返回全部</span>）</div>}
 
       {/* 控制条：视图 / 排序 / 收藏 / 颜色 / 随机 / 导出 / 多选 / 回收站 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+      <div className="noscrollbar notes-control-rail" style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 2 }}>
         <Segmented
           options={[
             { key: 'grid', label: '瀑布', icon: LayoutGrid },
@@ -974,18 +974,17 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
         <Chip icon={Dices} onClick={randomWalk} title="随机翻一条旧便签">漫步</Chip>
         <Chip icon={ListChecks} active={selectMode} onClick={() => { setSelectMode((v) => !v); setSelected(new Set()) }} title="批量选择">多选</Chip>
         <Chip icon={Download} onClick={() => void exportMd()} title="导出全部为 .md">导出</Chip>
-        <span style={{ flex: 1 }} />
-        <span style={{ ...text.faint(), fontSize: FS.tiny - 1 }}>{stats.total} 条 · {stats.words > 1000 ? (stats.words / 1000).toFixed(1) + 'k' : stats.words} 字</span>
         {trashCount > 0 && <Chip icon={Trash2} active={showTrash} color={sem.danger} onClick={() => setShowTrash((v) => !v)} title="回收站">{trashCount}</Chip>}
       </div>
 
-      {/* 颜色筛选 */}
-      {usedColors.length > 1 && !showTrash && (
+      {/* 颜色筛选 + 当前库统计：统计不再挤在可横滑的控制条末尾。 */}
+      {!showTrash && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           {usedColors.map((c) => (
             <span key={c} className="hv" onClick={() => setColorFilter(colorFilter === c ? '' : c)} title={NOTE_COLORS.find((x) => x.key === c)?.label} style={{ width: 16, height: 16, borderRadius: R.pill, cursor: 'pointer', background: `oklch(0.6 0.13 ${colorOf(c)})`, border: colorFilter === c ? '2px solid #fff' : '2px solid transparent', boxSizing: 'border-box' }} />
           ))}
           {colorFilter && <span className="hv" onClick={() => setColorFilter('')} style={{ color: ink(3), fontSize: FS.tiny - 0.5, cursor: 'pointer' }}>清除</span>}
+          <span style={{ marginLeft: 'auto', ...text.faint(), fontSize: FS.tiny, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{stats.total} 条 · {stats.words > 1000 ? (stats.words / 1000).toFixed(1) + 'k' : stats.words} 字</span>
         </div>
       )}
 
@@ -1013,7 +1012,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
       )}
 
       {/* 瀑布流双栏 / 列表·时间线单栏 / 画廊双栏 */}
-      <div style={{ columnCount: layout === 'list' || layout === 'timeline' ? 1 : 2, columnGap: 9 }}>
+      <div className="notes-grid" style={{ columnCount: layout === 'list' || layout === 'timeline' ? 1 : 2, columnGap: 9 }}>
         {filtered.map((n, idx) => {
           const h = colorOf(n.color)
           const editing = editId === n.id && draft
@@ -1110,7 +1109,7 @@ export function NotesTab(p: NotesTabProps): React.JSX.Element {
                 {n.tags.map((t) => (
                   <span key={t} onClick={(e) => { e.stopPropagation(); setTagFilter(tagFilter === t ? '' : t) }} style={chip(h)}># {t}</span>
                 ))}
-                <span style={{ marginLeft: 'auto', color: ink(4), fontSize: 9 }}>{n.md.length} 字 · {dayLabel(sortBy === 'updated' ? n.updatedAt : n.createdAt)}</span>
+                <span style={{ marginLeft: 'auto', color: ink(4), fontSize: 10 }}>{n.md.length} 字 · {dayLabel(sortBy === 'updated' ? n.updatedAt : n.createdAt)}</span>
               </div>
               {/* 操作：回收站态 = 恢复/彻底删；正常态 = 全套 */}
               <div className="row-acts" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>

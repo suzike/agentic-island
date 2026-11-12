@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, Languages, Layers, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Pin, Pipette, Redo2, RotateCcw, RotateCw, Ruler, Save, ScanLine, ScanText, Scissors, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, Video, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
+import { Accessibility, AtSign, BarChart3, Camera, Check, Circle, ClipboardPaste, Code, Copy, Crop, Droplets, FileImage, FileText, FlipHorizontal, FlipVertical, Globe, Grid, Hash, Highlighter, History as HistoryIcon, Languages, Layers, ListChecks, Maximize2, Megaphone, MessageSquare, Monitor, MousePointer2, MoveUpRight, Palette, PenLine, PenTool, Pencil, Pin, Pipette, Redo2, RotateCcw, RotateCw, Ruler, Save, ScanLine, ScanText, Scissors, Shapes, ShieldCheck, Slash, Sparkles, Square, Stethoscope, Table, Tag, TriangleAlert, Type, Undo2, Video, X, Zap, ZoomIn, ZoomOut } from 'lucide-react'
 import type { LucideIcon } from '../ui/icons'
 import { Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
@@ -13,7 +13,7 @@ import { island } from '../bridge'
 import { SCREENSHOT_QUICK_DIR, captureScreenNative, clampRect, dataUrlBytes, dragRect, exportDimensions, formatBytes, formatExtension, rulerTicks, sanitizeScreenshotName, screenshotLoupeRect, screenshotPixelHex, textCardLayout } from '../logic/screenshot'
 import type { Point as Pt, Rect, ScreenshotFormat } from '../logic/screenshot'
 import { ScreenRecorderStudio } from './ScreenRecorderStudio'
-import type { LlmRequestConfig } from '../../../shared/protocol'
+import type { LlmRequestConfig, ScreenshotHistoryEntry } from '../../../shared/protocol'
 
 interface Props {
   dataUrl: string
@@ -396,6 +396,9 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
   const [tab, setTab] = useState<'design' | 'annotate' | 'ai'>('design')
   const [out, setOut] = useState('')
   const [toast, setToast] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyEntries, setHistoryEntries] = useState<ScreenshotHistoryEntry[]>([])
+  const [historyDir, setHistoryDir] = useState('')
 
   // AI 状态
   const [aiBusy, setAiBusy] = useState('')
@@ -463,10 +466,32 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
     setImgLoaded(false)
   }
 
+  const loadHistory = (): void => {
+    void island.screenshotHistory(40).then((result) => {
+      if (!result.ok) return
+      setHistoryEntries(result.entries || [])
+      setHistoryDir(result.dir || '')
+    }).catch(() => {})
+  }
+
+  const loadHistoryEntry = (entry: ScreenshotHistoryEntry): void => {
+    void island.readScreenshotHistory(entry.path).then((result) => {
+      if (!result.ok || !result.dataUrl) { setToast(result.error || '历史截图读取失败'); return }
+      useSource(result.dataUrl, result.name || entry.name)
+      setHistoryOpen(false)
+      setToast(`已载入 ${entry.width}×${entry.height} 历史截图`)
+    }).catch(() => setToast('历史截图读取失败'))
+  }
+
   useEffect(() => {
     useSource(dataUrl)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataUrl])
+
+  useEffect(() => {
+    if (historyOpen) loadHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyOpen])
 
   // 加载原图
   useEffect(() => {
@@ -730,12 +755,18 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
   /** 零摩擦保存：不弹保存框，直接落到「图片/Agentic-Island」并顺手复制一份到剪贴板。 */
   const doQuickSave = (): void => {
     const dataUrl = render(deco.scale, exportFormat, exportQuality)
+    const outSize = exportDimensions(compSize.width || 1, compSize.height || 1, deco.scale)
+    void island.archiveScreenshot(dataUrl, `${sanitizeScreenshotName(sourceName)}_saved`).then(() => { if (historyOpen) loadHistory() }).catch(() => {})
     void island.saveImageQuick(dataUrl, `${sanitizeScreenshotName(sourceName)}${deco.scale > 1 ? `_${deco.scale}x` : ''}`, exportFormat)
       .then((r) => {
         if (!r.ok) { flash(`✗ ${r.error || '快速保存失败'}`); return }
         // 同一动作里把图放进剪贴板：绝大多数截图下一步就是粘贴到别处
         void island.copyImage(dataUrl).catch(() => {})
-        flash(`已保存到 ${SCREENSHOT_QUICK_DIR} 并复制到剪贴板`)
+        const actual = r.width && r.height ? `${r.width}×${r.height}` : `${outSize.width}×${outSize.height}`
+        const mismatch = r.width && r.height && (r.width !== outSize.width || r.height !== outSize.height)
+        flash(mismatch
+          ? `已保存，但读回尺寸 ${actual} 与预期 ${outSize.width}×${outSize.height} 不一致`
+          : `已保存 ${actual} 到 ${SCREENSHOT_QUICK_DIR} 并复制到剪贴板`)
       })
   }
   /** 批量美化：把当前边框/背景/水印套到选中的多张图上，逐张直接落盘（免对话框）。 */
@@ -915,7 +946,7 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
             <Camera size={14} strokeWidth={1.75} />
           </div>
           <span style={text.subtitle()}>截图工坊</span>
-          <span style={{ ...text.faint(), fontVariantNumeric: 'tabular-nums' }}>{originalSize.width} × {originalSize.height} · {formatBytes(dataUrlBytes(sourceData))}</span>
+          <span style={{ ...text.faint(), fontVariantNumeric: 'tabular-nums' }}>{originalSize.width} × {originalSize.height} → 输出 {exportSize.width} × {exportSize.height} · {formatBytes(dataUrlBytes(sourceData))}</span>
           {/* 顶部 Tab */}
           <Segmented value={tab} onChange={(k) => setTab(k)} style={{ marginLeft: 6 }} options={[
             { key: 'design', label: '设计', icon: Palette },
@@ -924,6 +955,7 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
           ]} />
           <Button sm variant="ghost" icon={Video} onClick={() => setWorkspace('record')} title="打开专业录屏工作台">录屏</Button>
           <Button sm variant="ghost" icon={FileImage} onClick={openImage} title="打开本地图片">打开</Button>
+          <Button sm variant="ghost" icon={HistoryIcon} onClick={() => { setHistoryOpen((value) => !value); if (!historyOpen) loadHistory() }} title="最近截图历史（抓到的每一张都会自动归档）">历史{historyEntries.length ? ` ${historyEntries.length}` : ''}</Button>
           <Button sm variant="ghost" icon={ClipboardPaste} onClick={pasteImage} title="从剪贴板粘贴图片 (Ctrl+V)">粘贴</Button>
           <Button sm variant="ghost" icon={Monitor} onClick={captureDisplay} title="捕获鼠标所在显示器">整屏</Button>
           <Button sm variant="ghost" icon={Type} onClick={() => setCardOpen((v) => !v)} title="把一段文字直接做成美化卡片（复用当前边框/背景）">文字卡片</Button>
@@ -935,6 +967,31 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
           {toast && <span style={{ color: sem.calm, fontSize: FS.tiny, fontWeight: 600 }}>{toast}</span>}
           <IconButton icon={X} onClick={onClose} title="关闭" size={28} />
         </div>
+
+        {historyOpen && (
+          <div style={{ ...surface.inset(), margin: `0 ${SP.md + 4}px ${SP.sm}px`, padding: 9, display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <HistoryIcon size={12} color={accentText()} />
+              <span style={{ color: ink(1), fontSize: 11.5, fontWeight: 700 }}>最近截图</span>
+              <span style={{ ...text.faint(), fontSize: 9.5 }}>{historyEntries.length} 张 · 自动保留最近 120 张</span>
+              <span style={{ flex: 1 }} />
+              <Button sm variant="ghost" icon={FileImage} onClick={() => historyDir && island.openFolder(historyDir)} disabled={!historyDir}>打开文件夹</Button>
+              <IconButton icon={X} size={22} onClick={() => setHistoryOpen(false)} title="收起历史" />
+            </div>
+            {historyEntries.length === 0 ? (
+              <div style={{ ...text.faint(), fontSize: 10, padding: '8px 2px' }}>还没有历史截图。框选截图后会自动归档到这里，不保存也不会丢。</div>
+            ) : (
+              <div className="ai-scroll" style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 2 }}>
+                {historyEntries.map((entry) => (
+                  <button key={entry.path} type="button" onClick={() => loadHistoryEntry(entry)} title={`${entry.name}\n${entry.width}×${entry.height} · ${formatBytes(entry.bytes)}`} style={{ flex: 'none', width: 124, padding: 0, border: `0.5px solid ${hairline(0.14)}`, borderRadius: R.sm, overflow: 'hidden', background: '#0b0d10', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                    <img src={entry.thumb} alt="" style={{ display: 'block', width: '100%', height: 66, objectFit: 'cover' }} />
+                    <div style={{ padding: '3px 5px', color: ink(2), fontSize: 8.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{new Date(entry.mtime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} · {entry.width}×{entry.height}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {cardOpen && (
         <div style={{ ...surface.inset(), margin: `0 ${SP.md + 4}px ${SP.sm}px`, padding: SP.md, display: 'flex', flexDirection: 'column', gap: 8 }}>

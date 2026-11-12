@@ -158,6 +158,25 @@ export function recordingTranscriptToVtt(segments: RecordingTranscriptLike[]): s
   return `WEBVTT\n\n${body}`
 }
 
+/**
+ * 双语字幕：译文作为同一条字幕的第二行，而不是生成两条时间相同的字幕。
+ * 后者在部分播放器/剪辑软件里会互相覆盖，双语对照也就丢了。
+ */
+export function recordingBilingualTranscript(segments: RecordingTranscriptLike[], translations: string[]): RecordingTranscriptLike[] {
+  return segments.map((segment, index) => ({
+    ...segment,
+    text: [segment.text, (translations[index] || '').trim()].filter(Boolean).join('\n')
+  }))
+}
+
+export function recordingBilingualSrt(segments: RecordingTranscriptLike[], translations: string[]): string {
+  return recordingTranscriptToSrt(recordingBilingualTranscript(segments, translations))
+}
+
+export function recordingBilingualVtt(segments: RecordingTranscriptLike[], translations: string[]): string {
+  return recordingTranscriptToVtt(recordingBilingualTranscript(segments, translations))
+}
+
 export function recordingOutputSize(sourceWidth: number, sourceHeight: number, resolution: RecordingResolution, aspect: RecordingAspect = 'source'): RecordingSize {
   const sw = Math.max(2, Math.round(sourceWidth))
   const sh = Math.max(2, Math.round(sourceHeight))
@@ -489,6 +508,10 @@ export function recordingMotionFrames(
     maxZoom: number
     /** 成片速度：>1 时同一段素材会更快放完，帧数按比例减少 */
     speed?: number
+    /** 点击事件：用于"点哪里就短暂推近哪里"的强调，比只看光标更接近演示意图 */
+    clicks?: RecordingClickSample[]
+    /** 是否启用点击强调（默认关闭，保持旧行为） */
+    clickFocus?: boolean
   }
 ): RecordingMotionFrame[] {
   const fps = Math.max(1, Math.min(120, Math.round(options.fps) || 30))
@@ -498,6 +521,8 @@ export function recordingMotionFrames(
   const kept = (segments || []).filter((segment) => segment.endMs - segment.startMs >= 1).sort((a, b) => a.startMs - b.startMs)
   if (!kept.length || !samples.length) return []
   const sorted = [...samples].sort((a, b) => a.t - b.t)
+  const clicks = options.clickFocus ? [...(options.clicks || [])].filter((click) => Number.isFinite(click.t)).sort((a, b) => a.t - b.t) : []
+  let clickCursor = 0
   const strength = Math.max(0, Math.min(1, options.strength))
   // 实时运镜每帧乘 0.92 衰减速度；这里按帧率归一化，掉帧/不同帧率下的推近节奏才一致
   const decay = 0.92 ** (frameMs / (1000 / 30))
@@ -526,7 +551,13 @@ export function recordingMotionFrames(
       x += (cursorX - x) * centerAlpha
       y += (cursorY - y) * centerAlpha
       const targetZoom = options.motion === 'off' ? 1 : Math.min(maxZoom, recordingZoomForMotion(options.motion, cursorSpeed))
-      zoom += (targetZoom - zoom) * recordingSmoothingAlpha(frameMs, 0.035 + strength * 0.04, Math.max(1, frameMs))
+      // 点击强调：点击后 1.2 秒内把镜头推到点击位置附近（光标通常已经在附近，所以只提升焦距）。
+      while (clickCursor + 1 < clicks.length && clicks[clickCursor + 1].t <= sourceMs) clickCursor += 1
+      const click = clicks[clickCursor]
+      const clickAge = click && sourceMs >= click.t ? sourceMs - click.t : Infinity
+      const clickBoost = clickAge <= 1200 ? (1 - clickAge / 1200) * (0.45 + strength * 0.35) : 0
+      const emphasisZoom = Math.min(maxZoom, Math.max(targetZoom, 1 + (maxZoom - 1) * clickBoost))
+      zoom += (emphasisZoom - zoom) * recordingSmoothingAlpha(frameMs, 0.035 + strength * 0.04, Math.max(1, frameMs))
       frames.push({
         x: Number(Math.max(0, Math.min(1, x)).toFixed(4)),
         y: Number(Math.max(0, Math.min(1, y)).toFixed(4)),
@@ -947,6 +978,62 @@ export function recordingVideoBitrate(width: number, height: number, fps: number
   const pixelsPerSecond = Math.max(1, width * height * fps)
   const factor = quality === 'ultra' ? 0.16 : quality === 'high' ? 0.11 : 0.075
   return Math.round(Math.max(4_000_000, Math.min(80_000_000, pixelsPerSecond * factor)))
+}
+
+/** MediaStreamTrack.getStats() 里与"画面是否真的按目标帧率在走"相关的字段（各 Chromium 版本命名不完全一致）。 */
+export interface RecordingTrackStats {
+  framesPerSecond?: number
+  frames?: number
+  framesDropped?: number
+  frameWidth?: number
+  frameHeight?: number
+  totalFramesDuration?: number
+}
+
+export interface RecordingTrackSummary {
+  actualFps: number
+  droppedPercent: number
+  width: number
+  height: number
+  level: 'ok' | 'warning' | 'unknown'
+  message: string
+}
+
+/**
+ * 把浏览器采集轨的原始统计压成一条人能读的结论。
+ * 目标帧率是录制设置；实际帧率低于 80% 时明确告警——这正是"录出来卡顿"最直接的证据，
+ * 不要只看界面上的目标 30 FPS。
+ */
+export function recordingTrackSummary(stats: RecordingTrackStats | null, targetFps: number): RecordingTrackSummary {
+  const frames = Number(stats?.frames)
+  const seconds = Number(stats?.totalFramesDuration) / 1_000_000
+  const reported = Number(stats?.framesPerSecond)
+  const measured = Number.isFinite(reported) && reported > 0
+    ? reported
+    : Number.isFinite(frames) && frames > 0 && Number.isFinite(seconds) && seconds > 0
+      ? frames / seconds
+      : 0
+  const dropped = Math.max(0, Number(stats?.framesDropped) || 0)
+  const total = Math.max(0, frames || 0) + dropped
+  const droppedPercent = total > 0 ? dropped / total * 100 : 0
+  const width = Math.max(0, Math.round(Number(stats?.frameWidth) || 0))
+  const height = Math.max(0, Math.round(Number(stats?.frameHeight) || 0))
+  if (!measured) {
+    return { actualFps: 0, droppedPercent, width, height, level: 'unknown', message: '采集统计待采样' }
+  }
+  const actualFps = Math.round(measured * 10) / 10
+  const low = targetFps > 0 && actualFps < targetFps * 0.8
+  const level: RecordingTrackSummary['level'] = low || droppedPercent > 5 ? 'warning' : 'ok'
+  return {
+    actualFps,
+    droppedPercent,
+    width,
+    height,
+    level,
+    message: low
+      ? `实际 ${actualFps}fps / 目标 ${targetFps}fps · 采集跟不上，建议改原始画面或降低帧率`
+      : `实际 ${actualFps}fps / 目标 ${targetFps}fps${droppedPercent > 0 ? ` · 丢帧 ${droppedPercent.toFixed(1)}%` : ''}`
+  }
 }
 
 export interface RecordingHealthInput {

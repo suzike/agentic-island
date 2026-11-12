@@ -286,7 +286,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
           borderRadius: R.lg,
           background: flash ? semBg(accent(), 0.16) : open ? semBg(accent(), 0.07) : fill(1),
           border: flash ? `0.5px solid ${accent(0.75, 0.5)}` : open ? `0.5px solid ${accent(0.7, 0.3)}` : 'none',
-          opacity: it.read && !open ? 0.62 : 1,
+          opacity: it.read && !open ? 0.72 : 1,
           transition: transition('background, border-color, opacity', MOTION.base),
           overflow: 'hidden'
         }}
@@ -299,7 +299,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
               {it.fav && <Star size={11} strokeWidth={2} style={{ color: sem.warn, fill: sem.warn, verticalAlign: -1.5, marginRight: 4 }} />}{it.title}
             </div>
             {it.brief && <div style={{ color: ink(2), fontSize: FS.tiny, lineHeight: 1.5, marginTop: 2 }}>{it.brief}</div>}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 3, fontSize: 9, color: ink(3) }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 4, fontSize: 9.5, color: ink(3) }}>
               <span>{it.sourceName}</span>
               {it.tag && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><Tag size={8.5} strokeWidth={2} />{it.tag}</span>}
               {it.summary && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2.5, color: accentText(0.82, 0.75) }}><Sparkles size={9} strokeWidth={2} />有详细总结</span>}
@@ -622,13 +622,13 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
               animate="animate"
               className="hv ai-card"
               onClick={() => toggleExpand(it)}
-              style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', cursor: 'pointer', background: `linear-gradient(135deg, ${semBg(accent(), 0.13)}, ${semBg(accent2(), 0.06)})`, border: `0.5px solid ${accent(0.65, 0.25)}`, borderRadius: R.lg }}
+              style={{ ...surface.card(), display: 'flex', alignItems: 'flex-start', gap: 10, padding: '11px 13px', cursor: 'pointer', background: `linear-gradient(90deg, ${accent(0.7, 0.42)} 0, ${accent(0.7, 0.42)} 3px, ${fill(1)} 3px)`, border: `0.5px solid ${accent(0.6, 0.16)}`, borderRadius: R.lg }}
             >
               <span style={{ flex: 'none', fontSize: 15, fontWeight: 900, color: accentText(0.85 - i * 0.08), fontStyle: 'italic', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ color: ink(1), fontSize: FS.body, fontWeight: 700, lineHeight: 1.4 }}>{it.title}</div>
                 {it.brief && <div style={{ color: ink(2), fontSize: FS.tiny, lineHeight: 1.5, marginTop: 3 }}>{it.brief}</div>}
-                <div style={{ display: 'flex', gap: 7, marginTop: 4, fontSize: 9, color: ink(3) }}>
+                <div style={{ display: 'flex', gap: 7, marginTop: 4, fontSize: 10, color: ink(3) }}>
                   <span>{it.sourceName}</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtHM(it.pubDate)}</span>{it.tag && <span># {it.tag}</span>}
                 </div>
               </div>
@@ -652,7 +652,7 @@ export function NewsTab(p: NewsTabProps): React.JSX.Element {
         <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 3px 0' }}>
             <span style={text.overline()}>{g.label}</span>
-            <span style={{ ...text.faint(), fontSize: 9, fontVariantNumeric: 'tabular-nums' }}>{g.items.length} 条</span>
+            <span style={{ ...text.faint(), fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>{g.items.length} 条</span>
             <span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} />
           </div>
           {g.items.map(renderItem)}

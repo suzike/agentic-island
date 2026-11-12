@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ApprovalAuditEntry, PinnedShotPayload, ScreenshotSnipRegion, ScrollHudState, DecisionMessage, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalShellProfile, TerminalWorkspaceState, UpdateState } from '../shared/protocol'
+import type { ApprovalAuditEntry, PinnedShotPayload, ScreenshotSnipRegion, ScrollHudState, DecisionMessage, FollowupEvent, FollowupRequest, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalJumpHint, TerminalShellProfile, TerminalWorkspaceState, UpdateState } from '../shared/protocol'
 
 const api: IslandBridgeApi = {
   getRuntimeInfo: () => ipcRenderer.invoke('runtime-info'),
@@ -23,7 +23,14 @@ const api: IslandBridgeApi = {
   },
   getSnapshot: (): Promise<IslandSnapshot> => ipcRenderer.invoke('get-snapshot'),
   decide: (msg: DecisionMessage): void => ipcRenderer.send('decide', msg),
-  jumpToTerminal: (agentId: string): Promise<boolean> => ipcRenderer.invoke('jump-to-terminal', agentId),
+  jumpToTerminal: (agentId: string, hint?: TerminalJumpHint): Promise<boolean> => ipcRenderer.invoke('jump-to-terminal', agentId, hint),
+  startFollowup: (req: FollowupRequest): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('agent-followup', req),
+  cancelFollowup: (runId: string): void => ipcRenderer.send('agent-followup-cancel', runId),
+  onFollowupEvent: (cb: (ev: FollowupEvent) => void): (() => void) => {
+    const handler = (_e: unknown, ev: FollowupEvent): void => cb(ev)
+    ipcRenderer.on('followup-event', handler)
+    return () => ipcRenderer.removeListener('followup-event', handler)
+  },
   onExternalYield: (cb: () => void): (() => void) => {
     const handler = (): void => cb()
     ipcRenderer.on('external-yield', handler)
@@ -31,6 +38,7 @@ const api: IslandBridgeApi = {
   },
   setNativeDialogOpen: (active: boolean): void => ipcRenderer.send('set-native-dialog-open', active),
   setIgnoreMouse: (ignore: boolean): void => ipcRenderer.send('set-ignore-mouse', ignore),
+  setInteractiveRegion: (state: { open: boolean; overlay: boolean; rect: { x: number; y: number; width: number; height: number } | null }): void => ipcRenderer.send('set-interactive-region', state),
   playSound: (key: string): void => ipcRenderer.send('play-sound', key),
   setAutostart: (on: boolean): void => ipcRenderer.send('set-autostart', on),
   reposition: (opts: { follow: boolean; monitorIndex: number }): void => ipcRenderer.send('reposition', opts),
@@ -129,6 +137,10 @@ const api: IslandBridgeApi = {
   pinScreenshot: (input: { dataUrl: string; name?: string; width?: number; height?: number }) => ipcRenderer.invoke('pin-screenshot', input),
   closePinnedShot: (id: string) => ipcRenderer.send('close-pinned-shot', id),
   saveImageQuick: (dataUrl: string, name: string, format: string) => ipcRenderer.invoke('save-image-quick', dataUrl, name, format),
+  archiveScreenshot: (dataUrl: string, name: string) => ipcRenderer.invoke('archive-screenshot', dataUrl, name),
+  screenshotHistory: (limit?: number) => ipcRenderer.invoke('screenshot-history', limit),
+  readScreenshotHistory: (path: string) => ipcRenderer.invoke('read-screenshot-history', path),
+  revealScreenshotHistory: (path: string) => ipcRenderer.invoke('reveal-screenshot-history', path),
   onPinnedShot: (cb: (payload: PinnedShotPayload) => void): (() => void) => {
     const handler = (_e: unknown, payload: PinnedShotPayload): void => cb(payload)
     ipcRenderer.on('pinned-shot', handler)
@@ -136,8 +148,9 @@ const api: IslandBridgeApi = {
   },
   completeSnip: (region: ScreenshotSnipRegion) => ipcRenderer.send('snip-complete', region),
   cancelSnip: () => ipcRenderer.send('snip-cancel'),
-  onSnipConfig: (cb: (config: { displayId: string; scaleFactor: number; width: number; height: number }) => void): (() => void) => {
-    const handler = (_e: unknown, config: { displayId: string; scaleFactor: number; width: number; height: number }): void => cb(config)
+  snipReady: () => ipcRenderer.send('snip-ready'),
+  onSnipConfig: (cb: (config: { displayId: string; scaleFactor: number; width: number; height: number; mode?: 'snip' | 'scroll' }) => void): (() => void) => {
+    const handler = (_e: unknown, config: { displayId: string; scaleFactor: number; width: number; height: number; mode?: 'snip' | 'scroll' }): void => cb(config)
     ipcRenderer.on('snip-config', handler)
     return () => ipcRenderer.removeListener('snip-config', handler)
   },

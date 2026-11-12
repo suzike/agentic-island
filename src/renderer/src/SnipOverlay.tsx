@@ -12,7 +12,11 @@ export function SnipOverlay(): React.JSX.Element {
   const anchorRef = useRef<{ x: number; y: number } | null>(null)
   const [done, setDone] = useState(false)
 
-  useEffect(() => island.onSnipConfig((value) => setConfig(value)), [])
+  useEffect(() => {
+    const off = island.onSnipConfig((value) => setConfig(value))
+    island.snipReady()
+    return off
+  }, [])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {

@@ -121,7 +121,7 @@ export function LearnCenter(p: Props): React.JSX.Element | null {
                       return (
                         <div key={g} className="hv" onClick={() => grade(g)} style={{ flex: 1, textAlign: 'center', padding: '9px 0', borderRadius: R.md, cursor: 'pointer', background: semBg(color, 0.18), border: `0.5px solid ${semBg(color, 0.45)}` }}>
                           <div style={{ color, fontSize: FS.body, fontWeight: 700 }}>{label}</div>
-                          <div style={{ ...text.faint(), fontSize: 9, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>+{intervalLabel(nx.interval)}</div>
+                          <div style={{ ...text.faint(), fontSize: 10, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>+{intervalLabel(nx.interval)}</div>
                         </div>
                       )
                     })}
@@ -136,7 +136,7 @@ export function LearnCenter(p: Props): React.JSX.Element | null {
                 {[...RINGS].reverse().map((r) => (
                   <g key={r.key}>
                     <circle cx={150} cy={150} r={r.outer} style={{ fill: semBg(r.color, 0.06), stroke: semBg(r.color, 0.28), strokeWidth: 1 }} />
-                    <text x={150} y={150 - r.outer + 11} textAnchor="middle" style={{ fill: semBg(r.color, 0.75), fontSize: 8, fontWeight: 700 }}>{r.label}</text>
+                    <text x={150} y={150 - r.outer + 11} textAnchor="middle" style={{ fill: semBg(r.color, 0.75), fontSize: 9, fontWeight: 700 }}>{r.label}</text>
                   </g>
                 ))}
                 {RINGS.map((r) => {
@@ -148,7 +148,7 @@ export function LearnCenter(p: Props): React.JSX.Element | null {
                     return (
                       <g key={it.id} className="hv" onClick={() => p.onCycleRadar(it.id)} style={{ cursor: 'pointer' }}>
                         <circle cx={x} cy={y} r={4} style={{ fill: r.color }} />
-                        <text x={x} y={y - 6} textAnchor="middle" style={{ fill: ink(1), fontSize: 7.5 }}>{it.name.slice(0, 8)}</text>
+                        <text x={x} y={y - 7} textAnchor="middle" style={{ fill: ink(1), fontSize: 9 }}>{it.name.slice(0, 8)}</text>
                       </g>
                     )
                   })

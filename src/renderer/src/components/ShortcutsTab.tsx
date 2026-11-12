@@ -322,14 +322,14 @@ export function ShortcutsTab(p: Props): React.JSX.Element {
         {filtered.map((s) => {
           const meta = GROUP_META[s.group] || GROUP_META['自定义']
           return (
-          <motion.div key={s.id} variants={staggerItem} className="ai-card" onClick={() => void runIt(s)} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '11px 12px', ...surface.card(), background: `linear-gradient(145deg, ${tintSurface(String(meta.hue), .38)}, ${fill(2)})`, cursor: 'pointer' }}>
+          <motion.div key={s.id} variants={staggerItem} className="ai-card" onClick={() => void runIt(s)} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '11px 12px', ...surface.card(), background: `linear-gradient(90deg, oklch(0.72 0.1 ${meta.hue} / .55) 0, oklch(0.72 0.1 ${meta.hue} / .55) 2.5px, ${fill(2)} 2.5px)`, cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ width: 24, height: 24, borderRadius: R.sm, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 13, background: tintSurface(String(meta.hue), .72, true), color: hueAccent(String(meta.hue), .12) }}>{s.icon}</span>
               <span style={{ flex: 1, minWidth: 0, ...text.subtitle(), fontSize: FS.body, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
               {s.steps.some((x) => x.kind === 'agent') && <span title="调用本地 Agent" style={{ display: 'inline-flex', color: sem.focus }}><Ico.agent size={11} strokeWidth={2} /></span>}
               {needsRepo(s) && <span title="需要选目标仓库" style={{ display: 'inline-flex', color: ink(3) }}><Ico.repos size={11} strokeWidth={2} /></span>}
             </div>
-            {s.desc && <div style={{ ...text.faint(), fontSize: 10, lineHeight: 1.45, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as React.CSSProperties}>{s.desc}</div>}
+            {s.desc && <div style={{ ...text.faint(), fontSize: 10.5, lineHeight: 1.5, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as React.CSSProperties}>{s.desc}</div>}
             <div className="row-acts" style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
               <span style={text.faint()}>{s.steps.length} 步{s.runCount > 0 ? ` · ${s.runCount} 次` : ''}</span>
               <span style={{ flex: 1 }} />

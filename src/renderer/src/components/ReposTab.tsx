@@ -130,7 +130,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
             <Star size={11} strokeWidth={2} fill="currentColor" />{fmtK(repo.stars)}
           </span>
           {repo.forks > 0 && (
-            <span style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 3, color: ink(3), fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>
+            <span style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 3, color: ink(3), fontSize: 10.5, fontVariantNumeric: 'tabular-nums' }}>
               <GitFork size={10} strokeWidth={1.75} />{fmtK(repo.forks)}
             </span>
           )}
@@ -138,12 +138,12 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
         {repo.desc && <div style={{ ...text.dim(), fontSize: FS.tiny, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}>{repo.desc}</div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {repo.language && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: ink(2), fontSize: 10 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: ink(2), fontSize: 10.5 }}>
               <span style={{ width: 8, height: 8, borderRadius: R.pill, background: langColor(repo.language) }} />{repo.language}
             </span>
           )}
           {repo.topics.slice(0, 3).map((t) => (
-            <span key={t} style={{ padding: '1px 7px', borderRadius: R.pill, background: semBg(accent(), 0.12), color: accentText(0.82, 0.85), fontSize: 8.5, fontWeight: 600 }}>{t}</span>
+            <span key={t} style={{ padding: '1.5px 7px', borderRadius: R.pill, background: semBg(accent(), 0.12), color: accentText(0.82, 0.85), fontSize: 9.5, fontWeight: 600 }}>{t}</span>
           ))}
           <span style={{ flex: 1 }} />
           <span className="hv" title={saved ? '取消收藏' : '收藏'} onClick={() => onToggleBookmark(repo)}
@@ -191,7 +191,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {langDist.map((l) => (
               <span key={l.lang} className="hv" onClick={() => view === 'trending' && setLangFilter(langFilter === l.lang ? '' : l.lang)}
-                style={{ display: 'flex', alignItems: 'center', gap: 3.5, color: langFilter === l.lang ? accentText(0.88) : ink(3), fontSize: 9.5, cursor: view === 'trending' ? 'pointer' : 'default', fontWeight: langFilter === l.lang ? 700 : 400 }}>
+                style={{ display: 'flex', alignItems: 'center', gap: 3.5, color: langFilter === l.lang ? accentText(0.88) : ink(3), fontSize: 10, cursor: view === 'trending' ? 'pointer' : 'default', fontWeight: langFilter === l.lang ? 700 : 400 }}>
                 <span style={{ width: 7, height: 7, borderRadius: R.pill, background: langColor(l.lang) }} />{l.lang}
               </span>
             ))}
@@ -332,7 +332,7 @@ export function ReposTab({ repos, onAdd, onRemove, githubToken, onSetToken, onAI
                   <IconButton icon={X} size={22} title="移除" color={sem.danger} style={{ borderRadius: R.sm, background: 'transparent' }}
                     onClick={() => onRemove(r.path)} />
                 </div>
-                <div style={{ ...text.mono(10), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ ...text.mono(10.5), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {s?.ok ? <>· <b style={{ color: accentText(0.8) }}>{s.commit}</b> {s.subject} <span style={{ opacity: 0.7 }}>· {s.when}</span></> : (s?.error || '读取中…')}
                 </div>
               </motion.div>

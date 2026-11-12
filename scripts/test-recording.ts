@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { EncoderRunner } from '../src/main/recording-export.ts'
 import { buildRecordingAspectFilters, buildRecordingFfmpegArgs, buildRecordingMotionCropFilter, buildRecordingMotionFilter, MOTION_MAX_CENTER_TOLERANCE, recordingMotionUsable, parseRecordingOutputProbe, probeRecordingOutput, recordingExportVerdict, buildRecordingRemuxArgs, crfFor, detectHardwareEncoders, hardwareQuantizerForCrf, MAX_MOTION_WAYPOINTS, parseHardwareEncoders, pickFastestEncoder, pickVideoEncoder, recordingExportDurationMs, recordingExportStrategy, recordingExportSubtitleSegments, recordingHasEdits, simplifyRecordingMotion, videoEncoderArgs } from '../src/main/recording-export.ts'
 import { recordingContainerOf, recordingFileExtension, sniffRecordingContainer } from '../src/shared/recording-format.ts'
-import { clampRecordingBarPosition, formatRecordingTime, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, remapRecordingMotionFrames, recordingSmoothingAlpha, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
+import { clampRecordingBarPosition, formatRecordingTime, recordingBilingualSrt, recordingBilingualVtt, recordingIdleRanges, recordingKeptSegmentsFromIdle, recordingLerpTimed, recordingMotionCoverCrop, recordingMotionFrameTimes, recordingMotionFrames, recordingMotionFramesFromKeyframes, recordingMotionKeyframes, remapRecordingMotionFrames, recordingSmoothingAlpha, normalizeRecordingSegments, parseRecordingAiEditPlan, recordingElapsed, recordingFitComposition, recordingFocusCrop, recordingFrameBudget, recordingHealth, recordingLerp, recordingOutputSize, recordingPreviewSize, recordingRawCaptureSize, recordingRawModeBlockers, recordingRegionCrop, recordingSegmentsDuration, recordingSourcePointToOutput, recordingStartError, recordingTrackSummary, recordingTranscriptToSrt, recordingTranscriptToVtt, recordingVideoBitrate, recordingZoomForMotion, selectRecorderMime, selectRecordingSourceId, snapRecordingTime, splitRecordingSegment, stylizeRecordingAnimeFrame, writePreviewPosition,
 } from '../src/renderer/src/logic/recording.ts'
 import { recordingSourceLabel, recordingWindowHandle, sameRecordingWindowSource } from '../src/shared/recording-source.ts'
 import type { RecordingExportRequest } from '../src/shared/protocol.ts'
@@ -48,6 +48,17 @@ assert.equal(recordingHealth({ active: true, elapsedMs: 5000, bytes: 1_000_000, 
 assert.equal(recordingHealth({ active: true, elapsedMs: 5000, bytes: 1_000_000, chunkGapMs: 1000, writeLatencyMs: 2300, droppedFrames: 0, totalFrames: 150 }).message, '磁盘写入积压', '写盘积压产生健康告警')
 assert.equal(recordingHealth({ active: true, elapsedMs: 5000, bytes: 1_000_000, chunkGapMs: 1000, writeLatencyMs: 20, droppedFrames: 10, totalFrames: 150 }).level, 'warning', '高丢帧率产生健康告警')
 assert.equal(recordingHealth({ active: true, elapsedMs: 5000, bytes: 1_000_000, chunkGapMs: 1000, writeLatencyMs: 20, droppedFrames: 1, totalFrames: 150 }).level, 'healthy', '正常录制健康状态')
+assert.equal(recordingTrackSummary({ framesPerSecond: 29.8, frameWidth: 2560, frameHeight: 1600 }, 30).level, 'ok', '实际帧率接近目标时正常')
+assert.equal(recordingTrackSummary({ framesPerSecond: 18.2, framesDropped: 40, frames: 300 }, 30).level, 'warning', '实际帧率明显低于目标时告警')
+assert.equal(recordingTrackSummary({ frames: 600, totalFramesDuration: 20_000_000, frameWidth: 2560, frameHeight: 1600 }, 30).actualFps, 30, '没有 framesPerSecond 时用帧数/时长推算')
+assert.equal(recordingTrackSummary(null, 30).level, 'unknown', '统计尚未就绪时明确标注待采样')
+assert.equal(recordingBilingualSrt([{ startMs: 0, endMs: 1000, text: '你好' }], ['Hello']), '1\n00:00:00,000 --> 00:00:01,000\n你好\nHello', '双语 SRT 在同一时间码内保留原文与译文')
+assert.match(recordingBilingualVtt([{ startMs: 0, endMs: 1000, text: '你好' }], ['Hello']), /你好\nHello/, '双语 VTT 同样按两行输出')
+const motionSamples = [{ t: 0, x: 0.2, y: 0.2 }, { t: 2000, x: 0.8, y: 0.8 }]
+const motionPlain = recordingMotionFrames(motionSamples, [{ startMs: 0, endMs: 2000 }], { fps: 30, motion: 'gentle', strength: 0.5, maxZoom: 1.6 })
+const motionClicked = recordingMotionFrames(motionSamples, [{ startMs: 0, endMs: 2000 }], { fps: 30, motion: 'gentle', strength: 0.5, maxZoom: 1.6, clicks: [{ t: 1000, x: 0.8, y: 0.8 }], clickFocus: true })
+assert.ok(motionClicked[32].zoom > motionPlain[32].zoom, '点击后 1.2 秒内推近，形成点击强调')
+assert.ok(motionClicked[50].zoom <= 1.6, '点击强调不会超过最大放大')
 assert.equal(formatRecordingTime(3_725_000), '01:02:05', '长录制时长格式')
 assert.match(recordingStartError(new DOMException('Permission denied', 'NotAllowedError')), /权限被拒绝/, '权限错误转为可执行提示')
 assert.match(recordingStartError(new Error('desktop picture timed out')), /连接屏幕画面超时/, '采集超时转为可执行提示')

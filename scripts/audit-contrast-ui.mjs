@@ -27,7 +27,7 @@ const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)
 /** 审计的主题：一个深色预设 + 唯一浅色预设（浅色下 accent 明度下移，是最容易出问题的一侧）。 */
 const THEMES = ['aurora', 'control-center']
 /** 逐分区审计（分区键与 App.tsx 的 TABS 一致）。 */
-const TABS = ['agents', 'plan', 'ask', 'shortcuts', 'todos', 'notes', 'news', 'review', 'repos', 'term', 'settings']
+const TABS = ['agents', 'accept', 'ask', 'shortcuts', 'todos', 'notes', 'news', 'review', 'repos', 'term', 'settings']
 
 class Cdp {
   constructor(url) { this.seq = 0; this.pending = new Map(); this.ws = new WebSocket(url) }

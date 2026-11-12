@@ -9,7 +9,7 @@ import type { BarConfig } from '../types'
 import type { AmbientStatus, AmbientStatusKind } from '../logic/ambientBar'
 import { AMBIENT_TEXT_MODES, buildAmbientSlots, clampBarRotation } from '../logic/ambientBar'
 import { parseLrc, currentLine, type LrcLine } from '../logic/lrc'
-import { accent as dsAccent, ink } from '../ui/tokens'
+import { accent as dsAccent, fill, hairline, ink } from '../ui/tokens'
 
 export interface BarMedia {
   title: string
@@ -69,14 +69,14 @@ const controlStyle: CSSProperties = {
   width: 20,
   height: 20,
   padding: 0,
-  border: '1px solid rgba(255,255,255,.08)',
+  border: `0.5px solid ${hairline(0.08)}`,
   borderRadius: 6,
   display: 'grid',
   placeItems: 'center',
   flex: 'none',
   cursor: 'pointer',
   color: ink(1),
-  background: 'rgba(255,255,255,.055)'
+  background: fill(2)
 }
 
 export function AmbientBar({ cfg, media, brief, pools, width, status, onMediaKey, onOpen, onOpenTarget, fetchLyrics }: AmbientBarProps): React.JSX.Element {

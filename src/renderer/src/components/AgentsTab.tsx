@@ -73,8 +73,12 @@ const fmtClock = (ts: number): string => {
 }
 
 export function AgentsTab(props: AgentsTabProps): React.JSX.Element {
-  const { agents } = props
-  const active = agents.filter((a) => a.status !== 'done').length
+  const { agents, ...cardProps } = props
+  const groups = [
+    { key: 'needs', label: '需要你', items: agents.filter((a) => a.status === 'needs_approval' || a.status === 'waiting'), tone: sem.warn },
+    { key: 'running', label: '运行中', items: agents.filter((a) => a.status === 'running'), tone: accent() },
+    { key: 'done', label: '已结束', items: agents.filter((a) => a.status === 'done'), tone: ink(3) }
+  ]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: SP.md - 2 }}>
       {agents.length === 0 ? (
@@ -84,16 +88,46 @@ export function AgentsTab(props: AgentsTabProps): React.JSX.Element {
           desc="在任意终端运行 Claude Code / Codex 即自动接入。命令审批 · 计划审阅 · 等待提醒 · 完成小结都会实时出现。"
         />
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '0 2px' }}>
-          <span style={text.overline()}>
-            {active} 个活动会话{agents.length > active ? ` · ${agents.length - active} 个已结束` : ''}
-          </span>
-          <span style={{ flex: 1, height: 0.5, background: hairline(0.08) }} />
-        </div>
+        <>
+          {/* 一眼看清"谁需要我、谁在跑、谁已结束"——比一行活动会话计数更像仪表。 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: 3, ...surface.inset(), borderRadius: R.pill }}>
+            {groups.map((g) => {
+              const lit = g.items.length > 0
+              return (
+                <div
+                  key={g.key}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 5,
+                    minHeight: 26,
+                    borderRadius: R.pill,
+                    background: g.key === 'needs' && lit ? semBg(sem.warn, 0.12) : 'transparent'
+                  }}
+                >
+                  <span style={{ width: 5, height: 5, borderRadius: 999, flex: 'none', background: lit ? g.tone : ink(4), boxShadow: g.key === 'running' && lit ? `0 0 5px ${accent(0.7, 0.35)}` : undefined }} />
+                  <span style={{ color: lit ? ink(2) : ink(4), fontSize: FS.small, fontWeight: 600 }}>{g.label}</span>
+                  <span style={{ color: lit ? ink(1) : ink(4), fontSize: FS.small, fontWeight: 750, fontVariantNumeric: 'tabular-nums' }}>{g.items.length}</span>
+                </div>
+              )
+            })}
+          </div>
+          {groups.filter((g) => g.items.length > 0).map((g) => (
+            <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: SP.sm - 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 2px' }}>
+                <span style={{ ...text.overline(), color: g.key === 'needs' ? sem.warn : ink(3) }}>{g.label}</span>
+                <span style={{ flex: 1, height: 0.5, background: hairline(0.07) }} />
+              </div>
+              {g.items.map((a) => (
+                <AgentCard key={a.id} a={a} {...cardProps} />
+              ))}
+            </div>
+          ))}
+        </>
       )}
-      {agents.map((a) => (
-        <AgentCard key={a.id} a={a} {...props} />
-      ))}
     </div>
   )
 }
@@ -154,11 +188,11 @@ function AgentCard({
             {a.model && <span title={a.model} style={{ ...text.mono(9.5), background: semBg(sem.focus, 0.14), color: sem.focus, padding: '1px 7px', borderRadius: R.sm, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 'none' }}>{a.model}</span>}
             <span style={{ ...text.mono(10), background: fill(1), padding: '1px 7px', borderRadius: R.sm, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{a.proj}</span>
           </div>
-          {elapsed && <span style={{ ...text.faint(), fontSize: 9 }}>已运行 {elapsed}</span>}
+          {elapsed && <span style={{ ...text.faint(), fontSize: 9.5 }}>已运行 {elapsed}</span>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: R.pill, background: chipBg, border: highlight ? '0.5px solid oklch(0.8 0.13 75 / 0.4)' : 'none', flex: 'none' }}>
-          <div style={{ width: 6, height: 6, borderRadius: 999, background: dot, boxShadow: `0 0 7px ${dot}`, animation: isDone ? undefined : 'ai-dotpulse 2s ease-in-out infinite' }} />
-          <span style={{ color: chipFg, fontSize: 10, fontWeight: 700 }}>{label}</span>
+          <div style={{ width: 6, height: 6, borderRadius: 999, background: dot, boxShadow: `0 0 4px ${dot}`, animation: isDone ? undefined : 'ai-dotpulse 2.4s ease-in-out infinite' }} />
+          <span style={{ color: chipFg, fontSize: 10.5, fontWeight: 700 }}>{label}</span>
         </div>
       </div>
       {/* 状态描述：长内容（如 Agent 提问/最近消息）渲染 Markdown + 可折叠 */}

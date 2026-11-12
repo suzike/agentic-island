@@ -40,6 +40,17 @@ export interface ScreenshotCapture {
   target: ScreenshotTarget
 }
 
+/** 截图历史：抓到的每一张都会先归档到应用自己的历史目录，再进入工坊。 */
+export interface ScreenshotHistoryEntry {
+  path: string
+  name: string
+  thumb: string
+  width: number
+  height: number
+  bytes: number
+  mtime: number
+}
+
 /** 截图前的准备结果：主进程已藏岛并挑好采集源，取像素由渲染层用媒体流完成（原生尺寸）。 */
 export interface ScreenCapturePrepare {
   ok: boolean
@@ -358,6 +369,10 @@ export interface BridgeEvent {
   model?: string
   /** 当前上下文占用 token（输入+缓存；Stop 时从 transcript 尾部提取，Codex 来自 token_count） */
   contextTokens?: number
+  /** 本轮 Agent 的最终回复全文（Stop/task_complete 携带，供验收台留档） */
+  lastReply?: string
+  /** 刚执行完的一条验证/构建命令结果（Claude PostToolUse / Codex function_call_output） */
+  check?: CommandRun
 }
 
 /** 任务完成时的变更小结 */
@@ -366,6 +381,27 @@ export interface ChangeSummary {
   added: number
   removed: number
   commit: string
+  /** 变更文件清单（相对仓库根，最多 200 条；由 git status 得到，非 git/无改动时为空） */
+  paths?: { path: string; status: string }[]
+  /** 会话期间产生的提交数（>0 时清单只覆盖工作区，已提交内容不在其中） */
+  commits?: number
+}
+
+/**
+ * 一次命令执行的真实结果（验收台的"验证证据"）。
+ * 只记录能拿到的事实：退出码/耗时可能缺失（Claude Code 的钩子不回传退出码），缺失就不填。
+ */
+export interface CommandRun {
+  command: string
+  at: number
+  /** 退出码（Codex rollout 可从输出解析；Claude 钩子拿不到时缺省） */
+  exitCode?: number
+  /** 实测耗时（毫秒） */
+  ms?: number
+  /** 明确的失败信号：非零退出码 / 用户中断 / 工具报错 */
+  ok?: boolean
+  /** 失败时的输出尾部，最多 400 字 */
+  outputTail?: string
 }
 
 /** 一个 Agent 会话在岛内的展示态（服务端权威） */
@@ -376,6 +412,8 @@ export interface AgentState {
   tool: string
   /** 项目路径（cwd 的短名） */
   proj: string
+  /** 会话工作目录（续会话/补验证时需要） */
+  cwd?: string
   status: AgentStatus
   detail: string
   command?: string
@@ -399,7 +437,39 @@ export interface AgentState {
   tokens?: number
   /** 当前上下文占用 token（Codex token_count 的 last/context；Claude 为最近一次 API 调用的输入+缓存） */
   contextTokens?: number
+  /** 本次会话执行过的验证/构建命令结果（验收台证据，最多 12 条） */
+  checks?: CommandRun[]
+  /** 最近一轮的最终回复（会话结束前保留，供验收台留档） */
+  lastReply?: string
+  /** 计划模式提交的计划全文（ExitPlanMode）；批准/打回后仍保留，供验收对照 */
+  plan?: { text: string; at: number; decision?: Decision; reason?: string }
   updatedAt: number
+}
+
+/** 跳转终端的兜底线索（会话已结束、Agent 已从快照移除时由验收记录提供） */
+export interface TerminalJumpHint {
+  termHwnd?: string
+  ppid?: number
+  proj?: string
+  backend?: Backend
+}
+
+/** 让原会话继续补验证：走 CLI 的 resume，提示词从 stdin 喂入 */
+export interface FollowupRequest {
+  /** 渲染层用来对号入座这一次续跑的流事件 */
+  runId: string
+  engine: 'claude' | 'codex'
+  sessionId: string
+  cwd: string
+  prompt: string
+}
+
+export interface FollowupEvent {
+  runId: string
+  kind: 'start' | 'output' | 'done' | 'error'
+  text?: string
+  /** done 时的真实退出码 */
+  exitCode?: number
 }
 
 /** 主进程 → 渲染进程 推送的完整快照 */
@@ -643,12 +713,18 @@ export interface IslandBridgeApi {
   onSnapshot: (cb: (snap: IslandSnapshot) => void) => () => void
   getSnapshot: () => Promise<IslandSnapshot>
   decide: (msg: DecisionMessage) => void
-  jumpToTerminal: (agentId: string) => Promise<boolean>
+  jumpToTerminal: (agentId: string, hint?: TerminalJumpHint) => Promise<boolean>
+  /** 续跑原会话补验证（claude --resume / codex exec resume），结果经 onFollowupEvent 推送 */
+  startFollowup: (req: FollowupRequest) => Promise<{ ok: boolean; error?: string }>
+  cancelFollowup: (runId: string) => void
+  onFollowupEvent: (cb: (ev: FollowupEvent) => void) => () => void
   /** 外部文件/网页/会议即将打开：收起完整面板并让出窗口层级 */
   onExternalYield: (cb: () => void) => () => void
   /** Chromium 文件选择器显示期间暂停主窗口置顶，关闭后恢复 */
   setNativeDialogOpen: (active: boolean) => void
   setIgnoreMouse: (ignore: boolean) => void
+  /** 主进程按面板实际矩形兜底命中，解决面板刚出现/展开时首击穿透 */
+  setInteractiveRegion: (state: { open: boolean; overlay: boolean; rect: { x: number; y: number; width: number; height: number } | null }) => void
   playSound: (key: string) => void
   setAutostart: (on: boolean) => void
   reposition: (opts: { follow: boolean; monitorIndex: number }) => void
@@ -805,7 +881,9 @@ export interface IslandBridgeApi {
   /** 应用内框选：确认/取消（叠层窗口自己调）。 */
   completeSnip: (region: ScreenshotSnipRegion) => void
   cancelSnip: () => void
-  onSnipConfig: (cb: (config: { displayId: string; scaleFactor: number; width: number; height: number }) => void) => () => void
+  /** 叠层渲染层挂载完成后再取配置，避免 did-finish-load 早于 React listener 导致首帧丢配置。 */
+  snipReady: () => void
+  onSnipConfig: (cb: (config: { displayId: string; scaleFactor: number; width: number; height: number; mode?: 'snip' | 'scroll' }) => void) => () => void
   /** 滚动截图：开进度小窗、上报进度、接收小窗动作、小窗订阅状态。 */
   openScrollHud: () => void
   updateScrollHud: (state: ScrollHudState) => void
@@ -816,7 +894,15 @@ export interface IslandBridgeApi {
   /** 钉屏窗口接收载荷（浮窗是"主渲染层算、浮窗只显示"的推送模式）。 */
   onPinnedShot: (cb: (payload: PinnedShotPayload) => void) => () => void
   /** 免对话框快速保存：直接落到「图片/Agentic-Island」，并在同一次操作里可复制。 */
-  saveImageQuick: (dataUrl: string, name: string, format: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+  saveImageQuick: (dataUrl: string, name: string, format: string) => Promise<{ ok: boolean; path?: string; width?: number; height?: number; error?: string }>
+  /** 把截图放进应用历史（不占「图片」目录，重启后仍可回看）。 */
+  archiveScreenshot: (dataUrl: string, name: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+  /** 最近截图（缩略图 + 原始像素尺寸），供工坊历史条使用。 */
+  screenshotHistory: (limit?: number) => Promise<{ ok: boolean; entries?: ScreenshotHistoryEntry[]; dir?: string; error?: string }>
+  /** 按历史路径读回原图（仅限历史目录内的图片）。 */
+  readScreenshotHistory: (path: string) => Promise<{ ok: boolean; dataUrl?: string; name?: string; error?: string }>
+  /** 在资源管理器中定位历史截图。 */
+  revealScreenshotHistory: (path: string) => Promise<{ ok: boolean; error?: string }>
   /** 从本地选择一张图片进入截图工坊 */
   openImageFile: () => Promise<{ ok: boolean; dataUrl?: string; name?: string; error?: string }>
   /** 从系统剪贴板读取图片 */

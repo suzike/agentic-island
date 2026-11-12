@@ -1,6 +1,7 @@
 // 定时自动化调度测试：触发窗口 / 宽限补跑 / 已触发防重 / 非法输入。
 import assert from 'node:assert/strict'
 import { automationDue, automationTriggerLabel, clampMinutes, disappearedAgents, meetingTriggerDue, normalizeAutomationRules, pomoFocusEnded, withFiredKey } from '../src/renderer/src/logic/automation.ts'
+import { isMeetingCapabilityUse } from '../src/main/dnd-watch.ts'
 
 const ok = (cond: unknown, msg: string): void => {
   if (cond) console.log(`✓ ${msg}`)
@@ -109,6 +110,14 @@ ok(meetingTriggerDue({ kind: 'meeting-start', leadMin: 0 }, [meeting], at(9, 59,
 
 // 非会议触发器交给其它路径
 ok(meetingTriggerDue({ kind: 'daily', time: '09:30' }, [meeting], at(9, 56).getTime()) === null, '会议判定不接管其它触发器')
+
+// 语音输入法占用麦克风 ≠ 开会
+ok(!isMeetingCapabilityUse('microphone', 'C:#Program Files#Tencent#WeType#3.0.2.36#wetype_update.exe'), '微信输入法语音输入不触发会议')
+ok(!isMeetingCapabilityUse('microphone', 'C:#Program Files#DoubaoIME#versions#v1.0.0.23#ImeService.exe'), '豆包输入法语音输入不触发会议')
+ok(!isMeetingCapabilityUse('microphone', 'C:#Windows#System32#TextInputHost.exe'), 'Windows 语音输入不触发会议')
+ok(!isMeetingCapabilityUse('microphone', 'C:#Users#Lenovo#AppData#Local#Programs#Agentic-Island#Agentic-Island.exe'), '岛自己的录音不触发会议')
+ok(isMeetingCapabilityUse('microphone', 'D:#Software#Feishu#app#Feishu.exe'), '飞书会议仍可触发会议检测')
+ok(isMeetingCapabilityUse('webcam', 'D:#Software#Tencent#WeMeet#WeMeetApp.exe'), '摄像头占用仍可触发会议检测')
 
 // 去重键保留最近 100 个
 const manyKeys = Array.from({ length: 130 }, (_, i) => `k${i}`)

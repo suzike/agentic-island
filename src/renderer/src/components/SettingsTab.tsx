@@ -237,7 +237,7 @@ function CollapsibleSection(props: {
 }
 
 /** 组内小标签 */
-const labelSm: React.CSSProperties = { fontSize: FS.tiny, fontWeight: 600, color: ink(2) }
+const labelSm: React.CSSProperties = { fontSize: FS.small, fontWeight: 600, color: ink(2), letterSpacing: '-.004em' }
 const endpointHost = (baseUrl: string): string => {
   try { return new URL(baseUrl).host || baseUrl }
   catch { return baseUrl }
@@ -270,7 +270,7 @@ function UpdateRow({ p }: { p: SettingsTabProps }): React.JSX.Element {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${hairline(0.08)}` }}>
       <RefreshCw size={13} color={ink(3)} style={{ flex: 'none' }} />
-      <span title={text0} style={{ flex: 1, minWidth: 0, ...text.faint(), fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text0}</span>
+      <span title={text0} style={{ flex: 1, minWidth: 0, ...text.faint(), fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text0}</span>
       {u?.status === 'downloaded' ? (
         <Button sm variant="primary" icon={Zap} onClick={p.onInstallUpdate}>重启并安装{u.version ? ` v${u.version}` : ''}</Button>
       ) : (
@@ -333,7 +333,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
           </span>
         }
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 18px' }}>
+        <div className="settings-status-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 18px' }}>
           {statusItems.map((item) => {
             const c = item.ok ? sem.calm : sem.warn
             return (
@@ -341,7 +341,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                 <span style={{ width: 7, height: 7, marginTop: 5, borderRadius: 999, background: c, boxShadow: `0 0 8px ${semBg(c, 0.45)}` }} />
                 <div style={{ minWidth: 0 }}>
                   <div style={{ ...text.body(), fontSize: FS.small, fontWeight: 650 }}>{item.label}</div>
-                  <div title={item.detail} style={{ ...text.faint(), fontSize: 10, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.detail}</div>
+                  <div title={item.detail} style={{ ...text.faint(), fontSize: 10.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.detail}</div>
                 </div>
               </div>
             )
@@ -396,7 +396,7 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
         title="灵动岛主题"
         extra={<Button sm variant="ghost" icon={Sparkles} onClick={p.onOpenThemeDesigner}>自定义主题</Button>}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: SP.sm }}>
+        <div className="settings-theme-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: SP.sm }}>
           {[...p.customThemes, ...THEMES].map((t) => {
             const sel = p.theme === t.key
             const custom = t.key.startsWith('custom-')
@@ -428,8 +428,8 @@ export function SettingsTab(p: SettingsTabProps): React.JSX.Element {
                     <span title={light ? '浅色主题' : '深色主题'} style={{ display: 'inline-flex', color: ink(3) }}>{light ? <Sun size={9} /> : <Moon size={9} />}</span>
                     {sel && <span style={{ marginLeft: 2, fontSize: 9.5, fontWeight: 700, color: accentText() }}>使用中</span>}
                   </span>
-                  {!!t.tags?.length && <span title={t.tags.join(' · ')} style={{ display: 'flex', gap: 4, minWidth: 0, overflow: 'hidden' }}>{t.tags.slice(0, 4).map((tag) => <span key={tag} style={{ color: accentText(), fontSize: 8.5, fontWeight: 650, whiteSpace: 'nowrap' }}>#{tag}</span>)}</span>}
-                  <span title={`${t.desc} · 透明度 ${Math.round(+tk.ga * 100)}%`} style={{ color: ink(3), fontSize: 9.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.desc} · {Math.round(+tk.ga * 100)}%</span>
+                  {!!t.tags?.length && <span title={t.tags.join(' · ')} style={{ display: 'flex', gap: 4, minWidth: 0, overflow: 'hidden' }}>{t.tags.slice(0, 4).map((tag) => <span key={tag} style={{ color: accentText(), fontSize: 9.5, fontWeight: 650, whiteSpace: 'nowrap' }}>#{tag}</span>)}</span>}
+                  <span title={`${t.desc} · 透明度 ${Math.round(+tk.ga * 100)}%`} style={{ color: ink(3), fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.desc} · {Math.round(+tk.ga * 100)}%</span>
                 </div>
                 {custom && (
                   <span style={{ flex: 'none', display: 'flex', gap: 3 }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>

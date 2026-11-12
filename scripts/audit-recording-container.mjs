@@ -40,8 +40,15 @@ class Cdp {
 const child = spawn(electron, [root, `--remote-debugging-port=${port}`], {
   cwd: root,
   env: { ...process.env, AIISLAND_ALLOW_AUDIT_INSTANCE: '1', AIISLAND_AUDIT_USER_DATA: profile, AIISLAND_AUDIT_EXPORT_DIR: join(profile, 'audit-exports'), AIISLAND_SKIP_HOOKS: '1', AIISLAND_BRIDGE_FILE: join(profile, 'bridge.json') },
-  stdio: 'ignore', windowsHide: true
+  stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
 })
+for (const stream of [child.stdout, child.stderr]) {
+  stream?.setEncoding('utf8')
+  stream?.on('data', (chunk) => {
+    const text = String(chunk)
+    if (/mouse-hook|点击采集/i.test(text)) process.stdout.write(`[main] ${text.trim()}\n`)
+  })
+}
 let cdp
 try {
   let t
@@ -148,6 +155,12 @@ try {
   await sleep(3500)
   console.log('屏幕活动窗口:', child.exitCode === null && activityChild.exitCode === null ? '已启动' : '启动失败')
   await sleep(1200)
+  // 产品默认已改为原始采集；这条审计要保留"合成 vs 原始"的帧率对照，因此先显式切回画布合成。
+  await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>n.textContent?.trim()==='采集'); b?.click(); return Boolean(b) })()`)
+  await sleep(900)
+  const compositePick = await ev(`(() => { const b=[...document.querySelectorAll('button')].find((n)=>/画布合成/.test(n.textContent||'')); if (!b) return 'missing'; b.click(); return 'clicked' })()`)
+  console.log('采集方式切画布合成:', compositePick)
+  assert.equal(compositePick, 'clicked', '审计应能显式切回画布合成做帧率对照')
   const compositeFile = await recordOnce('合成', 8)
   console.log('\n录制产物:', compositeFile.slice(recordingsDir.length + 1))
   for (const path of [compositeFile]) {

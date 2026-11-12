@@ -46,6 +46,19 @@ export async function gitSummary(cwd: string): Promise<ChangeSummary | null> {
   const added = Number((shortstat.match(/(\d+) insertion/) || [])[1] || 0) + await countNewFileLines(cwd, untracked)
   const removed = Number((shortstat.match(/(\d+) deletion/) || [])[1] || 0)
 
+  // 变更文件清单（验收台"计划 → 实际改动"对照用）：-z 输出避免中文/空格路径被引号转义
+  const statusOut = await git(cwd, ['status', '--porcelain=v1', '-z', '-uall'])
+  const paths: { path: string; status: string }[] = []
+  const entries = statusOut.split('\0')
+  for (let i = 0; i < entries.length && paths.length < 200; i++) {
+    const entry = entries[i]
+    if (!entry || entry.length < 4) continue
+    const code = entry.slice(0, 2).trim() || 'M'
+    // 重命名/复制时下一段是原路径，跳过
+    if (code.startsWith('R') || code.startsWith('C')) i++
+    paths.push({ path: entry.slice(3), status: code })
+  }
+
   // 建议提交信息：从真实改动文件推导一个可编辑的模板
   const first = [...files][0]
   const scope = first.split('/')[0] || first
@@ -54,5 +67,5 @@ export async function gitSummary(cwd: string): Promise<ChangeSummary | null> {
       ? `chore: 更新 ${first}`
       : `chore(${scope}): 更新 ${files.size} 个文件`
 
-  return { files: files.size, added, removed, commit }
+  return { files: files.size, added, removed, commit, paths }
 }

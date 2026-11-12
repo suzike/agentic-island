@@ -102,7 +102,9 @@ const onClick = (payload: UiohookPayload): void => {
   if (!running) return
   // 上限兜底：一次录制最多 20 万个点击，防内存失控（正常用法远达不到）
   if (clicks.length >= 200_000) return
-  clicks.push({ at: Date.now(), x: Math.round(Number(payload.x) || 0), y: Math.round(Number(payload.y) || 0), button: buttonName(Number(payload.button)) })
+  const event = { at: Date.now(), x: Math.round(Number(payload.x) || 0), y: Math.round(Number(payload.y) || 0), button: buttonName(Number(payload.button)) }
+  if (!clicks.length) console.log('[mouse-hook] first click', `${event.x},${event.y}`, event.button)
+  clicks.push(event)
 }
 
 /** 开始采集（录制开始时调用）。重复调用是安全的。 */
@@ -119,6 +121,7 @@ export async function startMouseClickLog(): Promise<boolean> {
     module.uIOhook.on('keyup', onKeyUp)
     module.uIOhook.start()
     running = true
+    console.log('[mouse-hook] 点击采集已启动')
     return true
   } catch (error) {
     module.uIOhook.off('click', onClick)
