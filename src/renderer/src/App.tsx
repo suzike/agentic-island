@@ -555,10 +555,16 @@ export function App(): React.JSX.Element {
   }, [isShown, releasePanelKeyboardFocus])
   const attentionSigRef = useRef(''); attentionSigRef.current = attentionSig
   const snoozeNow = useCallback((): void => {
+    if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = undefined }
     releasePanelKeyboardFocus()
     setSnoozeSig(attentionSigRef.current)
     setPinned(false)
     setRevealed(false)
+    revealedRef.current = false
+    forcedRef.current = false
+    pendingRef.current = false
+    keyboardFocusRef.current = false
+    suppressHoverRef.current = true
   }, [releasePanelKeyboardFocus])
 
   // 打开文件夹、网页、会议或外部终端前主动让位：完整面板收起，当前提醒静默到下一条新事件。
@@ -594,6 +600,12 @@ export function App(): React.JSX.Element {
   const anyOverlay = capsuleOpen || paletteOpen || brainOpen || kbOpen || !!studio || themeDesignerOpen || calcOpen || learnOpen || !!shotImg || !!shotStudio
   const overlayRef = useRef(false); overlayRef.current = anyOverlay
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** 用户主动收起后，指针还停在折叠条上时不要被 hover 立刻弹回；离开岛后解除。 */
+  const suppressHoverRef = useRef(false)
+
+  useEffect(() => {
+    if (revealed || pinned || forceAttention) suppressHoverRef.current = false
+  }, [revealed, pinned, forceAttention])
 
   // 把面板真实矩形交给主进程做兜底命中测试。渲染层 mousemove 仍是主路径，
   // 但面板刚出现/内容展开/鼠标未移动时，主进程也能在 80ms 内关闭点击穿透。
@@ -1236,9 +1248,12 @@ export function App(): React.JSX.Element {
     const clearHideTimer = (): void => {
       if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = undefined }
     }
-    const panelHasKeyboardFocus = (): boolean => {
-      const active = document.activeElement
-      return !!active && !!panelRef.current?.contains(active)
+    // 只有正在输入才阻止自动收起。鼠标点按钮也会让按钮获得焦点，
+    // 但按钮焦点不应把面板永久锁住（"鼠标移开不收回"的根因）。
+    const panelHasActiveInput = (): boolean => {
+      const active = document.activeElement as HTMLElement | null
+      if (!active || !panelRef.current?.contains(active)) return false
+      return active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable
     }
     const scheduleHide = (delay: number): void => {
       if (hideTimer.current) return
@@ -1246,7 +1261,9 @@ export function App(): React.JSX.Element {
         hideTimer.current = undefined
         // 面板内点击后 1.2s 内不自动收起：详情展开、列表重排会让指针"看起来"离开了旧矩形，
         // 但这是用户刚点的内容，不能把面板当成失焦收回。
-        if (panelHasKeyboardFocus() || keyboardFocusRef.current || forcedRef.current || pendingRef.current || overlayRef.current || Date.now() - lastClickRef.current < 1200) return
+        if (panelHasActiveInput() || keyboardFocusRef.current || forcedRef.current || pendingRef.current || overlayRef.current) return
+        const sinceClick = Date.now() - lastClickRef.current
+        if (sinceClick < 1200) { scheduleHide(1200 - sinceClick + 30); return }
         setRevealed(false)
       }, delay)
     }
@@ -1264,6 +1281,9 @@ export function App(): React.JSX.Element {
       const overSolid = !!el?.closest('[data-solid]')
       const overAmbient = !!el?.closest('[data-ambient-bar]')
       const edgeReveal = atTopEdge && !overAmbient
+      // 主动收起后，指针若离开岛（或明确贴顶唤出）才解除 hover 抑制。
+      if (suppressHoverRef.current && (!overSolid || edgeReveal)) suppressHoverRef.current = false
+      const hoverSuppressed = suppressHoverRef.current && !edgeReveal && !forcedRef.current
       // 键盘焦点只能维持已经展开的面板，不能把用户刚收起的面板重新唤出。
       const forced = forcedRef.current || pendingRef.current || (revealedRef.current && keyboardFocusRef.current)
       // 已经打开时的"保持区"：按面板实际矩形外扩 48px 判定（面板可高达 1020px，硬编码 260 会在下半区点按钮时误收起）；
@@ -1278,7 +1298,7 @@ export function App(): React.JSX.Element {
 
       setIgnore(!interactive)
 
-      if (edgeReveal || (overSolid && !overAmbient) || forced) {
+      if ((edgeReveal || (overSolid && !overAmbient) || forced) && !hoverSuppressed) {
         clearHideTimer()
         if (!revealedRef.current) setRevealed(true)
       } else if (interactive) {
@@ -1291,19 +1311,23 @@ export function App(): React.JSX.Element {
     // 鼠标移出窗口：若非强制态，恢复穿透并延时隐藏（兜底，避免状态卡住）；点击后 1.2s 内同样豁免
     const onLeave = (): void => {
       if (document.querySelector('[data-recording-compact]')) { setIgnore(true); return }
-      if (keyboardFocusRef.current || panelHasKeyboardFocus() || forcedRef.current || pendingRef.current || overlayRef.current || Date.now() - lastClickRef.current < 1200) return
+      if (panelHasActiveInput() || keyboardFocusRef.current || forcedRef.current || pendingRef.current || overlayRef.current) return
+      const sinceClick = Date.now() - lastClickRef.current
+      if (sinceClick < 1200) { scheduleHide(1200 - sinceClick + 30); return }
       setIgnore(true)
       scheduleHide(400)
     }
     const onFocusIn = (event: FocusEvent): void => {
       if (!revealedRef.current || !panelRef.current?.contains(event.target as Node)) return
-      keyboardFocusRef.current = true
+      const el = event.target as HTMLElement
+      const typing = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
+      keyboardFocusRef.current = typing || (typeof el.matches === 'function' && el.matches(':focus-visible'))
       clearHideTimer()
       setIgnore(false)
     }
     const onFocusOut = (): void => {
       setTimeout(() => {
-        if (panelHasKeyboardFocus()) return
+        if (panelHasActiveInput()) return
         keyboardFocusRef.current = false
         if (!forcedRef.current && !pendingRef.current && !overlayRef.current) scheduleHide(400)
       }, 0)
