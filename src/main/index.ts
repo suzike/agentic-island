@@ -252,7 +252,7 @@ function createTray(): void {
       { label: '命令面板  Ctrl+Alt+K', click: () => openPalette() },
       { label: '第二大脑  Ctrl+Alt+F', click: () => openBrain() },
       { label: '闪念胶囊  Ctrl+Alt+Space', click: () => openCapsule() },
-      { label: '智能截图  Ctrl+Alt+S', click: () => openScreenshot() },
+      { label: '截图问答', click: () => openScreenshot() },
       { label: '分析当前屏幕  Ctrl+Alt+A', click: () => void openScreenAnalyze() },
       { type: 'separator' },
       { label: '重启应用', click: () => { app.relaunch(); app.quit() } },
@@ -310,6 +310,9 @@ let scrollHudWin: BrowserWindow | null = null
 let snipTarget: ScreenshotTarget = 'ask'
 let snipMode: 'snip' | 'scroll' = 'snip'
 let snipConfig: { displayId: string; scaleFactor: number; width: number; height: number; mode: 'snip' | 'scroll' } | null = null
+/** 框选期间岛是否原本可见；取消/异常退出时恢复，确认后由抓帧流程统一还原。 */
+let snipIslandWasVisible = false
+let snipCompleting = false
 
 /** 显示器热插拔 / 分辨率 / DPI 缩放变化：重定位全部岛系窗口（否则岛会偏、不再居中/铺满） */
 function onDisplayChange(): void {
@@ -540,6 +543,10 @@ const screenshotPoller = createScreenshotPoller({
 function openSnipOverlay(target: ScreenshotTarget, mode: 'snip' | 'scroll' = 'snip'): boolean {
   if (!win) return false
   if (snipWin && !snipWin.isDestroyed()) { snipWin.focus(); return true }
+  // 框选叠层必须独占屏幕：岛留在上层会挡住选区，也容易被误认为截图内容。
+  snipIslandWasVisible = win.isVisible()
+  snipCompleting = false
+  win.hide()
   const display = targetDisplay()
   const { bounds, scaleFactor } = display
   const overlay = new BrowserWindow({
@@ -560,7 +567,14 @@ function openSnipOverlay(target: ScreenshotTarget, mode: 'snip' | 'scroll' = 'sn
     overlay.moveTop()
   })
   loadRenderer(overlay, 'snip')
-  overlay.on('closed', () => { snipWin = null; snipConfig = null })
+  overlay.on('closed', () => {
+    snipWin = null
+    snipConfig = null
+    if (!snipCompleting && snipIslandWasVisible && win && !win.isDestroyed()) {
+      win.show()
+      win.moveTop()
+    }
+  })
   snipWin = overlay
   snipWin.focus()
   snipTarget = target
@@ -612,6 +626,7 @@ function closeSnipOverlay(): void {
 /** 框选确认：藏掉叠层（含岛），再请渲染层抓指定区域。 */
 async function completeSnip(region: ScreenshotSnipRegion): Promise<void> {
   const target = snipTarget
+  snipCompleting = true
   closeSnipOverlay()
   if (!win) return
   win.hide()
@@ -2248,11 +2263,11 @@ app.whenReady().then(async () => {
   screen.on('display-added', onDisplayChange)
   screen.on('display-removed', onDisplayChange)
   screen.on('display-metrics-changed', onDisplayChange)
-  // 全局热键：命令面板 Ctrl+Alt+K · 闪念胶囊 Ctrl+Alt+Space · 智能截图 Ctrl+Alt+S（注册失败不影响其它功能）
+  // 全局热键：命令面板 Ctrl+Alt+K · 闪念胶囊 Ctrl+Alt+Space · 截图并美化 Ctrl+Alt+S（注册失败不影响其它功能）
   try { globalShortcut.register('CommandOrControl+Alt+K', openPalette) } catch { /* 热键被占用 */ }
   try { globalShortcut.register('CommandOrControl+Alt+F', openBrain) } catch { /* 热键被占用 */ }
   try { globalShortcut.register('CommandOrControl+Alt+Space', openCapsule) } catch { /* 热键被占用 */ }
-  try { globalShortcut.register('CommandOrControl+Alt+S', openScreenshot) } catch { /* 热键被占用 */ }
+  try { globalShortcut.register('CommandOrControl+Alt+S', () => void openScreenshot('studio')) } catch { /* 热键被占用 */ }
   try { globalShortcut.register('CommandOrControl+Alt+A', () => void openScreenAnalyze()) } catch { /* 热键被占用 */ }
   try { globalShortcut.register('CommandOrControl+Alt+R', () => { if (win) { win.show(); win.moveTop(); safeSend('open-recorder') } }) } catch { /* 热键被占用 */ }
   // 剪贴板助手：clipWatch 关闭时主进程也停止读取系统剪贴板

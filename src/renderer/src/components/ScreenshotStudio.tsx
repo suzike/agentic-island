@@ -29,15 +29,19 @@ interface Props {
 }
 
 // ────────────────────────────── 边框 / 背景预设 ──────────────────────────────
-type FrameKey = 'none' | 'glass' | 'macos' | 'browser' | 'minimal' | 'neon' | 'dark' | 'polaroid'
+type FrameKey = 'none' | 'glass' | 'macos' | 'browser' | 'windows' | 'terminal' | 'minimal' | 'outline' | 'neon' | 'dark' | 'grid' | 'polaroid'
 const FRAMES: { key: FrameKey; label: string; hint: string }[] = [
   { key: 'none', label: '原图', hint: '零处理 · 位级无损' },
   { key: 'glass', label: '玻璃拟态', hint: '弥散渐变 + 悬浮投影' },
   { key: 'macos', label: 'macOS 窗口', hint: '交通灯标题栏' },
   { key: 'browser', label: '浏览器', hint: '地址栏窗口' },
+  { key: 'windows', label: 'Windows 窗口', hint: '浅色标题栏 + 窗口按钮' },
+  { key: 'terminal', label: '终端', hint: '深色命令行标题栏' },
   { key: 'minimal', label: '极简画框', hint: '白框 + 柔影' },
+  { key: 'outline', label: '渐变描边', hint: '细渐变边框 · 无辉光' },
   { key: 'neon', label: '霓虹光环', hint: '渐变描边 + 辉光' },
   { key: 'dark', label: '暗夜卡片', hint: '深色悬浮卡片' },
+  { key: 'grid', label: '网格纸', hint: '浅色网格背景 + 白卡' },
   { key: 'polaroid', label: '拍立得', hint: '白底相纸留白' }
 ]
 // 弥散背景预设
@@ -51,6 +55,7 @@ const BGS: { key: string; label: string; stops: [string, string, string] }[] = [
   { key: 'ocean', label: '深海', stops: ['#2b5876', '#4e4376', '#1e3c72'] },
   { key: 'ink', label: '素白', stops: ['#f5f7fa', '#e4e7eb', '#cfd9df'] }
 ]
+const SOLID_COLORS = ['#0f172a', '#1f2937', '#3b4252', '#eef2f7', '#ffffff', '#f4e9dc']
 // 标注调色板
 const PALETTE = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#00c7be', '#007aff', '#af52de', '#ffffff', '#000000']
 
@@ -76,8 +81,19 @@ interface Deco {
   scale: number // 导出倍率 1|2
   watermark: string // 水印文字（空=无）
   wmStamp: boolean // 追加时间戳
+  bgMode: 'gradient' | 'solid' | 'blur' | 'transparent'
+  bgColor: string
+  aspect: 'auto' | '1:1' | '4:3' | '16:9' | '3:4' | '4:5' | '9:16'
+  reflect: number
+  caption: string
+  subtitle: string
+  captionColor: string
 }
-const DEFAULT_DECO: Deco = { radius: 0.5, shadow: 0.6, pad: 0.5, scale: 1, watermark: '', wmStamp: false }
+const DEFAULT_DECO: Deco = {
+  radius: 0.5, shadow: 0.6, pad: 0.5, scale: 1, watermark: '', wmStamp: false,
+  bgMode: 'gradient', bgColor: '#1f2937', aspect: 'auto',
+  reflect: 0, caption: '', subtitle: '', captionColor: '#ffffff'
+}
 
 // ────────────────────────────── 变换参数 ──────────────────────────────
 interface Xform {
@@ -113,6 +129,134 @@ function paintBg(ctx: CanvasRenderingContext2D, W: number, H: number, stops: [st
   ctx.fillStyle = orb2; ctx.fillRect(0, 0, W, H)
 }
 
+/** 统一背景：渐变 / 纯色 / 原图虚化 / 透明（透明仅 PNG 有意义） */
+function paintSurface(ctx: CanvasRenderingContext2D, W: number, H: number, deco: Deco, bg: [string, string, string], base: HTMLCanvasElement): void {
+  if (deco.bgMode === 'transparent') return
+  if (deco.bgMode === 'solid') {
+    ctx.fillStyle = deco.bgColor
+    ctx.fillRect(0, 0, W, H)
+    return
+  }
+  if (deco.bgMode === 'blur') {
+    ctx.save()
+    ctx.filter = 'blur(34px) saturate(1.15)'
+    const scale = Math.max(W / Math.max(1, base.width), H / Math.max(1, base.height)) * 1.16
+    const dw = base.width * scale
+    const dh = base.height * scale
+    ctx.drawImage(base, (W - dw) / 2, (H - dh) / 2, dw, dh)
+    ctx.restore()
+    ctx.fillStyle = 'rgba(8,10,16,.42)'
+    ctx.fillRect(0, 0, W, H)
+    return
+  }
+  paintBg(ctx, W, H, bg)
+}
+
+const ASPECT_RATIO: Record<Exclude<Deco['aspect'], 'auto'>, number> = {
+  '1:1': 1, '4:3': 4 / 3, '16:9': 16 / 9, '3:4': 3 / 4, '4:5': 4 / 5, '9:16': 9 / 16
+}
+
+/** 画幅：把已合成画面放进目标比例的画布中央，空白由当前背景模式填充 */
+function fitAspect(comp: Composed, deco: Deco, bg: [string, string, string], base: HTMLCanvasElement): Composed {
+  if (deco.aspect === 'auto') return comp
+  const target = ASPECT_RATIO[deco.aspect]
+  const current = comp.W / Math.max(1, comp.H)
+  const W = current > target ? comp.W : Math.round(comp.H * target)
+  const H = current > target ? Math.round(comp.W / target) : comp.H
+  if (W === comp.W && H === comp.H) return comp
+  const canvas = document.createElement('canvas')
+  canvas.width = W; canvas.height = H
+  const ctx = canvas.getContext('2d')!
+  paintSurface(ctx, W, H, deco, bg, base)
+  const dx = Math.round((W - comp.W) / 2)
+  const dy = Math.round((H - comp.H) / 2)
+  ctx.drawImage(comp.canvas, dx, dy)
+  return { canvas, imgX: comp.imgX + dx, imgY: comp.imgY + dy, imgW: comp.imgW, imgH: comp.imgH, W, H }
+}
+
+/** 倒影：把画面底部镜像到下方，并用透明度渐变收尾。 */
+function addReflection(comp: Composed, deco: Deco): Composed {
+  const strength = Math.max(0, Math.min(1, deco.reflect))
+  if (strength <= 0.01) return comp
+  const extra = Math.max(10, Math.round(comp.H * 0.3 * strength))
+  const canvas = document.createElement('canvas')
+  canvas.width = comp.W; canvas.height = comp.H + extra
+  const ctx = canvas.getContext('2d')!
+  ctx.drawImage(comp.canvas, 0, 0)
+
+  const mirror = document.createElement('canvas')
+  mirror.width = comp.W; mirror.height = extra
+  const mctx = mirror.getContext('2d')!
+  mctx.save()
+  mctx.translate(0, extra)
+  mctx.scale(1, -1)
+  mctx.drawImage(comp.canvas, 0, comp.H - extra, comp.W, extra, 0, 0, comp.W, extra)
+  mctx.restore()
+  mctx.globalCompositeOperation = 'destination-in'
+  const fade = mctx.createLinearGradient(0, 0, 0, extra)
+  fade.addColorStop(0, `rgba(0,0,0,${0.4 * strength})`)
+  fade.addColorStop(1, 'rgba(0,0,0,0)')
+  mctx.fillStyle = fade
+  mctx.fillRect(0, 0, comp.W, extra)
+
+  ctx.drawImage(mirror, 0, comp.H)
+  return { ...comp, canvas, H: comp.H + extra }
+}
+
+/** 说明文字：在画面下方追加标题/副标题，作为分享时的一句话上下文。 */
+function addCaption(comp: Composed, deco: Deco, bg: [string, string, string]): Composed {
+  const title = deco.caption.trim()
+  const subtitle = deco.subtitle.trim()
+  if (!title && !subtitle) return comp
+  const short = Math.min(comp.W, comp.H)
+  const titleSize = Math.max(16, Math.round(short * 0.032))
+  const subtitleSize = Math.max(12, Math.round(short * 0.02))
+  const gap = Math.round(short * 0.014)
+  const padTop = Math.round(short * 0.05)
+  const padBottom = Math.round(short * 0.055)
+  const blockH = padTop + (title ? titleSize : 0) + (title && subtitle ? gap : 0) + (subtitle ? subtitleSize : 0) + padBottom
+  const canvas = document.createElement('canvas')
+  canvas.width = comp.W; canvas.height = comp.H + blockH
+  const ctx = canvas.getContext('2d')!
+  ctx.drawImage(comp.canvas, 0, 0)
+  const bandColor = deco.bgMode === 'solid' ? deco.bgColor : bg[1]
+  if (deco.bgMode !== 'transparent') {
+    ctx.fillStyle = bandColor
+    ctx.fillRect(0, comp.H, comp.W, blockH)
+    ctx.fillStyle = 'rgba(0,0,0,.22)'
+    ctx.fillRect(0, comp.H, comp.W, blockH)
+  }
+  // 浅色底上默认白字会读不清：未显式改色时按底色亮度自动转深色
+  const rgb = bandColor.match(/^#?([0-9a-f]{6})$/i)?.[1]
+  const luminance = rgb
+    ? (0.2126 * parseInt(rgb.slice(0, 2), 16) + 0.7152 * parseInt(rgb.slice(2, 4), 16) + 0.0722 * parseInt(rgb.slice(4, 6), 16)) / 255
+    : 0
+  const textColor = deco.captionColor === '#ffffff' && luminance > 0.62 ? '#1d2430' : deco.captionColor
+  const fitText = (text: string, font: string, maxWidth: number): string => {
+    ctx.font = font
+    if (ctx.measureText(text).width <= maxWidth) return text
+    let out = text
+    while (out.length > 1 && ctx.measureText(out + '…').width > maxWidth) out = out.slice(0, -1)
+    return out + '…'
+  }
+  const maxWidth = comp.W * 0.86
+  let cursorY = comp.H + padTop
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top'
+  if (title) {
+    const font = `700 ${titleSize}px 'Segoe UI','Microsoft YaHei UI',sans-serif`
+    ctx.font = font; ctx.fillStyle = textColor
+    ctx.fillText(fitText(title, font, maxWidth), comp.W / 2, cursorY)
+    cursorY += titleSize + gap
+  }
+  if (subtitle) {
+    const font = `400 ${subtitleSize}px 'Segoe UI','Microsoft YaHei UI',sans-serif`
+    ctx.font = font; ctx.fillStyle = textColor; ctx.globalAlpha = 0.72
+    ctx.fillText(fitText(subtitle, font, maxWidth), comp.W / 2, cursorY)
+    ctx.globalAlpha = 1
+  }
+  return { ...comp, canvas, H: comp.H + blockH }
+}
+
 /** 把原图按 transform（裁剪/旋转/翻转）烘焙成一张新的“基础图像” canvas */
 function bakeTransform(img: HTMLImageElement, xf: Xform): HTMLCanvasElement {
   const iw = img.naturalWidth, ih = img.naturalHeight
@@ -141,7 +285,7 @@ function bakeTransform(img: HTMLImageElement, xf: Xform): HTMLCanvasElement {
 
 /** 合成边框 + 背景 + 装饰。返回 canvas + 图像本体在画布内的偏移/尺寸（供标注坐标换算） */
 interface Composed { canvas: HTMLCanvasElement; imgX: number; imgY: number; imgW: number; imgH: number; W: number; H: number }
-function composeBase(base: HTMLCanvasElement, frame: FrameKey, bg: [string, string, string], deco: Deco): Composed {
+function composeFrame(base: HTMLCanvasElement, frame: FrameKey, bg: [string, string, string], deco: Deco): Composed {
   const iw = base.width, ih = base.height
   const short = Math.min(iw, ih)
   if (frame === 'none') {
@@ -149,8 +293,13 @@ function composeBase(base: HTMLCanvasElement, frame: FrameKey, bg: [string, stri
     c.getContext('2d')!.drawImage(base, 0, 0)
     return { canvas: c, imgX: 0, imgY: 0, imgW: iw, imgH: ih, W: iw, H: ih }
   }
-  const pad = Math.round(short * 0.16 * deco.pad) + 24
-  const bar = frame === 'macos' ? Math.max(44, Math.round(ih * 0.045)) : frame === 'browser' ? Math.max(52, Math.round(ih * 0.05)) : 0
+  // 0 必须是真的 0：此前固定 +24px，导致内边距拉到最小仍留一圈边框。
+  const pad = deco.pad <= 0 ? 0 : Math.round(short * 0.16 * deco.pad) + 12
+  const bar = frame === 'macos' ? Math.max(44, Math.round(ih * 0.045))
+    : frame === 'browser' ? Math.max(52, Math.round(ih * 0.05))
+      : frame === 'windows' ? Math.max(38, Math.round(ih * 0.04))
+        : frame === 'terminal' ? Math.max(36, Math.round(ih * 0.038))
+          : 0
   const polaroidBottom = frame === 'polaroid' ? Math.round(short * 0.16) : 0
   const W = iw + pad * 2
   const H = ih + pad * 2 + bar + polaroidBottom
@@ -161,13 +310,20 @@ function composeBase(base: HTMLCanvasElement, frame: FrameKey, bg: [string, stri
   const imgX = pad, imgY = pad + bar
 
   if (frame === 'minimal' || frame === 'polaroid') {
-    if (frame === 'minimal') { ctx.fillStyle = '#eceef1'; ctx.fillRect(0, 0, W, H) } else { ctx.fillStyle = '#f4f2ec'; ctx.fillRect(0, 0, W, H) }
-    const bw = Math.max(12, Math.round(pad * 0.3))
+    if (deco.bgMode === 'gradient') {
+      ctx.fillStyle = frame === 'minimal' ? '#eceef1' : '#f4f2ec'
+      ctx.fillRect(0, 0, W, H)
+    } else {
+      paintSurface(ctx, W, H, deco, bg, base)
+    }
+    const bw = pad > 0 ? Math.max(8, Math.round(pad * 0.3)) : 0
     ctx.save()
     ctx.shadowColor = `rgba(30,40,60,${0.36 * deco.shadow})`; ctx.shadowBlur = pad * 0.5; ctx.shadowOffsetY = pad * 0.14
-    ctx.fillStyle = '#ffffff'
-    roundedPath(ctx, pad - bw, pad - bw, iw + bw * 2, ih + bw * 2 + polaroidBottom, r + bw * 0.6)
-    ctx.fill()
+    if (bw > 0) {
+      ctx.fillStyle = '#ffffff'
+      roundedPath(ctx, pad - bw, pad - bw, iw + bw * 2, ih + bw * 2 + polaroidBottom, r + bw * 0.6)
+      ctx.fill()
+    }
     ctx.restore()
     ctx.save(); roundedPath(ctx, pad, pad, iw, ih, Math.max(2, r * 0.4)); ctx.clip(); ctx.drawImage(base, pad, pad); ctx.restore()
     if (frame === 'polaroid') {
@@ -180,17 +336,29 @@ function composeBase(base: HTMLCanvasElement, frame: FrameKey, bg: [string, stri
     return { canvas: c, imgX: pad, imgY: pad, imgW: iw, imgH: ih, W, H }
   }
 
-  if (frame === 'dark') {
+  if (frame === 'dark' && deco.bgMode === 'gradient') {
     ctx.fillStyle = '#0e1016'; ctx.fillRect(0, 0, W, H)
     paintBg(ctx, W, H, ['#151922', '#1c2230', '#101319'])
+  } else if (frame === 'grid' && deco.bgMode === 'gradient') {
+    ctx.fillStyle = '#f2f5f9'; ctx.fillRect(0, 0, W, H)
+    ctx.strokeStyle = 'rgba(90,110,140,.16)'; ctx.lineWidth = 1
+    const step = Math.max(18, Math.round(short * 0.035))
+    for (let gx = 0; gx <= W; gx += step) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke() }
+    for (let gy = 0; gy <= H; gy += step) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke() }
   } else {
-    paintBg(ctx, W, H, bg)
+    paintSurface(ctx, W, H, deco, bg, base)
+    if (frame === 'grid') {
+      ctx.strokeStyle = 'rgba(90,110,140,.16)'; ctx.lineWidth = 1
+      const step = Math.max(18, Math.round(short * 0.035))
+      for (let gx = 0; gx <= W; gx += step) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke() }
+      for (let gy = 0; gy <= H; gy += step) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke() }
+    }
   }
 
-  if (frame === 'neon') {
-    const ring = Math.max(4, Math.round(pad * 0.09))
+  if (frame === 'neon' || frame === 'outline') {
+    const ring = frame === 'neon' ? Math.max(4, Math.round(pad * 0.09)) : Math.max(2, Math.round(short * 0.0035))
     ctx.save()
-    ctx.shadowColor = bg[1]; ctx.shadowBlur = pad * 0.55 * (0.5 + deco.shadow)
+    if (frame === 'neon') { ctx.shadowColor = bg[1]; ctx.shadowBlur = pad * 0.55 * (0.5 + deco.shadow) }
     const rg = ctx.createLinearGradient(pad, pad, pad + iw, pad + ih)
     rg.addColorStop(0, '#7df9ff'); rg.addColorStop(0.5, bg[1]); rg.addColorStop(1, '#ff7ee2')
     ctx.strokeStyle = rg; ctx.lineWidth = ring
@@ -206,7 +374,9 @@ function composeBase(base: HTMLCanvasElement, frame: FrameKey, bg: [string, stri
   const cardH = ih + bar
   ctx.save()
   ctx.shadowColor = `rgba(0,0,0,${0.5 * deco.shadow})`; ctx.shadowBlur = pad * 0.6; ctx.shadowOffsetY = pad * 0.18
-  ctx.fillStyle = frame === 'dark' ? '#12151d' : '#20242c'
+  ctx.fillStyle = frame === 'dark' || frame === 'terminal' ? '#0f131b'
+    : frame === 'windows' || frame === 'grid' ? '#ffffff'
+      : '#20242c'
   roundedPath(ctx, pad, cardY, iw, cardH, r)
   ctx.fill()
   ctx.restore()
@@ -214,35 +384,74 @@ function composeBase(base: HTMLCanvasElement, frame: FrameKey, bg: [string, stri
   if (bar > 0) {
     ctx.save()
     roundedPath(ctx, pad, cardY, iw, cardH, r); ctx.clip()
-    const tg = ctx.createLinearGradient(0, cardY, 0, cardY + bar)
-    tg.addColorStop(0, '#3a3f4a'); tg.addColorStop(1, '#2b2f38')
-    ctx.fillStyle = tg
-    ctx.fillRect(pad, cardY, iw, bar)
-    const dotR = bar * 0.16
     const cy = cardY + bar / 2
-    ;['#ff5f57', '#febc2e', '#28c840'].forEach((col, i) => {
-      ctx.beginPath(); ctx.arc(pad + bar * 0.55 + i * dotR * 3.1, cy, dotR, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill()
-    })
-    if (frame === 'browser') {
-      const ax = pad + bar * 2.2
-      const aw = iw - bar * 3.2
-      const ah = bar * 0.56
-      roundedPath(ctx, ax, cy - ah / 2, aw, ah, ah / 2)
-      ctx.fillStyle = 'rgba(255,255,255,.09)'; ctx.fill()
-      ctx.fillStyle = 'rgba(255,255,255,.4)'
-      ctx.font = `${Math.round(ah * 0.52)}px 'Segoe UI',sans-serif`
+    if (frame === 'windows') {
+      const tg = ctx.createLinearGradient(0, cardY, 0, cardY + bar)
+      tg.addColorStop(0, '#fbfbfc'); tg.addColorStop(1, '#f0f1f4')
+      ctx.fillStyle = tg; ctx.fillRect(pad, cardY, iw, bar)
+      ctx.fillStyle = 'rgba(30,34,42,.72)'
+      ctx.font = `${Math.round(bar * 0.42)}px 'Segoe UI',sans-serif`
       ctx.textBaseline = 'middle'
-      ctx.fillText('🔒  agentic-island.local', ax + ah * 0.6, cy + 1)
+      ctx.fillText('Agentic-Island', pad + bar * 0.5, cy + 1)
+      const iconSize = Math.round(bar * 0.34)
+      const rx = pad + iw - bar * 0.5
+      ctx.strokeStyle = 'rgba(40,44,54,.62)'; ctx.lineWidth = Math.max(1, bar * 0.045)
+      ctx.beginPath(); ctx.moveTo(rx - iconSize * 3.4, cy); ctx.lineTo(rx - iconSize * 2.2, cy); ctx.stroke()
+      ctx.strokeRect(rx - iconSize * 2.2, cy - iconSize * 0.4, iconSize * 0.8, iconSize * 0.8)
+      ctx.beginPath(); ctx.moveTo(rx - iconSize * 0.5, cy - iconSize * 0.4); ctx.lineTo(rx + iconSize * 0.3, cy + iconSize * 0.4)
+      ctx.moveTo(rx + iconSize * 0.3, cy - iconSize * 0.4); ctx.lineTo(rx - iconSize * 0.5, cy + iconSize * 0.4); ctx.stroke()
+    } else if (frame === 'terminal') {
+      const tg = ctx.createLinearGradient(0, cardY, 0, cardY + bar)
+      tg.addColorStop(0, '#191e28'); tg.addColorStop(1, '#11151d')
+      ctx.fillStyle = tg; ctx.fillRect(pad, cardY, iw, bar)
+      const dotR = bar * 0.13
+      ;['#ff5f57', '#febc2e', '#28c840'].forEach((col, i) => {
+        ctx.beginPath(); ctx.arc(pad + bar * 0.42 + i * dotR * 3.4, cy, dotR, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill()
+      })
+      ctx.fillStyle = 'rgba(210,220,235,.62)'
+      ctx.font = `${Math.round(bar * 0.38)}px ui-monospace,Consolas,monospace`
+      ctx.textBaseline = 'middle'
+      ctx.fillText('PowerShell · agentic-island', pad + bar * 2.4, cy + 1)
+    } else {
+      const tg = ctx.createLinearGradient(0, cardY, 0, cardY + bar)
+      tg.addColorStop(0, '#3a3f4a'); tg.addColorStop(1, '#2b2f38')
+      ctx.fillStyle = tg
+      ctx.fillRect(pad, cardY, iw, bar)
+      const dotR = bar * 0.16
+      ;['#ff5f57', '#febc2e', '#28c840'].forEach((col, i) => {
+        ctx.beginPath(); ctx.arc(pad + bar * 0.55 + i * dotR * 3.1, cy, dotR, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill()
+      })
+      if (frame === 'browser') {
+        const ax = pad + bar * 2.2
+        const aw = iw - bar * 3.2
+        const ah = bar * 0.56
+        roundedPath(ctx, ax, cy - ah / 2, aw, ah, ah / 2)
+        ctx.fillStyle = 'rgba(255,255,255,.09)'; ctx.fill()
+        ctx.fillStyle = 'rgba(255,255,255,.4)'
+        ctx.font = `${Math.round(ah * 0.52)}px 'Segoe UI',sans-serif`
+        ctx.textBaseline = 'middle'
+        ctx.fillText('🔒  agentic-island.local', ax + ah * 0.6, cy + 1)
+      }
     }
     ctx.restore()
   }
   ctx.save(); roundedPath(ctx, pad, cardY, iw, cardH, r); ctx.clip(); ctx.drawImage(base, pad, cardY + bar); ctx.restore()
   ctx.save()
-  ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = 1.5
-  roundedPath(ctx, pad + 0.75, cardY + 0.75, iw - 1.5, cardH - 1.5, r)
-  ctx.stroke()
+  if (pad > 0) {
+    ctx.strokeStyle = frame === 'windows' || frame === 'grid' ? 'rgba(30,40,60,.12)' : 'rgba(255,255,255,.22)'
+    ctx.lineWidth = 1.5
+    roundedPath(ctx, pad + 0.75, cardY + 0.75, iw - 1.5, cardH - 1.5, r)
+    ctx.stroke()
+  }
   ctx.restore()
   return { canvas: c, imgX, imgY, imgW: iw, imgH: ih, W, H }
+}
+
+function composeBase(base: HTMLCanvasElement, frame: FrameKey, bg: [string, string, string], deco: Deco): Composed {
+  const framed = composeFrame(base, frame, bg, deco)
+  const reflected = addReflection(framed, deco)
+  const captioned = addCaption(reflected, deco, bg)
+  return fitAspect(captioned, deco, bg, base)
 }
 
 /** 标注坐标存储在基础图像坐标系中，切换边框/留白后仍保持在原内容位置。 */
@@ -507,7 +716,8 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
 
   // 是否处于“零处理”路径：原图 + 无任何编辑 → 位级一致导出原始 dataUrl
   const untouched = frame === 'none' && annos.length === 0 && !xf.crop && xf.rotate === 0 && !xf.flipH && !xf.flipV &&
-    !deco.watermark && !deco.wmStamp && deco.scale === 1
+    !deco.watermark && !deco.wmStamp && deco.scale === 1 && deco.aspect === 'auto' && deco.reflect <= 0 &&
+    !deco.caption.trim() && !deco.subtitle.trim()
 
   /** 核心：完整合成（transform → 边框/背景/装饰 → 标注 → 水印 → 倍率），返回 dataURL */
   const render = (mult = deco.scale, format: ScreenshotFormat = exportFormat, quality = exportQuality): string => {
@@ -538,7 +748,7 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
     if (!imgLoaded) return
     setOut(render(1, 'png', 1))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imgLoaded, frame, bgKey, deco.radius, deco.shadow, deco.pad, deco.watermark, deco.wmStamp, annos, draft, xf])
+  }, [imgLoaded, frame, bgKey, deco, annos, draft, xf])
 
   const final = untouched ? sourceData : out || sourceData
   const compSize = composedRef.current ? { width: composedRef.current.W, height: composedRef.current.H } : originalSize
@@ -1152,23 +1362,62 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
                     ))}
                   </div>
                 </div>
-                {/* 背景 */}
-                {frame !== 'none' && frame !== 'minimal' && frame !== 'polaroid' && frame !== 'dark' && (
-                  <div style={{ ...toolRow, flexWrap: 'wrap', gap: 6 }}>
-                    <span style={label9}>背景</span>
-                    {BGS.map((b) => (
-                      <div key={b.key} className="hv" onClick={() => setBgKey(b.key)} title={b.label} style={{ width: 24, height: 24, borderRadius: R.sm, cursor: 'pointer', background: `linear-gradient(135deg, ${b.stops[0]}, ${b.stops[1]}, ${b.stops[2]})`, border: bgKey === b.key ? `2px solid ${accent()}` : `0.5px solid ${hairline(0.15)}`, boxShadow: bgKey === b.key ? `0 0 8px ${accent(0.7, 0.5)}` : 'none' }} />
+                {/* 背景：渐变 / 纯色 / 原图虚化 / 透明 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={groupLabel}>背景</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {([['gradient', '渐变'], ['solid', '纯色'], ['blur', '原图虚化'], ['transparent', '透明']] as const).map(([key, label]) => (
+                      <Chip key={key} active={deco.bgMode === key} onClick={() => setDeco({ ...deco, bgMode: key })}>{label}</Chip>
                     ))}
                   </div>
-                )}
+                  {deco.bgMode === 'gradient' && (
+                    <div style={{ ...toolRow, flexWrap: 'wrap', gap: 6 }}>
+                      {BGS.map((b) => (
+                        <div key={b.key} className="hv" onClick={() => setBgKey(b.key)} title={b.label} style={{ width: 24, height: 24, borderRadius: R.sm, cursor: 'pointer', background: `linear-gradient(135deg, ${b.stops[0]}, ${b.stops[1]}, ${b.stops[2]})`, border: bgKey === b.key ? `2px solid ${accent()}` : `0.5px solid ${hairline(0.15)}`, boxShadow: bgKey === b.key ? `0 0 8px ${accent(0.7, 0.5)}` : 'none' }} />
+                      ))}
+                    </div>
+                  )}
+                  {deco.bgMode === 'solid' && (
+                    <div style={{ ...toolRow, flexWrap: 'wrap', gap: 6 }}>
+                      {SOLID_COLORS.map((c) => (
+                        <div key={c} className="hv" onClick={() => setDeco({ ...deco, bgColor: c })} title={c} style={{ width: 22, height: 22, borderRadius: R.sm, cursor: 'pointer', background: c, border: deco.bgColor === c ? `2px solid ${accent()}` : `0.5px solid ${hairline(0.18)}` }} />
+                      ))}
+                      <input type="color" value={deco.bgColor} onChange={(e) => setDeco({ ...deco, bgColor: e.target.value })} title="自定义背景色" style={{ width: 26, height: 24, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }} />
+                    </div>
+                  )}
+                  {deco.bgMode === 'blur' && <div style={{ ...text.faint(), fontSize: 9.5 }}>用原图放大虚化作为背景，适合截图本身信息密度高的场景。</div>}
+                  {deco.bgMode === 'transparent' && <div style={{ ...text.faint(), fontSize: 9.5 }}>背景透明，导出 PNG / WEBP 时生效。</div>}
+                </div>
+                {/* 画幅：社交/文档常用比例 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={groupLabel}>画幅</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {([['auto', '原始'], ['1:1', '1:1'], ['4:3', '4:3'], ['16:9', '16:9'], ['3:4', '3:4'], ['4:5', '4:5'], ['9:16', '9:16']] as const).map(([key, label]) => (
+                      <Chip key={key} active={deco.aspect === key} onClick={() => setDeco({ ...deco, aspect: key })}>{label}</Chip>
+                    ))}
+                  </div>
+                </div>
                 {/* 装饰滑杆 */}
                 {frame !== 'none' && (
                   <>
                     <div style={toolRow}><span style={toolLabel}>圆角</span><Slider min={0} max={1} step={0.05} value={deco.radius} onChange={(v) => setDeco({ ...deco, radius: v })} style={{ flex: 1 }} /></div>
                     <div style={toolRow}><span style={toolLabel}>阴影</span><Slider min={0} max={1} step={0.05} value={deco.shadow} onChange={(v) => setDeco({ ...deco, shadow: v })} style={{ flex: 1 }} /></div>
-                    <div style={toolRow}><span style={toolLabel}>内边距</span><Slider min={0} max={1} step={0.05} value={deco.pad} onChange={(v) => setDeco({ ...deco, pad: v })} style={{ flex: 1 }} /></div>
+                    <div style={toolRow} title="0 = 无边框；不再保留固定留白"><span style={toolLabel}>内边距</span><Slider min={0} max={1} step={0.05} value={deco.pad} onChange={(v) => setDeco({ ...deco, pad: v })} style={{ flex: 1 }} /></div>
                   </>
                 )}
+                {/* 标题 / 倒影：分享图常用的一句话说明与桌面倒影 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={groupLabel}>文字与倒影</div>
+                  <Input value={deco.caption} onChange={(v) => setDeco({ ...deco, caption: v })} placeholder="标题（显示在图片下方，可留空）" />
+                  <Input value={deco.subtitle} onChange={(v) => setDeco({ ...deco, subtitle: v })} placeholder="副标题 / 来源说明（可留空）" />
+                  <div style={toolRow}>
+                    <span style={toolLabel}>文字颜色</span>
+                    <input type="color" value={deco.captionColor} onChange={(e) => setDeco({ ...deco, captionColor: e.target.value })} title="标题文字颜色" style={{ width: 26, height: 24, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }} />
+                    <span style={{ flex: 1 }} />
+                    <span style={{ ...text.faint(), fontSize: 9 }}>倒影</span>
+                    <Slider min={0} max={1} step={0.05} value={deco.reflect} onChange={(v) => setDeco({ ...deco, reflect: v })} style={{ width: 92 }} />
+                  </div>
+                </div>
                 {/* 变换 */}
                 <div style={{ ...toolRow, flexWrap: 'wrap', gap: 6 }}>
                   <span style={label9}>变换</span>
@@ -1196,8 +1445,9 @@ export function ScreenshotStudio({ dataUrl, initialMode = 'image', onClose, llmR
                   {[1, 2, 3].map((s) => (
                     <Chip key={s} active={deco.scale === s} onClick={() => setDeco({ ...deco, scale: s })}>{s}x</Chip>
                   ))}
-                  <span style={{ ...text.faint(), fontSize: 9 }}>1x 无损</span>
+                  <span style={{ ...text.faint(), fontSize: 9 }}>1x 原像素</span>
                 </div>
+                <div style={{ ...text.faint(), fontSize: 9, lineHeight: 1.5 }}>1x 按原图逐像素合成，预览缩放不影响导出；2x/3x 只放大画布，不增加细节。</div>
                 <div style={{ height: 0.5, background: hairline(0.09) }} />
                 <div style={toolRow}>
                   <span style={toolLabel}>文件名</span>
