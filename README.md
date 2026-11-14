@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.8.1](https://img.shields.io/badge/release-v0.8.1-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.8.1)
+[![Release v0.8.1](https://img.shields.io/badge/release-v0.8.2-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.8.2)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/loop-v081.png" alt="Agentic-Island v0.8.1 · 循环分区：后台自主 Agent 循环的监控与拍板真实截图" width="880"/>
+<img src="screenshots/loop-v082.png" alt="Agentic-Island v0.8.1 · 循环分区：后台自主 Agent 循环的监控与拍板真实截图" width="880"/>
 
 </div>
 
@@ -35,7 +35,7 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
 
-## v0.8.1 更新概览
+## v0.8.2 更新概览
 
 修复发布日暴露的入口问题，并保留 0.8.0 的全部能力。
 
@@ -67,27 +67,27 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v081.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v081.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v082.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v082.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v081.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v081.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v082.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v082.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v081.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v081.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v082.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v082.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/loop-v081.png" alt="循环：后台自主 Agent 循环的监控与拍板"/><br/><b>循环</b><br/><sub>待拍板卡片 · SSE 实时 · 规则与用量 · why 时间线</sub></td>
-<td width="50%" align="center"><img src="screenshots/recording-v081.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
+<td width="50%" align="center"><img src="screenshots/loop-v082.png" alt="循环：后台自主 Agent 循环的监控与拍板"/><br/><b>循环</b><br/><sub>待拍板卡片 · SSE 实时 · 规则与用量 · why 时间线</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v082.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="screenshots/settings-v081.png" alt="设置与主题系统" width="70%"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td colspan="2" align="center"><img src="screenshots/settings-v082.png" alt="设置与主题系统" width="70%"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v081.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v082.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -189,7 +189,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.8.1.exe
+Agentic-Island-Setup-0.8.2.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。
