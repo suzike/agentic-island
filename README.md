@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.8.0](https://img.shields.io/badge/release-v0.8.0-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.8.0)
+[![Release v0.8.1](https://img.shields.io/badge/release-v0.8.1-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.8.1)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/loop-v080.png" alt="Agentic-Island v0.8.0 · 循环分区：后台自主 Agent 循环的监控与拍板真实截图" width="880"/>
+<img src="screenshots/loop-v081.png" alt="Agentic-Island v0.8.1 · 循环分区：后台自主 Agent 循环的监控与拍板真实截图" width="880"/>
 
 </div>
 
@@ -35,9 +35,15 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
 
-## v0.8.0 更新概览
+## v0.8.1 更新概览
 
-新增「循环」分区（Super-Agent）：把**后台自主运行的 Agent 循环**纳入灵动岛的统一监控与拍板。首个支持方是 [agent-autoloop](https://github.com/KKKKhazix/agent-autoloop)——本机常驻、不开端口、任意命令行 Agent（Claude Code、Codex、DeepSeek Harness、自定义 command…）都能被它调度。岛的定位从"前台会话监控 + 审批"扩展为"前台 + 后台"双面拍板台。
+修复发布日暴露的入口问题，并保留 0.8.0 的全部能力。
+
+- **「循环」Tab 改为常显**：0.8.0 曾在未检测到 agent-autoloop 时隐藏该分区——发布主打功能不应因可选依赖缺席而消失。现在任何安装都能看到入口；未装中台时分区内直接给出安装指引。
+- **编排入口显性化**：顶栏主按钮「可视化编排」直接进入四层自定义（全局/事件来源/Agent/通道/规则），原来的「配置」更名为「连接」——它只管中台地址与密钥，并在卡内提供编排入口，避免被误认为全部配置。
+- **本机中台已可直接接入**：把你的 owner 密钥填进「循环 → 配置」即可拍板；地址留空自动发现本机中台（默认 127.0.0.1:3350）。
+
+### 0.8.0 能力（继续保留）
 
 - **流水线看得见在转**：七阶段系统管道（来源→规则→排队→执行→回执→拍板→复查）+ 每条规则一行的拓扑；多个事件并行时能看到分流到各自规则，动画由真实 SSE 事实驱动（哪条事实作用在哪条规则，就闪哪一行）。
 - **待拍板**：后台循环拿不准的事推成卡片——选项点选或写一句自由回答，回传后循环接着原会话干完；挂起超过 30 分钟的卡片琥珀升级；通道投递失败会在卡片上直接告警。
@@ -61,27 +67,27 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v080.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v080.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v081.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v081.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v080.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v080.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v081.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v081.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v080.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v080.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v081.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v081.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/loop-v080.png" alt="循环：后台自主 Agent 循环的监控与拍板"/><br/><b>循环</b><br/><sub>待拍板卡片 · SSE 实时 · 规则与用量 · why 时间线</sub></td>
-<td width="50%" align="center"><img src="screenshots/recording-v080.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
+<td width="50%" align="center"><img src="screenshots/loop-v081.png" alt="循环：后台自主 Agent 循环的监控与拍板"/><br/><b>循环</b><br/><sub>待拍板卡片 · SSE 实时 · 规则与用量 · why 时间线</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v081.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="screenshots/settings-v080.png" alt="设置与主题系统" width="70%"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td colspan="2" align="center"><img src="screenshots/settings-v081.png" alt="设置与主题系统" width="70%"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v080.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v081.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -183,7 +189,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.8.0.exe
+Agentic-Island-Setup-0.8.1.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。

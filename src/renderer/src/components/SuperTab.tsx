@@ -160,7 +160,7 @@ export function SuperTab({ snap, cfg, onCfgChange, onOpenStudio, active }: Super
           <ConnectionChip key={p?.id || 'none'} provider={p} enabled={cfg.enabled} onConfigure={() => setCfgOpen((v) => !v)} />
         ))}
         <span style={{ flex: 1 }} />
-        <Button sm icon={Settings2} variant="tinted" onClick={onOpenStudio} title="可视化编辑事件来源 / 规则回路 / Agent / 通道（写 rules.json，官方 check 校验）">编排</Button>
+        <Button sm icon={Settings2} variant="primary" onClick={onOpenStudio} title="可视化编辑事件来源 / 规则回路 / Agent / 通道（写 rules.json，官方 check 校验）">可视化编排</Button>
         <Button sm icon={RefreshCw} disabled={busy.refresh} onClick={() => { setBusy((b) => ({ ...b, refresh: true })); island.superSnapshot().catch(() => {}).finally(() => setBusy((b) => ({ ...b, refresh: false }))) }}>刷新</Button>
       </div>
 
@@ -189,7 +189,7 @@ export function SuperTab({ snap, cfg, onCfgChange, onOpenStudio, active }: Super
 
       {/* 连接配置（未连上或点"配置"时展开；密钥随 save-state 落 DPAPI 加密的 config.json） */}
       {(cfgOpen || notSetUp) && (
-        <ConfigCard cfg={cfg} onChange={onCfgChange} detected={provider?.hubDetected} discoveredUrl={!cfg.url.trim() ? provider?.url : null} onDone={() => setCfgOpen(false)} />
+        <ConfigCard cfg={cfg} onChange={onCfgChange} detected={provider?.hubDetected} discoveredUrl={!cfg.url.trim() ? provider?.url : null} onDone={() => setCfgOpen(false)} onOpenStudio={onOpenStudio} />
       )}
 
       {notSetUp && !provider?.hubDetected ? (
@@ -457,18 +457,18 @@ function ConnectionChip({ provider, enabled, onConfigure }: { provider: SuperAge
       </div>
       {provider?.detail && <span title={provider.detail} style={{ ...text.faint(), fontSize: 9.5, maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{provider.detail}</span>}
       {provider?.updatedAt && !connected && <span style={{ ...text.faint(), fontSize: 9.5 }}>数据截至 {fmtTime(provider.updatedAt)}</span>}
-      <Button sm variant="ghost" onClick={onConfigure}>配置</Button>
+      <Button sm variant="ghost" onClick={onConfigure} title="只配置中台连接（地址与本人密钥）">连接</Button>
     </div>
   )
 }
 
 /* ---------------- 连接配置卡 ---------------- */
 
-function ConfigCard({ cfg, onChange, detected, discoveredUrl, onDone }: { cfg: SuperAgentSettings; onChange: (c: SuperAgentSettings) => void; detected?: boolean; discoveredUrl?: string | null; onDone: () => void }): React.JSX.Element {
+function ConfigCard({ cfg, onChange, detected, discoveredUrl, onDone, onOpenStudio }: { cfg: SuperAgentSettings; onChange: (c: SuperAgentSettings) => void; detected?: boolean; discoveredUrl?: string | null; onDone: () => void; onOpenStudio: () => void }): React.JSX.Element {
   return (
     <div style={{ ...surface.card(), padding: SP.md, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ ...text.subtitle(), fontSize: FS.body }}>接入 Agent Autoloop</span>
+        <span style={{ ...text.subtitle(), fontSize: FS.body }}>连接中台</span>
         {detected && <span style={{ fontSize: 9.5, padding: '2px 7px', borderRadius: R.sm, background: semBg(accent(), 0.14), color: accentText(0.9), fontWeight: 600 }}>已检测到本机中台</span>}
         <span style={{ flex: 1 }} />
         <Switch on={cfg.enabled} onChange={(on) => onChange({ ...cfg, enabled: on })} label={cfg.enabled ? '监控中' : '已停用'} />
@@ -506,7 +506,10 @@ function ConfigCard({ cfg, onChange, detected, discoveredUrl, onDone }: { cfg: S
         </div>
         <span style={{ ...text.faint(), fontSize: 9 }}>实时流在线时自动降频为兜底</span>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Button sm icon={Settings2} variant="tinted" onClick={onOpenStudio}>打开可视化编排</Button>
+        <span style={{ ...text.faint(), fontSize: 9, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>规则 / Agent / 事件来源 / 通道</span>
+        <span style={{ flex: 1 }} />
         <Button sm variant="primary" onClick={onDone}>收起</Button>
       </div>
     </div>
