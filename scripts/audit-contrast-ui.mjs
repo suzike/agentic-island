@@ -453,6 +453,50 @@ try {
       const failures = samples.filter((sample) => sample.ratio < 3 && !sample.tooSmallToMeasure)
       const warnings = samples.filter((sample) => sample.ratio >= 3 && sample.ratio < 4.5)
       collected.push({ tab, samples, failures, warnings, sampled: samples.length })
+
+      // 编排工作台（SuperConfigStudio）是覆盖式浮层，不在主分区里——必须单独审计一次。
+      // 2026-11-14 实测：它曾把背景硬编码成深色、而文字用跟随主题的 ink()，
+      // 浅色主题下变成"深底深字"，主分区审计完全看不到。
+      if (tab === 'loop') {
+        const opened = await evaluate(`(() => {
+          const button = [...document.querySelectorAll('button')].find((node) => (node.textContent || '').trim() === '可视化编排')
+          button?.click()
+          return Boolean(button)
+        })()`)
+        if (!opened) throw new Error(`${theme}：循环分区里找不到「可视化编排」按钮`)
+        await sleep(600)
+        if (!(await evaluate('Boolean(document.querySelector("[data-config-studio]"))'))) {
+          throw new Error(`${theme}：编排工作台没有打开`)
+        }
+        const studioResult = await evaluate(`(${COLLECTOR})()`)
+        const studioShot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false })
+        const studioImage = decodePng(Buffer.from(studioShot.data, 'base64'))
+        const studioSamples = []
+        for (const item of studioResult) {
+          if (!/[p{L}p{N}p{P}]/u.test(item.text.replace(/[p{Extended_Pictographic}️‍]/gu, ''))) continue
+          const measured = measureElement(studioImage, item)
+          if (!measured) continue
+          const large = item.fontSize >= 24 || (item.fontSize >= 18.66 && item.weight >= 700)
+          studioSamples.push({ ...item, ...measured, large, tooSmallToMeasure: item.fontSize <= 10 })
+        }
+        collected.push({
+          tab: 'loop:studio',
+          samples: studioSamples,
+          failures: studioSamples.filter((sample) => sample.ratio < 3 && !sample.tooSmallToMeasure),
+          warnings: studioSamples.filter((sample) => sample.ratio >= 3 && sample.ratio < 4.5),
+          sampled: studioSamples.length
+        })
+        // 关闭浮层，回到分区继续下一个 tab
+        await evaluate(`(() => {
+          const close = [...document.querySelectorAll('[data-config-studio] button')].find((node) => (node.textContent || '').trim() === '关闭')
+          close?.click()
+          return Boolean(close)
+        })()`)
+        await sleep(320)
+        if (await evaluate('Boolean(document.querySelector("[data-config-studio]"))')) {
+          throw new Error(`${theme}：编排工作台没有关闭（会影响后续分区审计）`)
+        }
+      }
     }
     report.themes[theme] = collected
     process.stdout.write(`\n=== 主题 ${theme} ===\n`)

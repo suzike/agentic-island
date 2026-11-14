@@ -570,9 +570,9 @@ export function App(): React.JSX.Element {
   const dndActive = settings.meetingDnd && meetingActive
 
   const hasDueTodo = dueCount > 0
-  // 循环分区派生：待拍板的 ask 卡片数（角标/迷你条）+ 显隐（启用或检测到中台才出现，不挤占窄条）
+  // 循环分区派生：待拍板的 ask 卡片数（角标/迷你条）。Tab 常显：未装中台时分区内部显示安装引导
+  // （v0.8.0 曾做"检测到才显示"，发布日用户反馈主打功能不可见——功能入口不能藏）
   const superAskCount = useMemo(() => (superSnap?.decisions.filter((d) => d.kind === 'ask').length) || 0, [superSnap])
-  const superVisible = superCfg.enabled || !!superSnap?.providers.some((p) => p.hubDetected)
   const ambientStatus = useMemo(() => deriveAmbientStatus({
     pending: pending.length,
     waiting: waiting.length,
@@ -2896,7 +2896,7 @@ export function App(): React.JSX.Element {
                       : undefined
               }}
             >
-              {TABS.filter((t) => t.key !== 'loop' || superVisible).map(({ key, label, icon: TabIcon }) => {
+              {TABS.map(({ key, label, icon: TabIcon }) => {
                 const active = tab === key
                 return (
                   <button

@@ -227,7 +227,7 @@ export function SuperConfigStudio({ onClose, onSaved }: SuperConfigStudioProps):
       data-config-studio
       style={{
         position: 'fixed', inset: 0, zIndex: 60, display: 'flex', flexDirection: 'column',
-        background: 'oklch(0.15 0.02 var(--th) / 0.985)', backdropFilter: 'none', color: ink(1),
+        background: 'oklch(var(--panel-l, 0.15) var(--surface-c, 0.02) var(--ths) / 1)', backdropFilter: 'none', color: ink(1),
         ['--sp-entry-hover' as string]: fill(3)
       } as React.CSSProperties}
     >
@@ -283,7 +283,7 @@ export function SuperConfigStudio({ onClose, onSaved }: SuperConfigStudioProps):
           .sp-entry:hover { background-color: var(--sp-entry-hover) }
         `}</style>
         {/* 侧栏 */}
-        <div style={{ width: 138, flex: 'none', borderRight: `0.5px solid ${hairline(0.08)}`, padding: '10px 8px', display: 'flex', flexDirection: 'column', gap: 3, background: 'oklch(0.16 0.02 var(--th) / 0.5)' }}>
+        <div style={{ width: 138, flex: 'none', borderRight: `0.5px solid ${hairline(0.08)}`, padding: '10px 8px', display: 'flex', flexDirection: 'column', gap: 3, background: fill(2) }}>
           {NAV.map((n) => {
             const Icon = n.icon
             const active = nav === n.key
@@ -493,7 +493,7 @@ export function SuperConfigStudio({ onClose, onSaved }: SuperConfigStudioProps):
       </div>
 
       {/* 底部保存栏 */}
-      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 9, padding: '8px 14px', borderTop: `0.5px solid ${hairline(0.1)}`, background: 'oklch(0.17 0.02 var(--th) / 0.9)' }}>
+      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 9, padding: '8px 14px', borderTop: `0.5px solid ${hairline(0.1)}`, background: fill(2) }}>
         {check && (
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: R.sm,
