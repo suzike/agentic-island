@@ -182,6 +182,8 @@ const child = spawn(electron, [root, `--remote-debugging-port=${port}`, `--user-
     // README 截图会进公开仓库，而"录制来源"那一格预览拍的正是运行这台机器的桌面：
     // 让主进程交一张现画的示意画面，别把真实屏幕（和窗口标题）带进文档
     AIISLAND_AUDIT_PLACEHOLDER_SOURCES: '1',
+    // 循环分区（Super-Agent）用演示数据点亮——截图机器上不必真的装 agent-autoloop
+    AIISLAND_DEMO_SUPER: '1',
     AIISLAND_BRIDGE_FILE: join(profile, 'bridge.json')
   },
   stdio: 'ignore',
@@ -205,7 +207,19 @@ try {
   }
 
   await evaluate(`window.island.saveState(${JSON.stringify(demoState)}); true`)
-  await sleep(300)
+  // save-state 是 send（单向）+ 主进程 700ms trailing 防抖 + DPAPI 加密落盘：
+  // 固定 sleep 不够（实测表现为演示主题退回默认深色、面板宽度退回默认——截图全废）。
+  // 改为轮询 loadState 直到目标主题真的读回来，再 reload。
+  const persisted = await evaluate(`(async () => {
+    const want = ${JSON.stringify(demoState.theme)};
+    for (let i = 0; i < 60; i += 1) {
+      const s = await window.island.loadState();
+      if (s && s.theme === want) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  })()`)
+  if (!persisted) throw new Error('演示状态未在 6s 内落盘（loadState 读不回目标主题）')
   await cdp.send('Page.reload', { ignoreCache: true })
   await sleep(1_200)
   await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true, bubbles: true })); true")
@@ -284,8 +298,11 @@ try {
     process.stdout.write(`captured ${filename}\n`)
   }
 
-  if (captureOnly === 'terminal') {
-    await capture('终端', `terminal-${versionTag}.png`)
+  // captureOnly：只重截一个分区（迭代调样式用）。键 = 分区中文名的小写英文别名。
+  const ONLY = { terminal: ['终端', 'terminal'], loop: ['循环', 'loop'], ask: ['问答', 'ask'], settings: ['设置', 'settings'] }
+  if (captureOnly && ONLY[captureOnly]) {
+    const [label, file] = ONLY[captureOnly]
+    await capture(label, `${file}-${versionTag}.png`)
   } else {
     await capture('问答', `ask-${versionTag}.png`)
   }
@@ -295,6 +312,7 @@ try {
     await capture('灵感便签', `notes-${versionTag}.png`)
     await capture('资讯', `news-${versionTag}.png`)
     await capture('复盘', `review-${versionTag}.png`)
+    await capture('循环', `loop-${versionTag}.png`)
     await capture('设置', `settings-${versionTag}.png`)
     await capture('终端', `terminal-${versionTag}.png`)
 

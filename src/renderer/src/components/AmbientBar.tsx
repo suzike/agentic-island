@@ -27,7 +27,7 @@ interface AmbientBarProps {
   status: AmbientStatus
   onMediaKey: (cmd: string) => void
   onOpen: () => void
-  onOpenTarget: (target: 'agents' | 'todos') => void
+  onOpenTarget: (target: 'agents' | 'todos' | 'loop') => void
   fetchLyrics?: (title: string, artist: string) => Promise<{ ok: boolean; lrc?: string; plain?: string }>
 }
 

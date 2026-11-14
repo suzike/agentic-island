@@ -13,7 +13,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ```bash
 npm run dev          # 开发运行（app ready 会自动安装全局 hooks；AIISLAND_SKIP_HOOKS=1 可跳过）
 npm run typecheck    # 两套 tsconfig（node=main/preload+shared, web=renderer+shared）
-npm test             # 顺序执行 42 个离线 test-*.ts（排除真实 Claude 登录探针）
+npm test             # 顺序执行 53 个离线 test-*.ts（排除真实 Claude 登录探针）
 npm run build        # electron-vite 三端构建
 npm run package      # NSIS 安装包（原生模块经 asarUnpack **/*.node）
 npm run verify:package # 隔离启动 unpacked、静默安装/启动/卸载 NSIS
@@ -40,9 +40,10 @@ node --experimental-strip-types scripts/test-recording-project.ts # v2 工程保
 node --experimental-strip-types scripts/test-recording-export-e2e.ts # 真实 FFmpeg 导出
 node --experimental-strip-types scripts/test-terminal-workspace.ts # 终端现场迁移、加密与脱敏
 node --experimental-strip-types scripts/test-terminal-project.ts # 项目任务发现与健康检查
+node --experimental-strip-types scripts/test-super-agent.ts  # 循环分区：归一化 + 假中台端到端（拍板/停止/规则/why）
 npm run audit:terminal # 隔离 Electron 验证输入、退出码、危险确认与恢复
 npm run audit:ask      # 隔离 Electron 验证回答方法、气泡分析与窄宽布局
-npm run audit:contrast # 全岛像素级对比度审计（2 主题 × 11 分区，硬失败线 3.0）
+npm run audit:contrast # 全岛像素级对比度审计（2 主题 × 12 分区，硬失败线 3.0）
 npm run audit:recording # 隔离实例真录一段：容器/扩展名/时长/应用内播放断言
 npm run audit:screenshot # 隔离实例跑通截图工坊批量美化（含成品像素比对）
 npm run bench:recording # 导出基准：直通封装 vs 软件编码 vs 各硬件编码器
@@ -63,11 +64,13 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
               │ calendar-ics / calendar-caldav  飞书日历(CalDAV multiget 两段式)        │
               │ rss / media(SMTC) / clipboard-watch / sound / llm-proxy / git-summary  │
               │ recording-session / project / export  分片落盘、工程与 FFmpeg 导出    │
+              │ super-agent/autoloop-provider  后台自主循环监控(agent-autoloop /v1,  │
+              │   懒启动；归一化 SuperAgentSnapshot 推送)                              │
               │ terminal-jump(HWND/UIA 切 WT 标签页) / settings-store(DPAPI 加密)      │
               └───────────────────────────┬── Electron IPC ────────────────────────────┘
                                           ▼
               渲染进程 (src/renderer)：App.tsx 编排 + components/*Tab + logic/* + ui/*
-              十一个分区：Agents · Plan · 问答 · 快捷 · 待办 · 灵感便签 · 资讯 · 复盘 · 仓库 · 终端 · 设置
+              十二个分区：Agents · 循环 · Plan · 问答 · 快捷 · 待办 · 灵感便签 · 资讯 · 复盘 · 仓库 · 终端 · 设置
               + AmbientBar 常驻迷你条（收起后的小状态条，多模式轮播）
 ```
 
@@ -81,6 +84,7 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 - **协议契约**：`src/shared/protocol.ts`（三端共用；`IslandBridgeApi` 是 preload 暴露的全部能力面）。
 - **Claude Code 接入**：全生命周期 hooks（SessionStart/UserPromptSubmit/PreToolUse/Stop/Notification/SessionEnd）。PreToolUse 对非只读工具**阻塞审批**（stdout 返回 permissionDecision）；deny 理由回传实现接力 steer；ExitPlanMode→计划审阅；Stop→"等待回复"+ transcript 尾部提取最后回复 + turnEnd 触发 git 小结。
 - **Codex 接入**：rollout 日志跟随为主（`~/.codex/sessions/**/rollout-*.jsonl`，只监控无审批，15min 空闲自动归档）；hooks 桌面端实测会触发（审批可用），CLI 不触发。**CLI/桌面端无法区分**（originator 恒为 codex-tui），统一标 "Codex"。
+- **循环分区（Super-Agent，v0.8 新增）**：监控"后台自主循环"（首个提供方 [agent-autoloop](https://github.com/KKKKhazix/agent-autoloop)，任意 CLI Agent 可被它调度）。主进程 `super-agent.ts`（provider 抽象+聚合 store）+ `autoloop-provider.ts`（实现）+ `autoloop-config.ts`（rules.json 读写：官方 check 校验、备份、原子替换）；HTTP 直连 `/v1/state`（本人密钥）→ 归一化 `SuperAgentSnapshot` → `super-snapshot` 推送（**250ms 合并节流**，防高频 SSE 引发渲染风暴）；**SSE 增量流 `/v1/stream?after=<seq>` 在线时变更秒级可见、轮询退为 12 倍间隔兜底**（after=0 全量重放有 2s 追赶窗口只推进水位不触发刷新）；无密钥时 `agent-autoloop status --json` 只读兜底；动作（拍板/停止/规则暂停·恢复·运行·补跑）**只走 HTTP**，绝不把用户文本拼进命令行。渲染层 `SuperPipeline.tsx` 是**两层真实可视化**：七阶段系统管道（计数来自 totals）+ 每规则一行拓扑（触发方式/Agent/名下并行轮次·待拍板·复查），动画由 SSE fact 的 type + changes 里的 rule/lane/source 驱动。`SuperConfigStudio.tsx` 是可视化编排工作台（四层自定义表单 + JSON 校对 + 校验保存）。编排工作台支持编号改名（自动同步全部引用）、规则克隆、模板创建、未保存二次确认；规则行显示今日 tally 统计；数字键 1-9 快捷拍板；系统问题横幅；历史按 nextBefore 分页。密钥引导：本机 `agent-autoloop key new owner island`。新 ask 卡与 PreToolUse 审批同权重置顶+响铃；完成轮次自动进复盘活动流水。`AIISLAND_DEMO_SUPER=1` 注册演示 provider（内置 fixture 走真实归一化路径，含演示事实流），docs:capture / 对比度审计 / 开发预览共用。设计蓝本与研究材料在 `.research/`（dsh-superagent 与 agent-autoloop 全套文档）。
 - **专业录屏**：`ScreenRecorderStudio.tsx` 负责采集、Canvas 合成与工作台；`logic/recording.ts` 是坐标/时钟/字幕纯逻辑；主进程 `recording-session-store.ts`、`recording-project-store.ts`、`recording-export.ts` 负责磁盘会话、工程和 FFmpeg。
 
 ## 关键工程约束（踩过的坑，勿重蹈）
@@ -112,6 +116,8 @@ Codex (CLI/桌面端) ────rollout 日志──► src/main/codex-tail.ts
 25. **指针/按键采集只在录制期间**（`src/main/mouse-hook.ts`，uiohook-napi 的 N-API 预编译包）：录屏时那块屏本来就在被逐像素记录，所以鼠标点击不引入新的隐私面；停止录制即卸载钩子。键盘**只取 `NAVIGATION_KEYS`（方向键/Enter/Tab/Esc…）与修饰键组合的标签**（`Ctrl+S` 这类，给导出期角标用），**可打印字符一个都不采**——所以角标永远不可能包含用户打出的文字，这条边界是硬约束，改动这个文件时必须保住。原生模块加载失败要静默降级（fail-open）。打包必须 `npmRebuild: false`——electron-builder 默认会用 node-gyp 从源码重编原生模块，本机没有构建链会直接打包失败（本项目只用 N-API 预编译包，跳过 rebuild 是正确选择）。
 26. **审计实例可以免弹窗导出**：原生对话框没法用 CDP 关掉，否则那些链路在自动化里永远测不到。统一门槛是 `isAuditInstance()`（`AIISLAND_ALLOW_AUDIT_INSTANCE=1` + `AIISLAND_AUDIT_USER_DATA`，正常运行时两边都不成立），在这之上按用途分别开口：`AIISLAND_AUDIT_EXPORT_DIR` 让**保存框**（`showOwnedSaveDialog`）与**快存/批量落盘**（`save-image-quick`，否则每跑一次审计就往用户真实的"图片"文件夹里丢文件）直接落到指定目录；`AIISLAND_AUDIT_OPEN_PATHS`（`;` 分隔）充当**打开框**的选择结果，批量美化那条链路才谈得上端到端可验证。审计要用导出目录记得先 `mkdir`——目录不存在时导出会失败，而失败信息曾经被静默吞掉（见约束 11）。另有 `AIISLAND_AUDIT_PLACEHOLDER_SOURCES=1`：让 `recording-sources` 交一张**现画的示意画面**、窗口标题换成中性名——README 截图会进公开仓库，而"录制来源"那格预览拍的正是运行机器的桌面。
 27. **审计断言失败先怀疑审计侧**：这个项目已经栽过两次"脚本自己瞎了、看起来像产品坏了"——① 审计在主屏铺的活动窗口让 Chromium 在 150% 缩放下把采集帧报成 DIP 尺寸（1706×1066 的假回退）；② `audit-recording-container.mjs` 探测视频轨时假定视频是 `#0:0`，改成带 `.*$` 的通配写法又漏了 `m` 标志（JS 里不带 `m` 的 `$` **只匹配整个输入的末尾**，中间那行永远匹配不到）。所以：能按行找就别用跨行正则，别假设流/字段顺序，**动手改产品之前先用隔离脚本复现一遍真实数据**——两次都是隔离复现才证明产品是好的。
+28. **循环分区的动画性能红线**：流水线动画**只能**用 transform/opacity（合成层），禁止 background-position / box-shadow / filter 动画；**岛收起时必须停掉全部无限动画**（`SuperTab` 的 `active={isShown}` 一路传到 `SuperPipeline.animate`），空闲时管道不流动。2026-11-14 实测：透明置顶窗口里持续重绘会把整机鼠标拖卡。列表规模：卡片/轮次/规则每页 8 + 展开，拓扑只显示活跃前 7；事实环形队列 12、播放队列 8；主进程快照推送 250ms 合并。
+29. **循环分区（Super-Agent）的三条硬边界**：① 卡片/事件文本来自外部系统，是**不可信输入**——渲染层只按纯文本渲染（不进 Markdown/不执行），链接只允许显式点击经 `openExternal`（主进程仅放行 http/https）；② 用户自由回答**只经 HTTP JSON 体回传**，绝不拼进 CLI 命令行（注入面）；③ autoloop `/v1` 协议承诺"新增字段不算破坏"——归一化必须防御式取值（未知字段忽略、缺省置空、**永不抛错**，畸形 spending 显示"无数据"而不是 0，用量未上报轮数如实单列）。懒启动：板块未启用时零轮询零请求。**字段名以实现为准而非 docs/protocol.md**（2026-11-14 真机联调实测：runs 编号键是 `id` 不是文档写的 `run`、时间戳驼峰 `createdAt/finishedAt`、tokens 在 `usage.input+output`、lines 用 `every/next` 而非 `when.cron`、sources 无 `online`——照文档写会得到永远空列表；权威源是上游 `host/state.ts` 的 `stateOf` + `kernel/query.ts` 的 `cardView`，离线复现环境在 `.research/autoloop-live/`）。
 
 ## 数据与持久化
 

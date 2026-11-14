@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, safeStorage, screen, shell, Tray, type IpcMainInvokeEvent } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { copyFile, mkdir, mkdtemp, open, readFile, readdir as readdirP, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, extname, join, sep } from 'path'
@@ -52,7 +52,12 @@ import { transcribeRecordingFile } from './recording-transcription'
 import { startLanShare, type LanShareHandle } from './lan-share'
 import { startMjpegServer, type MjpegServerHandle } from './mjpeg-server'
 import { startObsVirtualCamera, stopObsVirtualCamera } from './obs-virtual-camera'
-import type { DecisionMessage, FollowupRequest, LlmRequestConfig, PinnedShotPayload, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotSnipRegion, ScreenshotTarget, ScrollHudState, TerminalJumpHint, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
+import { SuperAgentStore, type SuperProvider } from './super-agent'
+import { AutoloopProvider } from './autoloop-provider'
+import { AutoloopRulesStore } from './autoloop-config'
+import { DemoSuperProvider } from './super-demo'
+import { homedir } from 'os'
+import type { DecisionMessage, FollowupRequest, LlmRequestConfig, PinnedShotPayload, RecordingAnimeModel, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, RecordingSource, ScreenshotSnipRegion, ScreenshotTarget, ScrollHudState, SuperActionResult, SuperAgentSettings, SuperRulesResult, TerminalJumpHint, TerminalShellProfile, TerminalWorkspaceState } from '../shared/protocol'
 import { isVerificationCommand, type VerificationRules } from '../shared/verification'
 import { recordingWindowHandle } from '../shared/recording-source'
 
@@ -108,6 +113,90 @@ const bridge = new BridgeServer(
 )
 // Codex 实时接入：跟随其 rollout 会话日志（Windows 上 hooks/notify 都不通，这是唯一可靠通道）
 const codexTail = new CodexTail(store, sessionChanges.summary.bind(sessionChanges), undefined, { isVerification })
+// Super-Agent：后台自主循环（agent-autoloop）的监控与拍板。懒启动——板块未启用时零轮询零请求。
+// fetch 走 Node 全局（中台在本机/局域网，系统代理通常不回环，net.fetch 反而连不上 127.0.0.1）。
+const superStore = new SuperAgentStore()
+const autoloop = new AutoloopProvider({
+  fetchImpl: (url, init) => globalThis.fetch(url, init),
+  spawnImpl: (args) => new Promise((resolve) => {
+    try {
+      // Windows npm 全局安装的 CLI 是 .cmd 垫片，必须走 shell；args 只会是简单 token，无注入面
+      const child = spawn('agent-autoloop', args, { shell: process.platform === 'win32', windowsHide: true })
+      let stdout = ''
+      let stderr = ''
+      child.stdout?.on('data', (c) => { stdout += c })
+      child.stderr?.on('data', (c) => { stderr += c })
+      child.on('error', () => resolve({ code: -1, stdout, stderr: stderr || 'spawn 失败（未安装？）' }))
+      child.on('close', (code) => resolve({ code: code ?? -1, stdout: stdout.slice(0, 4_000_000), stderr: stderr.slice(0, 20_000) }))
+    } catch {
+      resolve({ code: -1, stdout: '', stderr: 'spawn 抛出异常' })
+    }
+  })
+})
+// 演示实例（docs:capture / 对比度审计 / 开发预览）：演示 provider **顶替**真实拉取（同 id，动作也走演示）
+if (process.env.AIISLAND_DEMO_SUPER === '1') {
+  const demo = new DemoSuperProvider()
+  superStore.register(demo)
+  demo.start() // 启动演示事实流（6s 一条，驱动流水线动画）
+} else superStore.register(autoloop)
+// 可视化编排：读写本机中台的 rules.json（校验走官方 check）。演示实例用隔离 home，不碰真实文件。
+const autoloopHome = process.env.AGENT_AUTOLOOP_HOME || join(homedir(), '.agent-autoloop')
+// 可视化编排的规则存储：**懒初始化**。
+// 必须在 `app.setPath('userData', ...)`（审计隔离，见下方单实例锁段）之后才能取 userData，
+// 否则 demo 环境的 rules.json 会写进真实目录（2026-11-14 自查发现）。
+// 首次调用发生在 app ready 之后的 IPC/初始化路径上，那时路径已定。
+let rulesStore: AutoloopRulesStore | null = null
+function getRulesStore(): AutoloopRulesStore {
+  if (rulesStore) return rulesStore
+  const demo = process.env.AIISLAND_DEMO_SUPER === '1'
+  const home = demo ? join(app.getPath('userData'), 'demo-autoloop') : (process.env.AGENT_AUTOLOOP_HOME || join(homedir(), '.agent-autoloop'))
+  if (demo) {
+    // 演示环境预置一份 rules.json（与演示快照对应），编排工作台开箱可用；跳过官方 check（机器上没装 CLI）
+    try {
+      mkdirSync(home, { recursive: true })
+      const demoRulesPath = join(home, 'rules.json')
+      if (!existsSync(demoRulesPath)) {
+        writeFileSync(demoRulesPath, JSON.stringify({
+          timezone: 'Asia/Shanghai',
+          askFirst: ['删数据', '停服', '花钱', '对外发消息'],
+          sources: { local: { name: '本机' }, github: { name: 'GitHub' }, shop: { name: '业务系统' } },
+          agents: {
+            claude: { name: 'Claude Code', use: 'claude', access: 'edit' },
+            codex: { name: 'Codex', use: 'codex', access: 'edit' },
+            hermes: { name: 'Hermes', use: 'command', command: ['hermes', 'chat', '-Q', '-q', '{prompt}'], access: 'read' }
+          },
+          channels: { desktop: { name: '桌面通知' }, feishu: { name: '飞书' } },
+          rules: [
+            { name: '早报', when: { cron: '0 8 * * *' }, to: 'claude', cwd: '~/notes', prompt: '整理昨天的笔记和提交，写今天的早报。' },
+            { name: '订单跟进', when: { source: 'shop', types: ['order.*'] }, to: 'hermes', cwd: '~/code/shop', skill: 'handle-order', parallel: 3 },
+            { name: '网站巡检', when: { cron: '*/5 * * * *' }, to: 'codex', cwd: '~/code/site', prompt: '检查状态与关键内容，异常时提问。' },
+            { name: '处理意见', when: { source: 'github', types: ['issues.opened'] }, to: 'claude', cwd: '~/code/app', skill: 'handle-issue' }
+          ],
+          elsewhere: [{ name: '周报', source: 'shop', to: 'claude', cron: '0 18 * * 0', where: 'Claude 应用的定时任务' }]
+        }, null, 2) + '\n', 'utf8')
+      }
+    } catch { /* 演示目录不可写时编排入口显示错误即可，不影响板块其它功能 */ }
+  }
+  rulesStore = new AutoloopRulesStore({
+    homeDir: home,
+    skipCheck: demo,
+    spawnImpl: (args) => new Promise((resolve) => {
+      try {
+        const child = spawn('agent-autoloop', args, { shell: process.platform === 'win32', windowsHide: true })
+        let stdout = ''
+        let stderr = ''
+        child.stdout?.on('data', (c) => { stdout += c })
+        child.stderr?.on('data', (c) => { stderr += c })
+        child.on('error', () => resolve({ code: -1, stdout, stderr: stderr || 'spawn 失败（未安装？）' }))
+        child.on('close', (code) => resolve({ code: code ?? -1, stdout: stdout.slice(0, 200_000), stderr: stderr.slice(0, 20_000) }))
+      } catch {
+        resolve({ code: -1, stdout: '', stderr: 'spawn 抛出异常' })
+      }
+    })
+  })
+  return rulesStore
+}
+
 const recordingExportJobs = new Map<string, ChildProcess>()
 const recordingPreviewDirs = new Map<string, string>()
 const lanShares = new Set<LanShareHandle>()
@@ -938,6 +1027,37 @@ store.on('change', () => {
   }
   prevPending = new Set(pend.map((a) => a.requestId as string).filter(Boolean))
   prevWaiting = new Set(wait.map((a) => a.id))
+})
+
+// Super-Agent 快照推送（事件驱动，渲染层零轮询）。新的待拍板卡片与 Agents 审批同权重提醒：
+// 置顶弹岛（不抢键盘焦点）+ 响铃，与 store.on('change') 的 PreToolUse 行为对齐。
+let prevSuperCards = new Set<string>()
+/** 推送节流：高频 SSE（几十条/秒）不能把整座 App 重渲染几十次——首次立即推，250ms 内合并 */
+let superPushTrailing: NodeJS.Timeout | null = null
+let superPushPending = false
+const pushSuperSnapshot = (): void => {
+  const snap = superStore.snapshot()
+  safeSend('super-snapshot', snap)
+  const askIds = snap.decisions.filter((d) => d.kind === 'ask').map((d) => d.id)
+  const newAsk = askIds.filter((id) => !prevSuperCards.has(id))
+  if (newAsk.length > 0 && !dndActive) {
+    if (win) {
+      if (!externalYield?.isLowered()) win.setAlwaysOnTop(true, 'screen-saver')
+      win.moveTop()
+      win.showInactive() // 显示但不抢键盘焦点
+    }
+    if (soundPref.on) playSound(soundPref.map.approval)
+  }
+  prevSuperCards = new Set(askIds)
+}
+superStore.on('change', () => {
+  if (superPushTrailing) { superPushPending = true; return }
+  pushSuperSnapshot()
+  superPushTrailing = setTimeout(() => {
+    superPushTrailing = null
+    if (superPushPending) { superPushPending = false; pushSuperSnapshot() }
+  }, 250)
+  superPushTrailing.unref?.()
 })
 
 // 抓取网页正文 + <title>（问答附件与知识库共用）；粗提正文，压缩空白，截断上限
@@ -2163,13 +2283,74 @@ const verifyRecordingOutput = async (ffmpegPath: string, outputPath: string, req
   ipcMain.handle('kb-get-wiki', async () => { try { return await kb.getWiki() } catch { return {} } })
   ipcMain.handle('kb-save-wiki', (_e, key: string, md: string) => kbGuard(() => kb.saveWiki(String(key), String(md), Date.now())))
   ipcMain.handle('load-state', () => loadState())
+  // ===== Super-Agent（后台自主循环）=====
+  const superProvider = (id: string): SuperProvider | null => superStore.find(String(id || '')) || null
+  ipcMain.handle('super-snapshot', async () => {
+    // 手动拉取即触发一次刷新（后台仍由 provider 自己的轮询/目录监听驱动）
+    void superStore.refreshAll()
+    return superStore.snapshot()
+  })
+  ipcMain.handle('super-answer', (_e, provider: string, cardId: number, choice?: number, text?: string): Promise<SuperActionResult> => {
+    const p = superProvider(provider)
+    if (!p?.answer) return Promise.resolve({ ok: false, error: '该循环不支持回答卡片' })
+    return p.answer(Number(cardId), typeof choice === 'number' ? choice : undefined, typeof text === 'string' ? text : undefined)
+  })
+  ipcMain.handle('super-resolve', (_e, provider: string, cardId: number, reason: string): Promise<SuperActionResult> => {
+    const p = superProvider(provider)
+    if (!p?.resolve) return Promise.resolve({ ok: false, error: '该循环不支持结案卡片' })
+    return p.resolve(Number(cardId), String(reason || '无需决定'))
+  })
+  ipcMain.handle('super-stop-run', (_e, provider: string, runId: number): Promise<SuperActionResult> => {
+    const p = superProvider(provider)
+    if (!p?.stopRun) return Promise.resolve({ ok: false, error: '该循环不支持停止轮次' })
+    return p.stopRun(Number(runId))
+  })
+  ipcMain.handle('super-rule-action', (_e, provider: string, rule: string, action: 'pause' | 'resume' | 'run', opts?: { reason?: string }): Promise<SuperActionResult> => {
+    const p = superProvider(provider)
+    if (!p?.ruleAction) return Promise.resolve({ ok: false, error: '该循环不支持规则操作' })
+    return p.ruleAction(String(rule || ''), action, opts && typeof opts.reason === 'string' ? { reason: opts.reason } : undefined)
+  })
+  ipcMain.handle('super-rule-replay', (_e, provider: string, rule: string, since: string): Promise<SuperActionResult> => {
+    const p = superProvider(provider)
+    if (!p?.ruleReplay) return Promise.resolve({ ok: false, error: '该循环不支持补跑' })
+    return p.ruleReplay(String(rule || ''), String(since || ''))
+  })
+  ipcMain.handle('super-history-more', (_e, provider: string) => {
+    const p = superProvider(provider)
+    if (!p?.historyMore) return Promise.resolve({ ok: false, error: '该循环不支持历史分页' })
+    return p.historyMore()
+  })
+  ipcMain.handle('super-why', (_e, provider: string, runId: number) => {
+    const p = superProvider(provider)
+    if (!p?.why) return Promise.resolve({ ok: false, error: '该循环不支持查看来龙去脉' })
+    return p.why(Number(runId))
+  })
+  // 可视化编排：rules.json 读取 / 官方 check 校验 / 备份式保存
+  ipcMain.handle('super-rules-read', (): SuperRulesResult => getRulesStore().read())
+  ipcMain.handle('super-rules-validate', (_e, json: string) => getRulesStore().validate(String(json || '')))
+  ipcMain.handle('super-rules-create', (): SuperRulesResult => getRulesStore().createTemplate())
+  ipcMain.handle('super-rules-save', async (_e, json: string): Promise<SuperRulesResult> => {
+    const r = await getRulesStore().save(String(json || ''))
+    // 刷新已注册的 provider（演示模式只有 demo provider，别去戳未启动的真实拉取）
+    if (r.ok) void superStore.refreshAll()
+    return r
+  })
   ipcMain.on('save-state', (_e, state: Record<string, unknown>) => {
     scheduleSave(state)
     // 同步主进程的提示音偏好（按类型的声效映射）—— 即时生效，不随防抖延迟
-    const s = state as { settings?: { sound?: boolean; clipWatch?: boolean }; soundMap?: Record<string, string>; approvalPolicy?: Parameters<typeof setApprovalPolicy>[0]; verificationRules?: VerificationRules }
+    const s = state as { settings?: { sound?: boolean; clipWatch?: boolean }; soundMap?: Record<string, string>; approvalPolicy?: Parameters<typeof setApprovalPolicy>[0]; verificationRules?: VerificationRules; superAgent?: Partial<SuperAgentSettings> }
     if (typeof s.settings?.sound === 'boolean') soundPref.on = s.settings.sound
     if (typeof s.settings?.clipWatch === 'boolean') setClipboardWatch(s.settings.clipWatch)
     if (s.soundMap && typeof s.soundMap === 'object') Object.assign(soundPref.map, s.soundMap)
+    // Super-Agent 连接配置（密钥随 config.json 整体 DPAPI 加密落盘）—— enabled 变化即时启停轮询
+    if (s.superAgent && typeof s.superAgent === 'object') {
+      autoloop.configure({
+        ...(typeof s.superAgent.enabled === 'boolean' ? { enabled: s.superAgent.enabled } : {}),
+        ...(typeof s.superAgent.url === 'string' ? { url: s.superAgent.url } : {}),
+        ...(typeof s.superAgent.ownerKey === 'string' ? { ownerKey: s.superAgent.ownerKey } : {}),
+        ...(typeof s.superAgent.pollMs === 'number' ? { pollMs: s.superAgent.pollMs } : {})
+      })
+    }
     // 审批策略随 save-state 全量同步（主进程为强制执行方）
     if (s.approvalPolicy && typeof s.approvalPolicy === 'object') setApprovalPolicy(s.approvalPolicy)
     // 验收规则随 save-state 同步：命令结果要不要留作证据，主进程说了算
@@ -2243,6 +2424,16 @@ app.whenReady().then(async () => {
     }
     // 审批策略启动即生效（渲染层首帧前主进程就要能自动放行）
     if (st?.approvalPolicy && typeof st.approvalPolicy === 'object') setApprovalPolicy(st.approvalPolicy)
+    // Super-Agent 板块：启动即按持久化配置懒启动（enabled 才开始轮询）
+    const sup = (st as { superAgent?: Partial<SuperAgentSettings> } | null)?.superAgent
+    if (sup && typeof sup === 'object') {
+      autoloop.configure({
+        ...(typeof sup.enabled === 'boolean' ? { enabled: sup.enabled } : {}),
+        ...(typeof sup.url === 'string' ? { url: sup.url } : {}),
+        ...(typeof sup.ownerKey === 'string' ? { ownerKey: sup.ownerKey } : {}),
+        ...(typeof sup.pollMs === 'number' ? { pollMs: sup.pollMs } : {})
+      })
+    }
     if (typeof st?.activeMonitor === 'number') monitorIndex = Math.max(0, st.activeMonitor - 1)
     const stm = (st as { soundMap?: Record<string, string> } | null)?.soundMap
     if (stm && typeof stm === 'object') Object.assign(soundPref.map, stm)

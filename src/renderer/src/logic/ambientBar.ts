@@ -6,13 +6,15 @@ export interface AmbientStatus {
   detail: string
   count: number
   urgent: boolean
-  target: 'agents' | 'todos' | null
+  target: 'agents' | 'todos' | 'loop' | null
 }
 
 export interface AmbientStatusInput {
   pending: number
   waiting: number
   dueTodos: number
+  /** 循环分区（Super-Agent）待拍板的 ask 卡片数 */
+  loopPending?: number
   runningAgents: number
   project?: string
   focusLabel?: string
@@ -71,6 +73,17 @@ export function deriveAmbientStatus(input: AmbientStatusInput): AmbientStatus {
       count: input.dueTodos,
       urgent: true,
       target: 'todos'
+    }
+  }
+  // 循环待拍板：后台自主循环的 ask 卡片（无硬截止，排在待办之后、运行中之前；点击直达循环分区）
+  if ((input.loopPending || 0) > 0) {
+    return {
+      kind: 'approval',
+      label: '循环待拍板',
+      detail: `后台循环 ${input.loopPending} 张卡片等你`,
+      count: input.loopPending as number,
+      urgent: true,
+      target: 'loop'
     }
   }
   if (input.runningAgents > 0) {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import type { AgentCliEvent, ApprovalAuditEntry, ApprovalPolicy, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo, UpdateState } from '../../shared/protocol'
+import type { AgentCliEvent, ApprovalAuditEntry, ApprovalPolicy, CalendarEvent, DisplayInfo, GitHubRepo, IslandSnapshot, KbSourceView, LlmRequestConfig, RuntimeInfo, SuperAgentSettings, SuperAgentSnapshot, UpdateState } from '../../shared/protocol'
 import type { VerificationRules } from '../../shared/verification'
 import type { AcceptanceGate, AcceptanceRecord, ActivityEntry, AgentLive, AgentVM, AnswerAnalysisAction, AnswerMethodId, AskBranchMeta, AskSession, AutomationRule, Block, ChatMessage, ChatProps, ClipItem, Composer, FeedItem, FeedSource, NewsWatch, QuickPrompt, QuoteRef, StickyNote, TodoItem, WorkArtifact, WorkbenchProject, WorkflowRun } from './types'
 import type { BarConfig } from './types'
@@ -45,6 +45,8 @@ import { NewsTab } from './components/NewsTab'
 import { ReviewTab } from './components/ReviewTab'
 import { ReposTab } from './components/ReposTab'
 import { TerminalTab } from './components/TerminalTab'
+import { SuperTab } from './components/SuperTab'
+import { SuperConfigStudio } from './components/SuperConfigStudio'
 import { AmbientBar, type BarMedia } from './components/AmbientBar'
 import { SettingsTab, type LlmState, type SettingsFlags } from './components/SettingsTab'
 import { ShortcutsTab } from './components/ShortcutsTab'
@@ -59,9 +61,10 @@ import { ArrowUpRight, BellOff, Camera, Check, ChevronDown, Download, Expand, Ma
 import { accentText, accent, fill, gradient, hairline, ink, semBg } from './ui/tokens'
 import { Ico } from './ui/icons'
 
-type Tab = 'agents' | 'accept' | 'ask' | 'shortcuts' | 'todos' | 'notes' | 'news' | 'review' | 'repos' | 'term' | 'settings'
+type Tab = 'agents' | 'accept' | 'ask' | 'shortcuts' | 'todos' | 'notes' | 'news' | 'review' | 'repos' | 'term' | 'loop' | 'settings'
 const TABS: { key: Tab; label: string; icon: (typeof Ico)[keyof typeof Ico] }[] = [
   { key: 'agents', label: 'Agents', icon: Ico.agent },
+  { key: 'loop', label: '循环', icon: Ico.loop },
   { key: 'accept', label: '验收', icon: Ico.accept },
   { key: 'ask', label: '问答', icon: Ico.ask },
   { key: 'shortcuts', label: '快捷', icon: Ico.shortcuts },
@@ -101,6 +104,9 @@ export function App(): React.JSX.Element {
   // 真实快照（唯一 Agent 数据源）
   const [snap, setSnap] = useState<IslandSnapshot>({ agents: [] })
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null)
+  // 循环分区（Super-Agent）：后台自主循环的归一化快照 + 连接配置（主进程事件推送，零轮询）
+  const [superSnap, setSuperSnap] = useState<SuperAgentSnapshot | null>(null)
+  const [superCfg, setSuperCfg] = useState<SuperAgentSettings>({ enabled: false, url: '', ownerKey: '', pollMs: 15 })
   const [updateState, setUpdateState] = useState<UpdateState | null>(null)
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>({ enabled: false, rules: [] })
   // 验收规则：内置判定之外的补充片段（全局 + 按项目），随 save-state 同步到主进程
@@ -239,6 +245,8 @@ export function App(): React.JSX.Element {
   // 截图工坊：截图目标由主进程随结果回传，不依赖取消后可能残留的渲染层 ref。
   const [shotStudio, setShotStudio] = useState<string | null>(null)
   const [shotStudioMode, setShotStudioMode] = useState<'image' | 'record'>('image')
+  // 循环分区：可视化编排工作台（读写 rules.json）
+  const [superStudioOpen, setSuperStudioOpen] = useState(false)
   // 迷你条动态内容池：AI 每 10 分钟刷新 + GitHub 热门（内存态，重启重新拉）
   const [aiPools, setAiPools] = useState<Record<string, string[]>>({})
   const [ghItems, setGhItems] = useState<string[]>([])
@@ -322,6 +330,9 @@ export function App(): React.JSX.Element {
     const offAudit = island.onApprovalAudit((entry) => setApprovalAudit((list) => [entry, ...list].slice(0, 100)))
     island.getSnapshot().then((next) => { setSnap(next); setBridgeConnected(true) }).catch(() => setBridgeConnected(false))
     const off = island.onSnapshot((next) => { setSnap(next); setBridgeConnected(true) })
+    // 循环分区：首帧拉取 + 订阅推送（主进程懒启动，未启用时拿到的是空快照+探测结果）
+    island.superSnapshot().then(setSuperSnap).catch(() => {})
+    const offSuper = island.onSuperSnapshot(setSuperSnap)
     // 载入持久化配置
     island.loadState().then((s) => {
       // 只水合一次：React StrictMode(dev) 会双调用本 effect，之前的"前插合并"会导致每次重启待办翻倍
@@ -342,6 +353,7 @@ export function App(): React.JSX.Element {
         if (Array.isArray(s.repoBookmarks)) setRepoBookmarks(s.repoBookmarks as GitHubRepo[])
         if (Array.isArray(s.shortcuts)) setShortcuts(s.shortcuts as ShortcutDef[])
         if (s.approvalPolicy && typeof s.approvalPolicy === 'object') setApprovalPolicy(s.approvalPolicy as ApprovalPolicy)
+        if (s.superAgent && typeof s.superAgent === 'object') setSuperCfg((v) => ({ ...v, ...(s.superAgent as Partial<SuperAgentSettings>) }))
         if (s.verificationRules && typeof s.verificationRules === 'object') setVerificationRules(s.verificationRules as VerificationRules)
         if (s.acceptanceGate && typeof s.acceptanceGate === 'object') setAcceptanceGate(s.acceptanceGate as AcceptanceGate)
         if (Array.isArray(s.automations)) setAutomations(normalizeAutomationRules(s.automations))
@@ -400,7 +412,7 @@ export function App(): React.JSX.Element {
         monitorIndex: (typeof s?.activeMonitor === 'number' ? s.activeMonitor : 1) - 1
       })
     })
-    return () => { off(); offUpdate(); offAudit() }
+    return () => { off(); offUpdate(); offAudit(); offSuper() }
   }, [])
 
   const agents: AgentVM[] = useMemo(() => snap.agents.map((a) => ({ ...a })), [snap])
@@ -483,6 +495,34 @@ export function App(): React.JSX.Element {
     })
   }, [snap])
 
+  // 复盘联动：循环分区（Super-Agent）已完成的轮次也进活动流水——后台循环干了什么、花了多少，
+  // 复盘时和前台会话一样能看到。key=loop:<runId> 去重，仅摘要/用量变化时更新。
+  useEffect(() => {
+    if (!hydrated.current || !superSnap?.history.length) return
+    setActivityLog((prev) => {
+      const map = new Map(prev.map((e) => [e.id, e]))
+      let changed = false
+      for (const h of superSnap.history) {
+        if (h.outcome === 'cancelled') continue // 取消的轮次复盘价值低，不占流水
+        const id = `loop:${h.runId}`
+        const cur = map.get(id)
+        const detail = `${h.summary || (h.outcome === 'nothing' ? '没事可做' : '已完成')}${h.tokens !== null || h.costUsd !== null ? `（${h.tokens !== null ? `${h.tokens} tokens` : '未报用量'}${h.costUsd !== null ? ` · $${h.costUsd.toFixed(2)}` : ''}）` : ''}`
+        if (cur?.detail === detail) continue
+        map.set(id, {
+          id,
+          ts: h.finishedAt || cur?.ts || Date.now(),
+          updatedAt: Date.now(),
+          tool: `循环 · ${h.agent || 'Agent'}`,
+          proj: h.rule,
+          detail
+        })
+        changed = true
+      }
+      if (!changed) return prev
+      return [...map.values()].sort((x, y) => y.ts - x.ts).slice(0, 300)
+    })
+  }, [superSnap])
+
   // 验收留档：会话从快照消失（SessionEnd / Codex 空闲回收 / done 清扫）时，
   // 用最后看到的现场落账——计划、最后回复、git 文件清单、活动轨迹都随即销毁，事后再也补不回来。
   const seenAgents = useRef<Map<string, AgentVM>>(new Map())
@@ -530,15 +570,19 @@ export function App(): React.JSX.Element {
   const dndActive = settings.meetingDnd && meetingActive
 
   const hasDueTodo = dueCount > 0
+  // 循环分区派生：待拍板的 ask 卡片数（角标/迷你条）+ 显隐（启用或检测到中台才出现，不挤占窄条）
+  const superAskCount = useMemo(() => (superSnap?.decisions.filter((d) => d.kind === 'ask').length) || 0, [superSnap])
+  const superVisible = superCfg.enabled || !!superSnap?.providers.some((p) => p.hubDetected)
   const ambientStatus = useMemo(() => deriveAmbientStatus({
     pending: pending.length,
     waiting: waiting.length,
     dueTodos: dueCount,
+    loopPending: superAskCount,
     runningAgents: agents.filter((agent) => agent.status !== 'done').length,
     project: (pending[0] || waiting[0] || agents.find((agent) => agent.status === 'running'))?.proj,
     focusLabel: pomoWorking ? `番茄 ${pomoMMSS}` : focusActive ? focusMMSS : undefined,
     dnd: dndActive
-  }), [pending, waiting, dueCount, agents, pomoWorking, pomoMMSS, focusActive, focusMMSS, dndActive])
+  }), [pending, waiting, dueCount, superAskCount, agents, pomoWorking, pomoMMSS, focusActive, focusMMSS, dndActive])
   // 暂时收起：正在开会等场景，允许把"有待处理"的岛收回去；出现**新的**请求（签名变化）会重新弹出
   const [snoozeSig, setSnoozeSig] = useState('')
   const attentionSig = [
@@ -597,7 +641,7 @@ export function App(): React.JSX.Element {
   const revealedRef = useRef(false); revealedRef.current = revealed
   // 全屏覆盖层（截图问AI / 闪念胶囊 / 命令面板）打开时，窗口必须保持可点击，
   // 否则 onMove 会把它翻回点击穿透 → 覆盖层收不到点击 = 界面"卡死"。
-  const anyOverlay = capsuleOpen || paletteOpen || brainOpen || kbOpen || !!studio || themeDesignerOpen || calcOpen || learnOpen || !!shotImg || !!shotStudio
+  const anyOverlay = capsuleOpen || paletteOpen || brainOpen || kbOpen || !!studio || themeDesignerOpen || calcOpen || learnOpen || !!shotImg || !!shotStudio || superStudioOpen
   const overlayRef = useRef(false); overlayRef.current = anyOverlay
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   /** 用户主动收起后，指针还停在折叠条上时不要被 hover 立刻弹回；离开岛后解除。 */
@@ -710,6 +754,8 @@ export function App(): React.JSX.Element {
       automations,
       soundMap,
       activeMonitor,
+      // 循环分区连接配置（含本人密钥，随 config.json 整体 DPAPI 加密）
+      superAgent: superCfg,
       todos,
       theme,
       customThemes,
@@ -765,7 +811,7 @@ export function App(): React.JSX.Element {
         providerCatalogVersion: llm.providerCatalogVersion
       }
     })
-  }, [settings, approvalPolicy, verificationRules, acceptanceGate, automations, soundMap, activeMonitor, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, acceptance, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
+  }, [settings, approvalPolicy, verificationRules, acceptanceGate, automations, soundMap, activeMonitor, superCfg, todos, theme, threads, askSessions, activeAskBranch, workbenchProjects, activeProjectId, workflowRuns, workArtifacts, quickPrompts, icsUrl, caldav, barCfg, islandWidth, fullscreen, fontChoice, uiZoom, feedSources, feedItems, feedHidden, feedAiEnrich, feedInterests, feedMinScore, feedDailies, newsWatches, clips, activityLog, acceptance, reviews, pomo, pomoDone, customThemes, calcSheet, repos, githubToken, repoBookmarks, shortcuts, askEngine, agentCwd, srsState, radar, embedConfig, notes, llm.provider, llm.model, llm.baseUrl, llm.apiKey, llm.saved, llm.modelLists, llm.profiles, llm.providerCatalogVersion])
 
   // 字体与缩放应用（--font 变量 + 主进程 zoomFactor）
   useEffect(() => {
@@ -2663,6 +2709,7 @@ export function App(): React.JSX.Element {
     { id: 'act:focus', title: (focusActive ? '退出' : '进入') + '专注模式', hint: '静默 25 分钟', icon: '🌙', group: '动作', keywords: 'focus zhuanzhu', run: () => toggleFocus() },
     { id: 'act:pomo', title: (pomo.phase === 'idle' ? '开始' : '停止') + '番茄钟', hint: '专注 25 / 小憩 5,自动循环', icon: '🍅', group: '动作', keywords: 'pomodoro fanqiezhong', run: () => setPomo((s) => (s.phase === 'idle' ? startWork(pomoCfg, Date.now()) : POMO_IDLE)) },
     { id: 'act:bar', title: (settings.ambientBar ? '关闭' : '开启') + '常驻迷你条', hint: '底部迷你状态条', icon: '〰', group: '动作', keywords: 'bar miniao', run: () => toggleSetting('ambientBar') },
+    { id: 'act:super-studio', title: '可视化编排后台循环', hint: '事件来源 / 规则回路 / Agent / 通道', icon: '⌘', group: '动作', keywords: 'loop autoloop rules 编排 规则 回路 agent', run: () => { setTab('loop'); setRevealed(true); setSuperStudioOpen(true) } },
     { id: 'act:size', title: (settings.largeSize ? '切回标准尺寸' : '切到大尺寸工作台'), hint: '面板大小', icon: '⤢', group: '动作', keywords: 'size chicun', run: () => toggleSetting('largeSize') },
     { id: 'act:full', title: (fullscreen ? '退出全屏' : '全屏模式'), hint: '铺满当前显示器', icon: '⛶', group: '动作', keywords: 'fullscreen quanping', run: () => setFullscreen((v) => !v) },
     { id: 'act:shot', title: '截图工坊', hint: '无损截图 + 高级边框美化', icon: '📸', group: '动作', keywords: 'screenshot jietu gongfang', run: () => island.triggerScreenshot('studio') },
@@ -2849,7 +2896,7 @@ export function App(): React.JSX.Element {
                       : undefined
               }}
             >
-              {TABS.map(({ key, label, icon: TabIcon }) => {
+              {TABS.filter((t) => t.key !== 'loop' || superVisible).map(({ key, label, icon: TabIcon }) => {
                 const active = tab === key
                 return (
                   <button
@@ -2882,6 +2929,10 @@ export function App(): React.JSX.Element {
                       {key === 'todos' && hasDueTodo && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
                       {key === 'todos' && !hasDueTodo && todos.filter((t) => !t.done).length > 0 && (
                         <span style={{ marginLeft: 2, fontSize: 9.5, opacity: 0.75 }}>{todos.filter((t) => !t.done).length}</span>
+                      )}
+                      {key === 'loop' && superAskCount > 0 && <span className="ui-sonar" style={{ marginLeft: 2, display: 'inline-block', width: 6, height: 6, borderRadius: 999, background: 'oklch(0.8 0.13 75)', verticalAlign: 'middle' }} />}
+                      {key === 'loop' && superAskCount === 0 && (superSnap?.decisions.length || 0) > 0 && (
+                        <span style={{ marginLeft: 2, fontSize: 9.5, opacity: 0.75 }}>{superSnap?.decisions.length}</span>
                       )}
                     </span>
                   </button>
@@ -3110,6 +3161,16 @@ export function App(): React.JSX.Element {
               />
             )}
             {tab === 'term' && <TerminalTab tall={settings.largeSize || fullscreen} full={fullscreen} agents={agents} llm={{ model: llm.model, baseUrl: llm.baseUrl, apiKey: llm.apiKey }} onKeyboardActivity={holdPanelForTerminal} />}
+            {tab === 'loop' && (
+              <SuperTab
+                snap={superSnap}
+                cfg={superCfg}
+                onCfgChange={setSuperCfg}
+                onOpenStudio={() => setSuperStudioOpen(true)}
+                // 岛收起时停掉流水线动画：透明置顶窗口里持续重绘会拖慢整机指针（实测踩过）
+                active={isShown}
+              />
+            )}
             {tab === 'settings' && (
               <SettingsTab
                 runtimeInfo={runtimeInfo} bridgeConnected={bridgeConnected}
@@ -3179,6 +3240,12 @@ export function App(): React.JSX.Element {
             setNotes((list) => [{ id: now, emoji: '📸', title: title.slice(0, 40), md: text, color: 'blue', tags: ['截图识别'], createdAt: now, updatedAt: now }, ...list].slice(0, 400))
             setToast('截图识别结果已存入灵感便签')
           }}
+        />
+      )}
+      {superStudioOpen && (
+        <SuperConfigStudio
+          onClose={() => setSuperStudioOpen(false)}
+          onSaved={() => { island.superSnapshot().then(setSuperSnap).catch(() => {}) }}
         />
       )}
       <CommandPalette open={paletteOpen} commands={paletteCommands} onClose={() => setPaletteOpen(false)} />

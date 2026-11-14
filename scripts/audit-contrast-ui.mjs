@@ -26,8 +26,8 @@ const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)
 
 /** 审计的主题：一个深色预设 + 唯一浅色预设（浅色下 accent 明度下移，是最容易出问题的一侧）。 */
 const THEMES = ['aurora', 'control-center']
-/** 逐分区审计（分区键与 App.tsx 的 TABS 一致）。 */
-const TABS = ['agents', 'accept', 'ask', 'shortcuts', 'todos', 'notes', 'news', 'review', 'repos', 'term', 'settings']
+/** 逐分区审计（分区键与 App.tsx 的 TABS 一致）。循环分区靠 AIISLAND_DEMO_SUPER 演示数据点亮（条件显隐，无数据不出现在 Tab 栏）。 */
+const TABS = ['agents', 'loop', 'accept', 'ask', 'shortcuts', 'todos', 'notes', 'news', 'review', 'repos', 'term', 'settings']
 
 class Cdp {
   constructor(url) { this.seq = 0; this.pending = new Map(); this.ws = new WebSocket(url) }
@@ -272,6 +272,7 @@ const child = spawn(electron, [root, `--remote-debugging-port=${port}`, `--user-
     AIISLAND_SKIP_HOOKS: '1',
     AIISLAND_ALLOW_AUDIT_INSTANCE: '1',
     AIISLAND_AUDIT_USER_DATA: profile,
+    AIISLAND_DEMO_SUPER: '1',
     AIISLAND_BRIDGE_FILE: join(profile, 'bridge.json')
   },
   // 主进程会把 renderer 的 console.error / 崩溃转发到 stderr：审计失败时要能看到根因，

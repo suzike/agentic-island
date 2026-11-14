@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ApprovalAuditEntry, PinnedShotPayload, ScreenshotSnipRegion, ScrollHudState, DecisionMessage, FollowupEvent, FollowupRequest, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, TerminalJumpHint, TerminalShellProfile, TerminalWorkspaceState, UpdateState } from '../shared/protocol'
+import type { ApprovalAuditEntry, PinnedShotPayload, ScreenshotSnipRegion, ScrollHudState, DecisionMessage, FollowupEvent, FollowupRequest, IslandSnapshot, IslandBridgeApi, LlmRequestConfig, RecordingExportProgress, RecordingExportRequest, RecordingProjectSaveInput, RecordingSessionCreateInput, ScreenshotCapture, ScreenshotTarget, SuperAgentSnapshot, TerminalJumpHint, TerminalShellProfile, TerminalWorkspaceState, UpdateState } from '../shared/protocol'
 
 const api: IslandBridgeApi = {
   getRuntimeInfo: () => ipcRenderer.invoke('runtime-info'),
@@ -254,6 +254,23 @@ const api: IslandBridgeApi = {
     return () => ipcRenderer.removeListener('reveal', handler)
   },
   quitApp: (): void => ipcRenderer.send('app-quit'),
+  superSnapshot: (): Promise<SuperAgentSnapshot> => ipcRenderer.invoke('super-snapshot'),
+  onSuperSnapshot: (cb: (snap: SuperAgentSnapshot) => void): (() => void) => {
+    const handler = (_e: unknown, snap: SuperAgentSnapshot): void => cb(snap)
+    ipcRenderer.on('super-snapshot', handler)
+    return () => ipcRenderer.removeListener('super-snapshot', handler)
+  },
+  superAnswer: (provider: string, cardId: number, choice?: number, text?: string) => ipcRenderer.invoke('super-answer', provider, cardId, choice, text),
+  superResolve: (provider: string, cardId: number, reason: string) => ipcRenderer.invoke('super-resolve', provider, cardId, reason),
+  superStopRun: (provider: string, runId: number) => ipcRenderer.invoke('super-stop-run', provider, runId),
+  superRuleAction: (provider: string, rule: string, action: 'pause' | 'resume' | 'run', opts?: { reason?: string }) => ipcRenderer.invoke('super-rule-action', provider, rule, action, opts),
+  superRuleReplay: (provider: string, rule: string, since: string) => ipcRenderer.invoke('super-rule-replay', provider, rule, since),
+  superHistoryMore: (provider: string) => ipcRenderer.invoke('super-history-more', provider),
+  superWhy: (provider: string, runId: number) => ipcRenderer.invoke('super-why', provider, runId),
+  superRulesRead: () => ipcRenderer.invoke('super-rules-read'),
+  superRulesValidate: (json: string) => ipcRenderer.invoke('super-rules-validate', json),
+  superRulesSave: (json: string) => ipcRenderer.invoke('super-rules-save', json),
+  superRulesCreate: () => ipcRenderer.invoke('super-rules-create'),
   loadState: (): Promise<Record<string, unknown> | null> => ipcRenderer.invoke('load-state'),
   saveState: (state: Record<string, unknown>): void => ipcRenderer.send('save-state', state)
 }

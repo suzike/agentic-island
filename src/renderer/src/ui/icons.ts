@@ -43,6 +43,7 @@ import {
   Plus,
   Radar,
   RefreshCw,
+  Repeat,
   Rss,
   Search,
   Send,
@@ -85,6 +86,7 @@ export const Ico = {
   review: BarChart3, // 复盘
   repos: FolderGit2, // 仓库
   term: Terminal, // 终端
+  loop: Repeat, // 循环（Super-Agent 后台自主任务）
   settings: Settings, // 设置
 
   // 通用动作

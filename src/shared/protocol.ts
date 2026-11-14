@@ -702,6 +702,366 @@ export interface TerminalProjectInspection {
   error?: string
 }
 
+// ===== Super-Agent（后台自主循环：监控 + 拍板）=====
+// 归一化模型：任何"后台自主跑、拿不准才找人"的循环（首个提供方 agent-autoloop，未来 dsh-superagent）
+// 都折算成下面这组视图模型，渲染层只消费归一化数据、不感知提供方细节。
+// 注意：卡片/事件文本来自外部系统，属不可信输入——只渲染、不执行；链接必须显式点击打开。
+
+/** 待拍板卡片：autoloop 的 ask（带选项）/ notice（通知，可结案） */
+export interface SuperDecision {
+  /** provider 域内唯一，如 'autoloop:56' */
+  id: string
+  provider: string
+  /** provider 原生卡片编号（动作回传用） */
+  cardId: number
+  kind: 'ask' | 'notice'
+  title: string
+  text: string
+  options: string[]
+  /** 推荐选项下标（可能缺省） */
+  recommend: number | null
+  /** 来源规则名 */
+  rule: string | null
+  /** 所在事项（parallel 规则按对象分事项） */
+  lane: string | null
+  /** 提问时留给接着干那一轮的说明 */
+  about: string | null
+  link: string | null
+  /** 创建时间（ms；中台未提供时为 0，不显示年龄） */
+  createdAt: number
+  /** 该卡片的投递状态：中台 `channels[].lastFailure` 命中的最近一张卡片（没送达=你可能根本不知道它存在） */
+  deliveryFailed?: { tries: number; error: string; givenUp: boolean } | null
+}
+
+/** 进行中/排队/不确定的一轮 */
+export interface SuperWork {
+  id: string
+  provider: string
+  runId: number
+  rule: string
+  lane: string | null
+  /** 执行该轮的 Agent 名（autoloop 可接任意 CLI Agent，不假设后端） */
+  agent: string | null
+  state: 'queued' | 'claimed' | 'unknown'
+  /** 已重试次数（>0 表示失败过；queued+attempts>0 = 等重试） */
+  attempts: number
+  error: string | null
+  summary: string | null
+  manual: boolean
+  /** 本人已请求停止、进程尚未确认（cancel_at 已置） */
+  stopping: boolean
+  /** 下次重试的最早时刻（attempts>0 时；显示"为什么不动"） */
+  notBefore: number | null
+  /** 打开该轮 Agent 会话的链接（http(s) 可直开；claude:// 等自定义协议仅复制） */
+  link: string | null
+  /** 会话编号（回执/接续时上报） */
+  session: string | null
+}
+
+/** 已结束的近几轮 */
+export interface SuperHistoryItem {
+  id: string
+  provider: string
+  runId: number
+  rule: string
+  agent: string | null
+  outcome: 'done' | 'nothing' | 'cancelled'
+  finishedAt: number | null
+  summary: string | null
+  /** usage.input+output；Agent 未上报时为 null（如实显示"未上报"而非 0） */
+  tokens: number | null
+  costUsd: number | null
+  link: string | null
+  session: string | null
+}
+
+/** 规则行（含暂停状态与暂停期间跳过的事件数） */
+export interface SuperRule {
+  provider: string
+  name: string
+  agent: string | null
+  /** 定时的人话描述（如"每天 08:00"）；事件规则为 null */
+  every: string | null
+  /** 事件规则：来源 id；定时规则为 null */
+  sourceType: string | null
+  /** 定时规则的下次运行时刻 */
+  next: number | null
+  paused: boolean
+  pauseReason: string | null
+  pausedSince: number | null
+  /** 暂停期间跳过、尚未补跑的事件数 */
+  skippedCount: number
+  /** 该规则的今日统计（中台 lines[].totals 的 tally）；缺失时为 null */
+  today: { done: number; nothing: number; retrying: number; running: number; queued: number } | null
+}
+
+/** 暂停期间被跳过的事件（state.skipped）：恢复后可原样补跑，所以必须让用户看到丢了什么 */
+export interface SuperSkippedEvent {
+  id: number
+  source: string
+  type: string
+  subject: string | null
+  summary: string | null
+  at: number | null
+  /** 收到时因为暂停没接这条事件的规则 */
+  rules: string[]
+}
+
+/** elsewhere：托管在别处的定时任务（中台不启动，只列出；写了 cwd 的也能回问） */
+export interface SuperElsewhere {
+  name: string
+  source: string
+  agent: string
+  cron: string
+  every: string | null
+  next: number | null
+  where: string | null
+}
+
+/** 未来复查（later 约定的到期提醒） */
+export interface SuperTimer {
+  provider: string
+  rule: string
+  lane: string | null
+  key: string
+  about: string
+  at: number
+}
+
+/** 用量窗口：未上报的轮数单列（诚实显示，不折算成 0） */
+export interface SuperSpendWindow {
+  rounds: number
+  tokens: number | null
+  cached: number | null
+  costUsd: number | null
+  missingTokens: number
+  missingCost: number
+}
+
+export interface SuperSpend {
+  today: SuperSpendWindow
+  week: SuperSpendWindow
+}
+
+/** 中台部件在线状态：Agent 接单程序 / 通知通道 / 事件源（事件源无心跳概念，online 为 null） */
+export interface SuperComponent {
+  kind: 'agent' | 'channel' | 'source'
+  name: string
+  online: boolean | null
+  detail: string | null
+}
+
+/** 单个提供方（后台循环系统）的连接状态 */
+export interface SuperProviderStatus {
+  id: string
+  label: string
+  connected: boolean
+  /** SSE 增量流在线：变更秒级可见，此时轮询退为兜底 */
+  live: boolean
+  /** 本机发现该循环的安装痕迹（如 ~/.agent-autoloop/） */
+  hubDetected: boolean
+  /** http=本人密钥直连 · cli=命令行只读兜底 · off=无可用通道 */
+  mode: 'http' | 'cli' | 'off'
+  url: string | null
+  /** 离线原因 / 连接方式说明 */
+  detail: string | null
+  keyConfigured: boolean
+  updatedAt: number | null
+}
+
+/** 一条真实事实（SSE /v1/stream 的 fact）：type 是上游输入类型，例如 ingest / started / result / createCard / ask / resolve / tick / rules。
+ *  rule/lane/source 从 fact 的 changes 里提取（这条事实真实作用的规则与事项）——流水线据此把动画精确落到对应规则行。 */
+export interface SuperFactPulse {
+  seq: number
+  type: string
+  at: number
+  /** 事实作用的规则名（runs/cards 表的 row.rule） */
+  rule?: string | null
+  /** 事项（parallel 规则的 lane） */
+  lane?: string | null
+  /** 事件来源（events 表的 row.source） */
+  source?: string | null
+}
+
+/** 流水线各阶段的真实计数（中台 totals + timers/rules 派生），用于可视化管道点亮 */
+export interface SuperPipeline {
+  /** 已登记来源数 */
+  sources: number
+  /** 规则总数 / 暂停中 */
+  rules: number
+  pausedRules: number
+  /** 排队（含等重试） */
+  queued: number
+  retrying: number
+  /** 执行中的轮次 */
+  running: number
+  /** 状态不确定（接单程序失联） */
+  unknown: number
+  /** 今日完成 / 今日没事可做 */
+  doneToday: number
+  nothingToday: number
+  /** 待拍板卡片（需人工） */
+  attention: number
+  /** 约定中的复查 */
+  timers: number
+}
+
+/** Super-Agent 板块的完整快照（主进程权威，事件推送） */
+export interface SuperAgentSnapshot {
+  providers: SuperProviderStatus[]
+  /** open 卡片，ask 在前、同 kind 按年龄从老到新（老的最该先处理） */
+  decisions: SuperDecision[]
+  work: SuperWork[]
+  rules: SuperRule[]
+  history: SuperHistoryItem[]
+  timers: SuperTimer[]
+  spend: SuperSpend | null
+  components: SuperComponent[]
+  pipeline: SuperPipeline
+  /** 暂停期间跳过、尚未补跑的事件（最近 20 条） */
+  skipped: SuperSkippedEvent[]
+  /** 托管在别处的定时任务 */
+  elsewhere: SuperElsewhere[]
+  /** 最近的真实事实流（SSE 增量，最多 12 条，按 seq 升序）——渲染层据此播放流动动画 */
+  facts: SuperFactPulse[]
+  updatedAt: number
+}
+
+// ===== Autoloop 规则文件（可视化编排读写的对象；上游用严格 JSON.parse，写前须 check 校验） =====
+
+/** 一个 Agent 定义（rules.json 的 agents[id]；任意 CLI Agent 一行接入） */
+export interface AutoloopAgentDef {
+  /** 展示名 */
+  name?: string
+  /** 内置插件：claude / codex / acp / command / dsh 等 */
+  use?: string
+  /** use=command 时的命令数组，{prompt} 作为独立参数 */
+  command?: string[]
+  /** 只跑在哪台接单程序（多机时） */
+  worker?: string
+  model?: string
+  effort?: string
+  /** 服务档位（如 Codex priority） */
+  tier?: string
+  /** read | edit | full（默认 edit） */
+  access?: string
+  /** 替换启动程序（设环境变量再 exec 的脚本） */
+  program?: string
+  /** 该 Agent 跨规则同时领取上限 */
+  maxActive?: number
+}
+
+/** 一个事件来源定义 */
+export interface AutoloopSourceDef {
+  name?: string
+  /** Webhook 适配器（plugins/<adapter>/source.ts） */
+  adapter?: string
+  [key: string]: unknown
+}
+
+/** 一个通知通道定义 */
+export interface AutoloopChannelDef {
+  name?: string
+  /** 允许拍板的人（飞书 open_id 等） */
+  answerers?: string[]
+  [key: string]: unknown
+}
+
+/** 规则的 when：定时（cron）或事件（来源+类型），二选一 */
+export interface AutoloopRuleWhen {
+  cron?: string
+  source?: string
+  types?: string[]
+}
+
+/** 一条规则 = 一次回路定义：什么事件 → 交给谁 → 哪个目录 → 什么 skill/提示词 → 怎么并行/续会话 */
+export interface AutoloopRuleDef {
+  name: string
+  when: AutoloopRuleWhen
+  to: string
+  cwd?: string
+  skill?: string
+  prompt?: string
+  /** 会话标题模板（{id} / {subject}） */
+  title?: string
+  /** 同组串行（默认=规则名） */
+  group?: string
+  /** 按对象分事项后的并发上限 */
+  parallel?: number
+  /** 该规则同时领取上限 */
+  maxActive?: number
+  /** 同一事项接着上一轮的会话 */
+  resume?: boolean
+  /** always / needed / never */
+  tell?: string
+  /** 回执里允许发的事件 */
+  emits?: { source: string; types: string[] }
+  /** 卡片/通知只发到这些通道 */
+  channels?: string[]
+}
+
+/** 托管在别处的定时任务（中台不启动，只列出；可回问） */
+export interface AutoloopElsewhereDef {
+  name: string
+  source: string
+  to: string
+  cron: string
+  where?: string
+  model?: string
+  effort?: string
+  cwd?: string
+  skill?: string
+  prompt?: string
+}
+
+/** rules.json 全文（可视化编排的编辑对象） */
+export interface AutoloopRules {
+  timezone?: string
+  askFirst?: string[]
+  sources: Record<string, AutoloopSourceDef>
+  agents: Record<string, AutoloopAgentDef>
+  channels?: Record<string, AutoloopChannelDef>
+  defaultChannels?: string[]
+  rules: AutoloopRuleDef[]
+  elsewhere?: AutoloopElsewhereDef[]
+}
+
+/** 规则文件读写结果 */
+export interface SuperRulesResult {
+  ok: boolean
+  /** 文件绝对路径 */
+  path: string
+  rules?: AutoloopRules
+  /** 读取/解析/校验失败原因（人话） */
+  error?: string
+  /** 保存时生成的备份路径 */
+  backupPath?: string
+}
+
+/** 一轮的来龙去脉时间线（agent-autoloop why） */
+export interface SuperWhyLine {
+  at: number | null
+  text: string
+}
+
+/** Super-Agent 动作统一结果 */
+export interface SuperActionResult {
+  ok: boolean
+  error?: string
+  message?: string
+}
+
+/** Super-Agent 板块连接配置（随 save-state 持久化，密钥落 DPAPI 加密的 config.json） */
+export interface SuperAgentSettings {
+  enabled: boolean
+  /** 中台地址；空 = 从本机 ~/.agent-autoloop/config.json 自动发现 */
+  url: string
+  /** 本人（owner）密钥；为空则只读兜底、无法拍板 */
+  ownerKey: string
+  /** 轮询间隔（秒，5–120） */
+  pollMs: number
+}
+
 /** preload 通过 contextBridge 暴露给渲染进程的 API */
 export interface IslandBridgeApi {
   getRuntimeInfo: () => Promise<RuntimeInfo>
@@ -980,6 +1340,34 @@ export interface IslandBridgeApi {
   onReveal: (cb: () => void) => () => void
   /** 退出应用 */
   quitApp: () => void
+  // ===== Super-Agent（后台自主循环：监控 + 拍板）=====
+  /** 拉取当前快照（也用于手动刷新） */
+  superSnapshot: () => Promise<SuperAgentSnapshot>
+  /** 快照变化推送（主进程事件驱动，渲染层零轮询） */
+  onSuperSnapshot: (cb: (snap: SuperAgentSnapshot) => void) => () => void
+  /** 回答待拍板卡片：choice=选项下标，或 text=自由回答 */
+  superAnswer: (provider: string, cardId: number, choice?: number, text?: string) => Promise<SuperActionResult>
+  /** 结案一张卡片（无需决定） */
+  superResolve: (provider: string, cardId: number, reason: string) => Promise<SuperActionResult>
+  /** 停掉进行中的一轮 */
+  superStopRun: (provider: string, runId: number) => Promise<SuperActionResult>
+  /** 规则动作：暂停/恢复/立即运行（run 会触发真实 Agent 执行，渲染层须二次确认） */
+  superRuleAction: (provider: string, rule: string, action: 'pause' | 'resume' | 'run', opts?: { reason?: string }) => Promise<SuperActionResult>
+  /** 补跑：把暂停期间跳过、尚未补跑的事件原样交给这条规则（since = 那次暂停的起点） */
+  superRuleReplay: (provider: string, rule: string, since: string) => Promise<SuperActionResult>
+  /** 历史分页：加载更早的轮次（中台一次给 60 轮，首页之外按 nextBefore 往前翻） */
+  superHistoryMore: (provider: string) => Promise<{ ok: boolean; items?: SuperHistoryItem[]; nextBefore?: number | null; error?: string }>
+  /** 一轮的来龙去脉时间线 */
+  superWhy: (provider: string, runId: number) => Promise<{ ok: boolean; lines?: SuperWhyLine[]; error?: string }>
+  // ===== 可视化编排（读写 rules.json，官方 check 校验）=====
+  /** 读规则文件（本机中台；远程中台不支持文件编辑） */
+  superRulesRead: () => Promise<SuperRulesResult>
+  /** 用官方 `agent-autoloop check` 校验一份草稿（不碰运行中的中台） */
+  superRulesValidate: (json: string) => Promise<{ ok: boolean; error?: string }>
+  /** 保存规则（写前自动 check + 备份原文件；几秒内中台自动生效） */
+  superRulesSave: (json: string) => Promise<SuperRulesResult>
+  /** 新建一份最小规则模板（拒绝覆盖已存在的文件） */
+  superRulesCreate: () => Promise<SuperRulesResult>
   // 配置持久化
   loadState: () => Promise<Record<string, unknown> | null>
   saveState: (state: Record<string, unknown>) => void
