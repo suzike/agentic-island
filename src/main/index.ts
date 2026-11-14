@@ -115,13 +115,17 @@ const bridge = new BridgeServer(
 const codexTail = new CodexTail(store, sessionChanges.summary.bind(sessionChanges), undefined, { isVerification })
 // Super-Agent：后台自主循环（agent-autoloop）的监控与拍板。懒启动——板块未启用时零轮询零请求。
 // fetch 走 Node 全局（中台在本机/局域网，系统代理通常不回环，net.fetch 反而连不上 127.0.0.1）。
-const superStore = new SuperAgentStore()
-const autoloop = new AutoloopProvider({
-  fetchImpl: (url, init) => globalThis.fetch(url, init),
-  spawnImpl: (args) => new Promise((resolve) => {
+// Autoloop CLI 启动器：优先用安装目录的绝对路径。
+// 用户级 PATH 是安装时写的，已在运行的岛（以及由 explorer 启动的进程）拿不到新 PATH，
+// 只按命令名 spawn 会失败；安装目录是确定的，直接用它。
+const autoloopCli = (args: string[]): Promise<{ code: number; stdout: string; stderr: string }> => {
+  const home = process.env.AGENT_AUTOLOOP_HOME || join(homedir(), '.agent-autoloop')
+  const binDir = join(home, 'app', 'bin')
+  const abs = process.platform === 'win32' ? join(binDir, 'agent-autoloop.cmd') : join(binDir, 'agent-autoloop')
+  const command = existsSync(abs) ? abs : 'agent-autoloop'
+  return new Promise((resolve) => {
     try {
-      // Windows npm 全局安装的 CLI 是 .cmd 垫片，必须走 shell；args 只会是简单 token，无注入面
-      const child = spawn('agent-autoloop', args, { shell: process.platform === 'win32', windowsHide: true })
+      const child = spawn(command, args, { shell: process.platform === 'win32', windowsHide: true })
       let stdout = ''
       let stderr = ''
       child.stdout?.on('data', (c) => { stdout += c })
@@ -132,6 +136,12 @@ const autoloop = new AutoloopProvider({
       resolve({ code: -1, stdout: '', stderr: 'spawn 抛出异常' })
     }
   })
+}
+
+const superStore = new SuperAgentStore()
+const autoloop = new AutoloopProvider({
+  fetchImpl: (url, init) => globalThis.fetch(url, init),
+  spawnImpl: autoloopCli
 })
 // 演示实例（docs:capture / 对比度审计 / 开发预览）：演示 provider **顶替**真实拉取（同 id，动作也走演示）
 if (process.env.AIISLAND_DEMO_SUPER === '1') {
@@ -180,19 +190,7 @@ function getRulesStore(): AutoloopRulesStore {
   rulesStore = new AutoloopRulesStore({
     homeDir: home,
     skipCheck: demo,
-    spawnImpl: (args) => new Promise((resolve) => {
-      try {
-        const child = spawn('agent-autoloop', args, { shell: process.platform === 'win32', windowsHide: true })
-        let stdout = ''
-        let stderr = ''
-        child.stdout?.on('data', (c) => { stdout += c })
-        child.stderr?.on('data', (c) => { stderr += c })
-        child.on('error', () => resolve({ code: -1, stdout, stderr: stderr || 'spawn 失败（未安装？）' }))
-        child.on('close', (code) => resolve({ code: code ?? -1, stdout: stdout.slice(0, 200_000), stderr: stderr.slice(0, 20_000) }))
-      } catch {
-        resolve({ code: -1, stdout: '', stderr: 'spawn 抛出异常' })
-      }
-    })
+    spawnImpl: autoloopCli
   })
   return rulesStore
 }
