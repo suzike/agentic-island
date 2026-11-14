@@ -24,6 +24,15 @@ export interface TerminalCwdEntry {
   cwd?: string
 }
 
+/** 历史按会话分组：同一标签页（会话）的记录聚在一起，便于整组查看与批量删除。 */
+export interface TerminalHistoryGroup {
+  key: string
+  sessionId?: string
+  sessionName: string
+  latestTs: number
+  entries: TerminalHistoryEntry[]
+}
+
 export const TERMINAL_COMMANDS: TerminalCommandPreset[] = [
   { id: 'location', group: '项目', label: '当前位置', command: 'Get-Location', description: '显示当前工作目录' },
   { id: 'files', group: '项目', label: '目录详情', command: 'Get-ChildItem -Force', description: '列出包含隐藏项的目录内容' },
@@ -148,16 +157,83 @@ export function buildTerminalHandoffPrompt(input: { cwd?: string; history: Termi
   ].filter(Boolean).join('\n\n')
 }
 
-/** 只采集普通可见输入；控制键和方向键不会污染历史。 */
+/** 按会话分组（最近使用在前），组内保持最新在前；未知会话名兜底为「已关闭会话」。 */
+export function groupTerminalHistory(entries: TerminalHistoryEntry[]): TerminalHistoryGroup[] {
+  const groups = new Map<string, TerminalHistoryGroup>()
+  for (const entry of entries) {
+    const key = entry.sessionId || entry.sessionName || 'unknown'
+    const group = groups.get(key)
+    if (group) {
+      group.entries.push(entry)
+      group.latestTs = Math.max(group.latestTs, entry.ts)
+    } else {
+      groups.set(key, { key, sessionId: entry.sessionId, sessionName: entry.sessionName || '已关闭会话', latestTs: entry.ts, entries: [entry] })
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.latestTs - a.latestTs)
+}
+
+/** 按 id 删除历史项；未命中的 id（已被删/会话已回收）直接忽略，不产生空档报错。 */
+export function dropTerminalHistory(entries: TerminalHistoryEntry[], ids: Iterable<number>): TerminalHistoryEntry[] {
+  const remove = new Set(ids)
+  return remove.size ? entries.filter((entry) => !remove.has(entry.id)) : entries
+}
+
+/**
+ * 从 index 处的 ESC 起跳过一整条转义序列，返回最后被消耗的字符下标。
+ * 鼠标上报（ESC [ < … M）、焦点上报（ESC [ I / O）、括号粘贴（ESC [ 200~ … 201~）、
+ * OSC 标题（ESC ] … BEL/ST）都属于「终端协议」而不是用户输入；只丢 ESC 会把剩余字节
+ * 当成命令记进历史（历史里出现 `[<35;8;30M你好` 这类脏数据的根因）。
+ */
+function readTerminalEscape(data: string, index: number): { end: number; resets: boolean } {
+  const next = data[index + 1]
+  if (next === undefined) return { end: index, resets: true } // 单独 ESC 在 PSReadLine 里就是清空当前行
+  if (next === '[') {
+    let start = index + 2
+    if (data[start] === '[') start += 1 // ESC[[A（F1-F4）：第二个 [ 不是终止符
+    for (let i = start; i < data.length; i++) {
+      const code = data.charCodeAt(i)
+      if (code < 0x40 || code > 0x7e) continue
+      const body = data.slice(start, i)
+      const final = data[i]
+      // X10 鼠标上报（ESC [ M + 3 字节）后面跟的是坐标原始字节，不能当输入
+      if (final === 'M' && !body) return { end: Math.min(i + 3, data.length - 1), resets: false }
+      // 只把光标/编辑键（方向、Home/End、Delete、翻页…）视为「改了输入」；
+      // 鼠标、焦点、粘贴标记、光标可见性与 DSR 都只是协议噪声，不能清掉正在键入的命令。
+      const editKey = /^[ABCHDFZ]$/.test(final) || (final === '~' && !/^20[01]$/.test(body.split(';')[0]))
+      return { end: i, resets: editKey }
+    }
+    return { end: data.length - 1, resets: true } // 序列跨 chunk 被截断：宁可漏记，不可写脏数据
+  }
+  if (next === ']') {
+    for (let i = index + 2; i < data.length; i++) {
+      if (data[i] === '\x07') return { end: i, resets: false }
+      if (data[i] === '\x1b' && data[i + 1] === '\\') return { end: i + 1, resets: false }
+    }
+    return { end: data.length - 1, resets: true }
+  }
+  // SS3（ESC O + 一个字符，F1-F4/应用模式方向键）与双字节字符集指定：都要吃掉后续字符
+  if (next === 'O' || (next >= ' ' && next <= '/')) return { end: Math.min(index + 2, data.length - 1), resets: true }
+  return { end: index + 1, resets: true } // Alt+键组合
+}
+
+/** 只采集普通可见输入；控制键、方向键与鼠标/焦点上报等终端协议序列不会污染历史。 */
 export function consumeTerminalInput(current: string, data: string): { buffer: string; submitted?: string } {
   let buffer = current
-  for (const ch of data) {
+  for (let i = 0; i < data.length; i++) {
+    const ch = data[i]
+    if (ch === '\x1b') {
+      const escape = readTerminalEscape(data, i)
+      if (escape.resets) buffer = ''
+      i = escape.end
+      continue
+    }
     if (ch === '\r' || ch === '\n') {
       const submitted = buffer.trim()
       return { buffer: '', submitted: submitted || undefined }
     }
     if (ch === '\x7f' || ch === '\b') { buffer = buffer.slice(0, -1); continue }
-    if (ch === '\x03' || ch === '\x1b') { buffer = ''; continue }
+    if (ch === '\x03') { buffer = ''; continue }
     if (ch >= ' ' && ch !== '\x7f') buffer += ch
   }
   return { buffer }

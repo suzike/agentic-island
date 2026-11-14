@@ -9,7 +9,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import {
-  ArrowDownToLine, Bot, Brain, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Clock,
+  ArrowDownToLine, Bot, Brain, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Clock,
   Clipboard, CornerDownRight, Eraser, Folder, FolderOpen, Gauge, History, ListChecks, Package,
   Pin, Play, Plus, RefreshCw, RotateCcw, Search, Settings2, ShieldAlert, Sparkles, Square, Star,
   Terminal as TerminalIcon, Ticket, Trash2, Wand2, X
@@ -17,7 +17,7 @@ import {
 import type { AgentVM } from '../types'
 import type { LlmRequestConfig, TerminalEnvironmentProfile, TerminalProjectInspection, TerminalSavedSession, TerminalShellProfile, TerminalStartupTask, TerminalWorkspaceGroup, TerminalWorkspaceSettings, TerminalWorkspaceState } from '../../../shared/protocol'
 import { island } from '../bridge'
-import { buildTerminalDiagnosisPrompt, buildTerminalHandoffPrompt, consumeTerminalInput, extractPowerShellCwd, extractTerminalExitCode, isDangerousTerminalCommand, quotePowerShellLiteral, setLocationCommand, summarizeTerminalOutput, terminalOutputTail, terminalProjectId, TERMINAL_COMMANDS, updateTerminalCwd, type TerminalCommandGroup, type TerminalHistoryEntry } from '../logic/terminal'
+import { buildTerminalDiagnosisPrompt, buildTerminalHandoffPrompt, consumeTerminalInput, dropTerminalHistory, extractPowerShellCwd, extractTerminalExitCode, groupTerminalHistory, isDangerousTerminalCommand, quotePowerShellLiteral, setLocationCommand, summarizeTerminalOutput, terminalOutputTail, terminalProjectId, TERMINAL_COMMANDS, updateTerminalCwd, type TerminalCommandGroup, type TerminalHistoryEntry } from '../logic/terminal'
 import { Badge, Button, Chip, IconButton, Input, Segmented, Slider, Switch } from '../ui/components'
 import { fadeScaleIn, overlayPop } from '../ui/motion'
 import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, SP, surface, text, transition } from '../ui/tokens'
@@ -316,6 +316,9 @@ export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { t
   const [envProfiles, setEnvProfiles] = useState<TerminalEnvironmentProfile[]>(workspaceCache.envProfiles)
   const [workspaceSettings, setWorkspaceSettings] = useState<TerminalWorkspaceSettings>(workspaceCache.settings)
   const [historyQuery, setHistoryQuery] = useState('')
+  const [historyManage, setHistoryManage] = useState(false)
+  const [historySelected, setHistorySelected] = useState<number[]>([])
+  const [historyConfirm, setHistoryConfirm] = useState<{ ids: number[]; label: string } | null>(null)
   const [inspection, setInspection] = useState<TerminalProjectInspection | null>(null)
   const [inspectionBusy, setInspectionBusy] = useState(false)
   const [aiBusy, setAiBusy] = useState(false)
@@ -344,6 +347,7 @@ export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { t
     const query = historyQuery.trim().toLowerCase()
     return query ? history.filter((entry) => `${entry.command} ${entry.cwd || ''} ${entry.sessionName}`.toLowerCase().includes(query)) : history
   }, [history, historyQuery])
+  const historyGroups = useMemo(() => groupTerminalHistory(filteredHistory), [filteredHistory])
   const outputSummary = useMemo(() => summarizeTerminalOutput(outputTails.get(active) || activeTab?.outputSnapshot || ''), [active, activeTab?.outputSnapshot, history.length])
 
   useEffect(() => {
@@ -431,6 +435,28 @@ export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { t
     historyStore.unshift(entry)
     if (historyStore.length > 500) historyStore.length = 500
     setHistory([...historyStore])
+  }, [])
+
+  /** 删除历史项：同步模块级 historyStore 与状态，工作区保存 effect 会把结果落盘。 */
+  const removeHistory = useCallback((ids: number[]): void => {
+    const next = dropTerminalHistory(historyStore, ids)
+    if (next === historyStore) { setHistoryConfirm(null); return }
+    historyStore.splice(0, historyStore.length, ...next)
+    setHistory([...historyStore])
+    setHistorySelected((current) => current.filter((id) => !ids.includes(id)))
+    setHistoryConfirm(null)
+  }, [])
+
+  const toggleHistoryGroup = useCallback((ids: number[]): void => {
+    setHistorySelected((current) => ids.every((id) => current.includes(id))
+      ? current.filter((id) => !ids.includes(id))
+      : [...new Set([...current, ...ids])])
+  }, [])
+
+  const exitHistoryManage = useCallback((): void => {
+    setHistoryManage(false)
+    setHistorySelected([])
+    setHistoryConfirm(null)
   }, [])
 
   useEffect(() => {
@@ -842,16 +868,50 @@ export function TerminalTab({ tall, full, agents, llm, onKeyboardActivity }: { t
               </>}
 
               {toolView === 'history' && <>
-                <Input value={historyQuery} onChange={setHistoryQuery} icon={Search} placeholder="按命令、目录或会话检索历史" />
-                <div className="ai-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 180, overflowY: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Input value={historyQuery} onChange={setHistoryQuery} icon={Search} placeholder="按命令、目录或会话检索历史" style={{ flex: 1, minWidth: 0 }} />
+                  <Button sm variant={historyManage ? 'tinted' : 'ghost'} icon={ListChecks} onClick={() => (historyManage ? exitHistoryManage() : setHistoryManage(true))} disabled={!history.length && !historyManage} title={historyManage ? '退出批量管理' : '按会话分组批量删除历史'}>{historyManage ? '完成' : '管理'}</Button>
+                </div>
+                {historyConfirm && <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 8, borderRadius: R.md, background: semBg(sem.danger, 0.14), color: sem.danger }}>
+                  <Trash2 size={14} style={{ flex: 'none' }} />
+                  <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700 }}>{historyConfirm.label}</span>
+                  <Button sm onClick={() => setHistoryConfirm(null)}>取消</Button>
+                  <Button sm variant="danger" onClick={() => removeHistory(historyConfirm.ids)}>确认删除</Button>
+                </div>}
+                <div className="ai-scroll" data-history-manage={historyManage ? 'true' : undefined} style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: historyManage ? 240 : 180, overflowY: 'auto' }}>
                   {filteredHistory.length === 0 && <span style={text.faint()}>没有匹配的命令记录</span>}
-                  {filteredHistory.slice(0, 80).map((entry) => <div key={entry.id} style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 30, padding: '3px 7px', borderRadius: R.sm, background: fill(1) }}>
+                  {historyManage ? historyGroups.map((group) => {
+                    const groupIds = group.entries.map((entry) => entry.id)
+                    const groupAllSelected = groupIds.every((id) => historySelected.includes(id))
+                    return <div key={group.key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '1px 4px' }}>
+                        <span title={`会话：${group.sessionName}`} style={{ flex: 1, minWidth: 0, ...text.dim(), color: ink(2), fontSize: 9.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.sessionName} · {group.entries.length} 条</span>
+                        <span className="hv" onClick={() => toggleHistoryGroup(groupIds)} style={{ ...text.faint(), fontSize: 9, color: accentText(), cursor: 'pointer' }}>{groupAllSelected ? '取消本组' : '全选本组'}</span>
+                        <span className="hv" onClick={() => setHistoryConfirm({ ids: groupIds, label: `删除「${group.sessionName}」的 ${group.entries.length} 条历史？` })} style={{ ...text.faint(), fontSize: 9, color: sem.danger, cursor: 'pointer' }}>删除本组</span>
+                      </div>
+                      {group.entries.map((entry) => {
+                        const selected = historySelected.includes(entry.id)
+                        return <div key={entry.id} data-history-row="true" onClick={() => setHistorySelected((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : [...current, entry.id])} style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 30, padding: '3px 7px', borderRadius: R.sm, background: selected ? semBg(accent(), 0.14) : fill(1), cursor: 'pointer' }}>
+                          <span style={{ width: 16, height: 16, flex: 'none', display: 'grid', placeItems: 'center', borderRadius: 5, background: selected ? accent() : fill(3), color: 'oklch(.18 0 0)' }}>{selected && <Check size={9} strokeWidth={3.5} />}</span>
+                          <span title={`${entry.cwd || entry.sessionName}\n${entry.command}`} style={{ flex: 1, minWidth: 0, ...text.mono(10), color: ink(1), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.command}</span>
+                          {entry.durationMs !== undefined && <span style={{ ...text.faint(), fontSize: 9 }}>{entry.durationMs < 1000 ? `${entry.durationMs}ms` : `${(entry.durationMs / 1000).toFixed(1)}s`}</span>}
+                        </div>
+                      })}
+                    </div>
+                  }) : filteredHistory.slice(0, 80).map((entry) => <div key={entry.id} style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 30, padding: '3px 7px', borderRadius: R.sm, background: fill(1) }}>
                     <span style={{ width: 6, height: 6, borderRadius: 999, background: entry.exitCode === undefined ? ink(3) : entry.exitCode === 0 ? sem.calm : sem.danger, flex: 'none' }} />
                     <span onClick={() => runCommand(entry.command)} title={`${entry.cwd || entry.sessionName}\n${entry.command}`} style={{ flex: 1, minWidth: 0, ...text.mono(10), color: ink(1), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{entry.command}</span>
                     {entry.durationMs !== undefined && <span style={{ ...text.faint(), fontSize: 9 }}>{entry.durationMs < 1000 ? `${entry.durationMs}ms` : `${(entry.durationMs / 1000).toFixed(1)}s`}</span>}
                     <IconButton icon={Star} size={23} active={favorites.includes(entry.command)} color={sem.warn} onClick={() => toggleFavorite(entry.command)} title="收藏命令" />
                   </div>)}
                 </div>
+                {historyManage && <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ ...text.faint(), fontSize: 9 }}>已选 {historySelected.length} / {filteredHistory.length}</span>
+                  <span style={{ flex: 1 }} />
+                  <Button sm onClick={() => setHistorySelected(filteredHistory.map((entry) => entry.id))} disabled={!filteredHistory.length || filteredHistory.every((entry) => historySelected.includes(entry.id))}>全选筛选</Button>
+                  <Button sm onClick={() => setHistorySelected([])} disabled={!historySelected.length}>取消选择</Button>
+                  <Button sm variant="danger" icon={Trash2} onClick={() => setHistoryConfirm({ ids: historySelected, label: `删除选中的 ${historySelected.length} 条历史？` })} disabled={!historySelected.length}>删除</Button>
+                </div>}
               </>}
 
               {toolView === 'favorites' && <div className="ai-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 180, overflowY: 'auto' }}>

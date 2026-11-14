@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { POWERSHELL_BOOTSTRAP } from '../src/main/term-pty.ts'
-import { buildTerminalDiagnosisPrompt, buildTerminalHandoffPrompt, consumeTerminalInput, extractPowerShellCwd, extractTerminalExitCode, isDangerousTerminalCommand, quotePowerShellLiteral, setLocationCommand, stripTerminalAnsi, summarizeTerminalOutput, terminalOutputTail, terminalProjectId, TERMINAL_COMMANDS, updateTerminalCwd } from '../src/renderer/src/logic/terminal.ts'
+import { buildTerminalDiagnosisPrompt, buildTerminalHandoffPrompt, consumeTerminalInput, dropTerminalHistory, extractPowerShellCwd, extractTerminalExitCode, groupTerminalHistory, isDangerousTerminalCommand, quotePowerShellLiteral, setLocationCommand, stripTerminalAnsi, summarizeTerminalOutput, terminalOutputTail, terminalProjectId, TERMINAL_COMMANDS, updateTerminalCwd } from '../src/renderer/src/logic/terminal.ts'
 
 assert.equal(quotePowerShellLiteral("E:\\O'Brien\\repo"), "'E:\\O''Brien\\repo'")
 assert.equal(setLocationCommand(' E:\\work\\repo '), "Set-Location -LiteralPath 'E:\\work\\repo'")
@@ -29,11 +29,37 @@ assert.equal(input.submitted, 'git status')
 assert.equal(input.buffer, '')
 
 assert.equal(consumeTerminalInput('secret', '\x03').buffer, '')
+// 鼠标/焦点上报、括号粘贴与 OSC 标题属于终端协议，不得把残余字节记成命令
+assert.equal(consumeTerminalInput('git status', '\x1b[<35;8;30M').buffer, 'git status')
+assert.equal(consumeTerminalInput('', '\x1b[<35;8;30M你好\r').submitted, '你好')
+assert.equal(consumeTerminalInput('', '\x1b[I').buffer, '')
+assert.equal(consumeTerminalInput('', '\x1b[200~npm test\x1b[201~').buffer, 'npm test')
+assert.equal(consumeTerminalInput('', '\x1b]0;Windows PowerShell\x07dir').buffer, 'dir')
+assert.equal(consumeTerminalInput('', '\x1bOP\x1b[[A').buffer, '', 'F1-F4 的 SS3/CSI 形式不得留下尾部字符')
+assert.equal(consumeTerminalInput('', '\x1b[Mabc').buffer, '', 'X10 鼠标上报的坐标字节不得进历史')
+// 方向键/Home 等编辑键仍按旧语义清空缓冲，避免把改过的命令按旧文本记进历史
+assert.equal(consumeTerminalInput('stale', '\x1b[A').buffer, '')
+assert.equal(consumeTerminalInput('stale', '\x1b[1;5C').buffer, '')
 assert.equal(stripTerminalAnsi('\x1b[31m失败\x1b[0m\r\n'), '失败\n')
 assert.equal(terminalOutputTail('a', '\x1b[32mb\x1b[0m', 2_000), 'ab')
 assert.equal(terminalProjectId('E:\\Work\\Repo\\'), 'e:\\work\\repo')
 assert.match(buildTerminalDiagnosisPrompt({ command: 'npm test', output: 'failed' }), /不得自动执行/)
 assert.match(buildTerminalHandoffPrompt({ history: [{ id: 1, sessionId: 's', sessionName: 'S', command: 'npm test', ts: 1 }], output: 'ok' }), /npm test/)
+
+// 历史分组：同一会话聚合、最近的会话在前、组内保持最新一条在前
+const historyEntries = [
+  { id: 3, sessionId: 's2', sessionName: 'PowerShell 2', command: 'npm run build', ts: 300 },
+  { id: 2, sessionId: 's1', sessionName: 'PowerShell 1', command: 'git status', ts: 200 },
+  { id: 1, sessionId: 's2', sessionName: 'PowerShell 2', command: 'npm test', ts: 100 }
+]
+const historyGroups = groupTerminalHistory(historyEntries)
+assert.equal(historyGroups.length, 2)
+assert.equal(historyGroups[0].sessionId, 's2')
+assert.deepEqual(historyGroups[0].entries.map((entry) => entry.id), [3, 1])
+assert.equal(historyGroups[1].sessionName, 'PowerShell 1')
+assert.equal(dropTerminalHistory(historyEntries, [1, 3]).map((entry) => entry.id).join(','), '2')
+assert.equal(dropTerminalHistory(historyEntries, []), historyEntries, '没有要删的 id 时必须保持原引用')
+assert.equal(dropTerminalHistory(historyEntries, [99]).length, 3, '未知 id 忽略即可')
 assert.equal(isDangerousTerminalCommand('git reset --hard HEAD~1'), true)
 assert.equal(isDangerousTerminalCommand('git status --short'), false)
 const summary = summarizeTerminalOutput('build\nbuild\nbuild\n\n\nok')
