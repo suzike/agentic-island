@@ -19,7 +19,8 @@ import type { SuperDecision, SuperFactPulse, SuperPipeline as PipelineCounts, Su
 import { Ico } from '../ui/icons'
 import { accentText, accent, fill, gradient, hairline, ink, R, sem, semBg } from '../ui/tokens'
 
-type PipeSeg = 'decide' | 'work' | 'rules' | 'recent'
+/** 流水线节点跳转目标：阶段 key 由 SuperTab 决定去哪个视图（来源/规则进编排，运行面进分段） */
+type PipeStageKey = 'source' | 'rule' | 'queue' | 'run' | 'report' | 'decide' | 'timer'
 
 /** 一条规则的实时轨道 */
 interface RuleTrack {
@@ -50,7 +51,7 @@ interface SuperPipelineProps {
   demo?: boolean
   /** 岛是否可见：不可见时停掉全部动画 */
   animate: boolean
-  onJump: (seg: PipeSeg) => void
+  onJump: (seg: PipeStageKey) => void
 }
 
 /** 真实事实 type → 系统管道上的阶段 */
@@ -82,14 +83,14 @@ const FACT_LABEL: Record<string, string> = {
   tick: '定时/复查到期'
 }
 
-const stageOf = (p: PipelineCounts): { key: string; label: string; icon: typeof Ico.rss; count: number; seg: PipeSeg; tone: 'idle' | 'live' | 'warn' }[] => [
-  { key: 'source', label: '来源', icon: Ico.rss, count: p.sources, seg: 'rules', tone: p.sources > 0 ? 'live' : 'idle' },
-  { key: 'rule', label: '规则', icon: Ico.magic, count: p.rules, seg: 'rules', tone: p.rules > 0 ? 'live' : 'idle' },
-  { key: 'queue', label: '排队', icon: Ico.history, count: p.queued + p.retrying, seg: 'work', tone: p.queued + p.retrying > 0 ? 'live' : 'idle' },
-  { key: 'run', label: '执行', icon: Ico.running, count: p.running, seg: 'work', tone: p.running > 0 ? 'live' : 'idle' },
-  { key: 'report', label: '回执', icon: Ico.send, count: p.doneToday, seg: 'recent', tone: p.doneToday > 0 ? 'live' : 'idle' },
+const stageOf = (p: PipelineCounts): { key: string; label: string; icon: typeof Ico.rss; count: number; seg: PipeStageKey; tone: 'idle' | 'live' | 'warn' }[] => [
+  { key: 'source', label: '来源', icon: Ico.rss, count: p.sources, seg: 'rule', tone: p.sources > 0 ? 'live' : 'idle' },
+  { key: 'rule', label: '规则', icon: Ico.magic, count: p.rules, seg: 'rule', tone: p.rules > 0 ? 'live' : 'idle' },
+  { key: 'queue', label: '排队', icon: Ico.history, count: p.queued + p.retrying, seg: 'run', tone: p.queued + p.retrying > 0 ? 'live' : 'idle' },
+  { key: 'run', label: '执行', icon: Ico.running, count: p.running, seg: 'run', tone: p.running > 0 ? 'live' : 'idle' },
+  { key: 'report', label: '回执', icon: Ico.send, count: p.doneToday, seg: 'report', tone: p.doneToday > 0 ? 'live' : 'idle' },
   { key: 'decide', label: '拍板', icon: Ico.approval, count: p.attention, seg: 'decide', tone: p.attention > 0 ? 'warn' : 'idle' },
-  { key: 'timer', label: '复查', icon: Ico.timer, count: p.timers, seg: 'recent', tone: p.timers > 0 ? 'live' : 'idle' }
+  { key: 'timer', label: '复查', icon: Ico.timer, count: p.timers, seg: 'report', tone: p.timers > 0 ? 'live' : 'idle' }
 ]
 
 const fmtClock = (ts: number): string => {
@@ -258,7 +259,7 @@ export function SuperPipeline({ pipeline, work, decisions, timers, rules, facts,
               type="button"
               className="sp-node"
               title={`${s.label} · ${s.count}${s.tone === 'warn' ? '（需要你）' : ''} — 点击查看`}
-              onClick={() => onJump(s.seg)}
+              onClick={() => onJump(s.key as PipeStageKey)}
               style={{
                 position: 'relative', flex: 1, minWidth: 0, border: 0, background: 'transparent',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
@@ -333,7 +334,7 @@ export function SuperPipeline({ pipeline, work, decisions, timers, rules, facts,
           {tracks.length > visibleTracks.length && (
             <button
               type="button"
-              onClick={() => onJump('rules')}
+              onClick={() => onJump('rule')}
               style={{ border: 0, background: 'transparent', color: ink(4), fontSize: 8.5, textAlign: 'left', cursor: 'pointer', padding: '1px 2px', fontFamily: 'inherit' }}
             >
               还有 {tracks.length - visibleTracks.length} 条规则 · 点开规则列表
@@ -370,7 +371,7 @@ function TrackRow({ t, animate, hit, hitKey, onJump }: {
   animate: boolean
   hit: boolean
   hitKey: number
-  onJump: (seg: PipeSeg) => void
+  onJump: (seg: PipeStageKey) => void
 }): React.JSX.Element {
   const runChips = t.works.slice(0, 3)
   const extra = t.works.length - runChips.length
@@ -405,7 +406,7 @@ function TrackRow({ t, animate, hit, hitKey, onJump }: {
       {/* 规则名 + Agent */}
       <button
         type="button"
-        onClick={() => onJump('rules')}
+        onClick={() => onJump('rule')}
         title={`${t.name}${t.agent ? ` · ${t.agent}` : ''}${t.paused ? ' · 已暂停' : ''}`}
         style={{
           border: 0, background: 'transparent', fontFamily: 'inherit', cursor: 'pointer', padding: 0, textAlign: 'left',

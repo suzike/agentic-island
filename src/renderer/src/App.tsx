@@ -245,8 +245,9 @@ export function App(): React.JSX.Element {
   // 截图工坊：截图目标由主进程随结果回传，不依赖取消后可能残留的渲染层 ref。
   const [shotStudio, setShotStudio] = useState<string | null>(null)
   const [shotStudioMode, setShotStudioMode] = useState<'image' | 'record'>('image')
-  // 循环分区：可视化编排工作台（读写 rules.json）
+  // 循环分区：可视化编排工作台（读写 rules.json）；nav 指定打开时落在哪个分组
   const [superStudioOpen, setSuperStudioOpen] = useState(false)
+  const [superStudioNav, setSuperStudioNav] = useState<'general' | 'sources' | 'agents' | 'channels' | 'rules' | 'json'>('rules')
   // 迷你条动态内容池：AI 每 10 分钟刷新 + GitHub 热门（内存态，重启重新拉）
   const [aiPools, setAiPools] = useState<Record<string, string[]>>({})
   const [ghItems, setGhItems] = useState<string[]>([])
@@ -2709,7 +2710,7 @@ export function App(): React.JSX.Element {
     { id: 'act:focus', title: (focusActive ? '退出' : '进入') + '专注模式', hint: '静默 25 分钟', icon: '🌙', group: '动作', keywords: 'focus zhuanzhu', run: () => toggleFocus() },
     { id: 'act:pomo', title: (pomo.phase === 'idle' ? '开始' : '停止') + '番茄钟', hint: '专注 25 / 小憩 5,自动循环', icon: '🍅', group: '动作', keywords: 'pomodoro fanqiezhong', run: () => setPomo((s) => (s.phase === 'idle' ? startWork(pomoCfg, Date.now()) : POMO_IDLE)) },
     { id: 'act:bar', title: (settings.ambientBar ? '关闭' : '开启') + '常驻迷你条', hint: '底部迷你状态条', icon: '〰', group: '动作', keywords: 'bar miniao', run: () => toggleSetting('ambientBar') },
-    { id: 'act:super-studio', title: '可视化编排后台循环', hint: '事件来源 / 规则回路 / Agent / 通道', icon: '⌘', group: '动作', keywords: 'loop autoloop rules 编排 规则 回路 agent', run: () => { setTab('loop'); setRevealed(true); setSuperStudioOpen(true) } },
+    { id: 'act:super-studio', title: '可视化编排后台循环', hint: '事件来源 / 规则回路 / Agent / 通道', icon: '⌘', group: '动作', keywords: 'loop autoloop rules 编排 规则 回路 agent', run: () => { setTab('loop'); setRevealed(true); setSuperStudioNav('rules'); setSuperStudioOpen(true) } },
     { id: 'act:size', title: (settings.largeSize ? '切回标准尺寸' : '切到大尺寸工作台'), hint: '面板大小', icon: '⤢', group: '动作', keywords: 'size chicun', run: () => toggleSetting('largeSize') },
     { id: 'act:full', title: (fullscreen ? '退出全屏' : '全屏模式'), hint: '铺满当前显示器', icon: '⛶', group: '动作', keywords: 'fullscreen quanping', run: () => setFullscreen((v) => !v) },
     { id: 'act:shot', title: '截图工坊', hint: '无损截图 + 高级边框美化', icon: '📸', group: '动作', keywords: 'screenshot jietu gongfang', run: () => island.triggerScreenshot('studio') },
@@ -3166,7 +3167,10 @@ export function App(): React.JSX.Element {
                 snap={superSnap}
                 cfg={superCfg}
                 onCfgChange={setSuperCfg}
-                onOpenStudio={() => setSuperStudioOpen(true)}
+                onOpenStudio={(nav) => {
+                  setSuperStudioNav(nav || 'rules')
+                  setSuperStudioOpen(true)
+                }}
                 // 岛收起时停掉流水线动画：透明置顶窗口里持续重绘会拖慢整机指针（实测踩过）
                 active={isShown}
               />
@@ -3244,6 +3248,7 @@ export function App(): React.JSX.Element {
       )}
       {superStudioOpen && (
         <SuperConfigStudio
+          initialNav={superStudioNav}
           onClose={() => setSuperStudioOpen(false)}
           onSaved={() => { island.superSnapshot().then(setSuperSnap).catch(() => {}) }}
         />

@@ -15,12 +15,14 @@ import { Button, EmptyState, Input } from '../ui/components'
 import { Ico } from '../ui/icons'
 import { accentText, accent, fill, FS, gradient, hairline, ink, R, sem, semBg, surface, text } from '../ui/tokens'
 
-type StudioNav = 'general' | 'sources' | 'agents' | 'channels' | 'rules' | 'json'
+export type StudioNav = 'general' | 'sources' | 'agents' | 'channels' | 'rules' | 'json'
 
 interface SuperConfigStudioProps {
   onClose: () => void
   /** 保存成功后通知外层刷新快照（中台几秒内热载） */
   onSaved?: () => void
+  /** 打开时落在哪个分组（流水线节点跳转会用到） */
+  initialNav?: StudioNav
 }
 
 const NAV: { key: StudioNav; label: string; icon: typeof Ico.plan; desc: string }[] = [
@@ -102,8 +104,8 @@ function TagInput({ values, onChange, placeholder }: { values: string[]; onChang
   )
 }
 
-export function SuperConfigStudio({ onClose, onSaved }: SuperConfigStudioProps): React.JSX.Element {
-  const [nav, setNav] = useState<StudioNav>('rules')
+export function SuperConfigStudio({ onClose, onSaved, initialNav }: SuperConfigStudioProps): React.JSX.Element {
+  const [nav, setNav] = useState<StudioNav>(initialNav || 'rules')
   const [draft, setDraft] = useState<AutoloopRules | null>(null)
   const [path, setPath] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)

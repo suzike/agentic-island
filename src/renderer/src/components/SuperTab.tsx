@@ -21,8 +21,8 @@ interface SuperTabProps {
   snap: SuperAgentSnapshot | null
   cfg: SuperAgentSettings
   onCfgChange: (cfg: SuperAgentSettings) => void
-  /** 打开可视化编排工作台（读写 rules.json） */
-  onOpenStudio: () => void
+  /** 打开可视化编排工作台（读写 rules.json）；可指定落在哪个分组 */
+  onOpenStudio: (nav?: 'general' | 'sources' | 'agents' | 'channels' | 'rules' | 'json') => void
   /** 岛面板当前是否可见：不可见时停掉流水线的全部无限动画（透明置顶窗口持续重绘会拖慢指针） */
   active: boolean
 }
@@ -160,7 +160,7 @@ export function SuperTab({ snap, cfg, onCfgChange, onOpenStudio, active }: Super
           <ConnectionChip key={p?.id || 'none'} provider={p} enabled={cfg.enabled} onConfigure={() => setCfgOpen((v) => !v)} />
         ))}
         <span style={{ flex: 1 }} />
-        <Button sm icon={Settings2} variant="primary" onClick={onOpenStudio} title="可视化编辑事件来源 / 规则回路 / Agent / 通道（写 rules.json，官方 check 校验）">可视化编排</Button>
+        <Button sm icon={Settings2} variant="primary" onClick={() => onOpenStudio()} title="可视化编辑事件来源 / 规则回路 / Agent / 通道（写 rules.json，官方 check 校验）">可视化编排</Button>
         <Button sm icon={RefreshCw} disabled={busy.refresh} onClick={() => { setBusy((b) => ({ ...b, refresh: true })); island.superSnapshot().catch(() => {}).finally(() => setBusy((b) => ({ ...b, refresh: false }))) }}>刷新</Button>
       </div>
 
@@ -178,7 +178,14 @@ export function SuperTab({ snap, cfg, onCfgChange, onOpenStudio, active }: Super
         live={anyLive}
         demo={snap?.providers.some((p) => p.url === "demo://agent-autoloop")}
         animate={active}
-        onJump={setSeg}
+        onJump={(stageKey) => {
+          // 来源/规则属于「配置面」：打开编排对应分组（规则分段里没有来源信息，跳到那里是错的）
+          if (stageKey === 'source') { onOpenStudio('sources'); return }
+          if (stageKey === 'rule') { onOpenStudio('rules'); return }
+          if (stageKey === 'report' || stageKey === 'timer') { setSeg('recent'); return }
+          if (stageKey === 'queue' || stageKey === 'run') { setSeg('work'); return }
+          setSeg('decide')
+        }}
       />
 
       {toast && (
@@ -189,7 +196,7 @@ export function SuperTab({ snap, cfg, onCfgChange, onOpenStudio, active }: Super
 
       {/* 连接配置（未连上或点"配置"时展开；密钥随 save-state 落 DPAPI 加密的 config.json） */}
       {(cfgOpen || notSetUp) && (
-        <ConfigCard cfg={cfg} onChange={onCfgChange} detected={provider?.hubDetected} discoveredUrl={!cfg.url.trim() ? provider?.url : null} onDone={() => setCfgOpen(false)} onOpenStudio={onOpenStudio} />
+        <ConfigCard cfg={cfg} onChange={onCfgChange} detected={provider?.hubDetected} discoveredUrl={!cfg.url.trim() ? provider?.url : null} onDone={() => setCfgOpen(false)} onOpenStudio={() => onOpenStudio()} />
       )}
 
       {notSetUp && !provider?.hubDetected ? (

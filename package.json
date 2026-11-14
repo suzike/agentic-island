@@ -1,6 +1,6 @@
 {
   "name": "agentic-island",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "常驻 Windows 屏幕顶部的 AI 编码 Agent 状态监控、审批与协作面板",
   "main": "./out/main/index.js",
   "author": "Agentic-Island",
@@ -24,7 +24,8 @@
     "audit:screenshot": "node scripts/audit-screenshot-studio.mjs",
     "audit:acceptance": "node scripts/audit-acceptance-followup.mjs",
     "audit:installed": "node scripts/audit-installed-approval.mjs",
-    "audit:features": "node scripts/audit-feature-sweep.mjs"
+    "audit:features": "node scripts/audit-feature-sweep.mjs",
+    "audit:super": "node scripts/audit-super-jumps.mjs"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",
