@@ -212,14 +212,16 @@ try {
   // 改为轮询 loadState 直到目标主题真的读回来，再 reload。
   const persisted = await evaluate(`(async () => {
     const want = ${JSON.stringify(demoState.theme)};
+    let last = null;
     for (let i = 0; i < 60; i += 1) {
       const s = await window.island.loadState();
-      if (s && s.theme === want) return true;
+      if (s && s.theme === want) return { ok: true };
+      last = s ? { theme: s.theme, width: s.islandWidth, keys: Object.keys(s).length } : null;
       await new Promise((r) => setTimeout(r, 100));
     }
-    return false;
+    return { ok: false, last };
   })()`)
-  if (!persisted) throw new Error('演示状态未在 6s 内落盘（loadState 读不回目标主题）')
+  if (!persisted?.ok) throw new Error(`演示状态未在 6s 内落盘（loadState 读不回目标主题；最后读回 ${JSON.stringify(persisted?.last)}）`)
   await cdp.send('Page.reload', { ignoreCache: true })
   await sleep(1_200)
   await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true, bubbles: true })); true")

@@ -195,7 +195,9 @@ export function AmbientBar({ cfg, media, brief, pools, width, status, onMediaKey
     marginLeft: -R,
     clipPath: `path("${outlinePath}")`,
     '--ambient-accent': accent,
-    '--ambient-rotation': `${rotationSeconds}s`
+    '--ambient-rotation': `${rotationSeconds}s`,
+    // 宠物散步的横向行程：必须留出状态舱/导航占位，否则会被条的 overflow 裁掉
+    '--ambient-pet-travel': `${Math.max(0, barW - 260)}px`
   } as CSSProperties
 
   return (

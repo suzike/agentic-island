@@ -9,14 +9,14 @@
 在 Claude Code、Codex、本地终端、项目任务、知识资料和资讯之间，
 建立一条可观察、可审批、可执行、可复盘的桌面工作链路。
 
-[![Release v0.8.4](https://img.shields.io/badge/release-v0.8.4-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.8.4)
+[![Release v0.8.5](https://img.shields.io/badge/release-v0.8.5-e89a2e)](https://github.com/suzike/agentic-island/releases/tag/v0.8.5)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-241d3d?logo=windows&logoColor=f5b45c)
 ![Electron](https://img.shields.io/badge/Electron-39-241d3d?logo=electron&logoColor=f5b45c)
 ![React](https://img.shields.io/badge/React-19-241d3d?logo=react&logoColor=f5b45c)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-241d3d?logo=typescript&logoColor=f5b45c)
 [![License](https://img.shields.io/badge/license-MIT-e8862e)](LICENSE)
 
-<img src="screenshots/loop-v084.png" alt="Agentic-Island v0.8.4 · 循环分区：后台自主 Agent 循环的监控与拍板真实截图" width="880"/>
+<img src="screenshots/loop-v085.png" alt="Agentic-Island v0.8.5 · 循环分区：后台自主 Agent 循环的监控与拍板真实截图" width="880"/>
 
 </div>
 
@@ -35,15 +35,15 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 窗口常驻屏幕顶部，空闲时收起；需要审批、提醒或用户主动唤出时展开。打开网页、文件、文件夹、会议或原生文件对话框前，应用会主动收起并暂时取消最高层级，避免覆盖外部目标窗口。
 
-## v0.8.4 更新概览
+## v0.8.5 更新概览
 
-终端历史可以按会话分组批量清理，同时不再把终端协议序列误记成命令。
+修掉长时间运行后的整机鼠标卡顿：常驻迷你条与收起面板不再逐帧重绘透明置顶窗口。
 
-- **历史批量管理**：终端 › 命令工具 › 历史新增「管理」模式——按会话分组展示，支持「全选本组 / 删除本组」、跨组多选、「全选筛选结果」与批量删除。所有删除都要过行内二次确认，只清理命令历史，不关闭会话、不清空输出、不影响正在运行的命令；删除结果随工作区落盘。
-- **修掉历史里的脏记录**：xterm 的鼠标上报（`ESC[<…M`）、焦点上报（`ESC[I`）、括号粘贴标记、OSC 标题与 SS3 功能键等终端协议序列，此前只丢弃 ESC、把剩余字节当用户输入记进历史（历史里会出现 `[<35;8;30M你好` 这类记录）。现在完整跳过这些序列；方向键/Home 等编辑键仍保持「清空当前输入缓冲」的原语义。
-- **回归覆盖**：终端逻辑测试新增协议序列、分组与删除断言；`npm run audit:terminal` 增加真实 Electron 端到端——进入管理态 → 选中一条 → 二次确认 → 历史计数减一且终端会话保留。
-
-近期修复继续保留：「循环」分区常显与「可视化编排」主入口（0.8.1）、中台 CLI 按绝对路径解析（0.8.2）、流水线节点按语义跳转（0.8.3），以及 0.8.0 的完整循环分区能力。
+- **收起态真正停手**：面板收起此前只是移出屏幕 + 透明，CSS 动画与背景模糊仍在逐帧跑；现在收起时暂停面板内全部关键帧动画并关闭背景模糊，展开即恢复。
+- **迷你条动画改合成层**：网格位移、呼吸轨、霓虹脉冲与宠物散步不再使用 `background-position`、`filter`、`left` 等逐帧重绘/重排属性；状态脉冲与 Tab 待处理点也改为「静态阴影 + 只动 transform/opacity」。
+- **鼠标移动合并到帧**：全屏透明窗口转发的高频 `mousemove` 不再逐条做命中测试；收起态指针离开顶部时直接短路。
+- **剪贴板大图不再反复编码**：剪贴板里的截图未变化时只做小块指纹比对，不再每 1.5 秒重新 resize + PNG 编码。
+- 本次为纯性能修复，功能与界面不变；近期修复继续保留：终端历史分组清理（0.8.4）、流水线节点语义跳转（0.8.3）、中台 CLI 绝对路径（0.8.2）、「循环」分区常显（0.8.1），以及 0.8.0 的完整循环分区能力。
 
 ### 0.8.0 能力（继续保留）
 
@@ -59,7 +59,7 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 - **安全边界**：卡片文本按纯文本渲染（外部事件是不可信输入）、自由回答只经 HTTP JSON 体回传绝不拼命令行、密钥 DPAPI 加密、板块未启用时零轮询。
 - **协议经真机验证**：归一化字段对齐 agent-autoloop 实现（runs 编号、驼峰时间戳、usage 用量结构），离线测试与隔离真中台端到端双覆盖。
 
-完整验证：类型检查、53 个离线测试、生产构建、12 分区扫页、对比度（硬失败 0）、问答、终端（含历史分组管理端到端）、验收台、截图工坊、真实录屏导出与安装版审批闭环全部通过。
+完整验证：类型检查、53 个离线测试、生产构建、12 分区扫页、对比度（硬失败 0）、问答、终端（含历史分组管理端到端）、验收台、循环流水线跳转、截图工坊、真实录屏导出与安装版审批闭环全部通过。
 
 媒体能力的逐项对标（含仍明确没做的场景/来源模型、云分享、动态遮罩）见 [docs/MEDIA_TOOL_BENCHMARK.md](docs/MEDIA_TOOL_BENCHMARK.md)。
 
@@ -69,27 +69,27 @@ Agentic-Island 不是一个聊天窗口的桌面外壳。它解决 AI Agent 真�
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="screenshots/ask-v084.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
-<td width="50%" align="center"><img src="screenshots/shortcuts-v084.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
+<td width="50%" align="center"><img src="screenshots/ask-v085.png" alt="问答工作台"/><br/><b>问答</b><br/><sub>模型切换 · 会话分支 · 气泡追问 · 独立 RAG</sub></td>
+<td width="50%" align="center"><img src="screenshots/shortcuts-v085.png" alt="快捷工程工作流"/><br/><b>快捷</b><br/><sub>项目上下文 · 12 条工程工作流</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/todos-v084.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
-<td width="50%" align="center"><img src="screenshots/notes-v084.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
+<td width="50%" align="center"><img src="screenshots/todos-v085.png" alt="智能待办工作台"/><br/><b>待办</b><br/><sub>计划 · 看板 · 任务属性 · AI 执行辅助</sub></td>
+<td width="50%" align="center"><img src="screenshots/notes-v085.png" alt="灵感便签知识工作台"/><br/><b>灵感便签</b><br/><sub>Markdown · 双链 · 模板 · 知识工具</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/news-v084.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
-<td width="50%" align="center"><img src="screenshots/review-v084.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
+<td width="50%" align="center"><img src="screenshots/news-v085.png" alt="资讯情报工作台"/><br/><b>资讯</b><br/><sub>观察清单 · 信号处置 · 情报雷达</sub></td>
+<td width="50%" align="center"><img src="screenshots/review-v085.png" alt="每日复盘与工作洞察"/><br/><b>复盘</b><br/><sub>活动流水 · 日报周报 · 效率洞察</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="screenshots/loop-v084.png" alt="循环：后台自主 Agent 循环的监控与拍板"/><br/><b>循环</b><br/><sub>待拍板卡片 · SSE 实时 · 规则与用量 · why 时间线</sub></td>
-<td width="50%" align="center"><img src="screenshots/recording-v084.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
+<td width="50%" align="center"><img src="screenshots/loop-v085.png" alt="循环：后台自主 Agent 循环的监控与拍板"/><br/><b>循环</b><br/><sub>待拍板卡片 · SSE 实时 · 规则与用量 · why 时间线</sub></td>
+<td width="50%" align="center"><img src="screenshots/recording-v085.png" alt="专业录屏工坊"/><br/><b>录屏</b><br/><sub>原生清晰度 · 原始采集 · 导出期运镜/光晕/角标 · 自动剪空白</sub></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="screenshots/settings-v084.png" alt="设置与主题系统" width="70%"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
+<td colspan="2" align="center"><img src="screenshots/settings-v085.png" alt="设置与主题系统" width="70%"/><br/><b>设置</b><br/><sub>供应商隔离 · 连接诊断 · 多显示器 · 主题</sub></td>
 </tr>
 </table>
 
-<div align="center"><img src="screenshots/terminal-v084.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 历史分组清理 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
+<div align="center"><img src="screenshots/terminal-v085.png" alt="PowerShell ConPTY 可恢复开发工作区" width="880"/><br/><b>终端</b><br/><sub>现场恢复 · 历史分组清理 · 项目任务 · AI 诊断 · 隐私快照</sub></div>
 
 ## 功能全景
 
@@ -191,7 +191,7 @@ Electron 主进程掌握系统权限、网络、终端、文件对话框和持�
 前往 [GitHub Releases](https://github.com/suzike/agentic-island/releases/latest) 下载：
 
 ```text
-Agentic-Island-Setup-0.8.4.exe
+Agentic-Island-Setup-0.8.5.exe
 ```
 
 当前安装包未做商业代码签名，Windows SmartScreen 可能显示未知发布者。请仅从本仓库 Releases 下载并核对发布页中的 SHA-256。

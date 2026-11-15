@@ -1314,11 +1314,17 @@ export function App(): React.JSX.Element {
         setRevealed(false)
       }, delay)
     }
-    const onMove = (e: MouseEvent): void => {
+    const handleMove = (e: MouseEvent): void => {
       const compactRecording = !!document.querySelector('[data-recording-compact]')
       if (compactRecording) {
         const overRecordingControl = !!document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-recording-control]')
         setIgnore(!overRecordingControl)
+        return
+      }
+      // 收起态：岛只存在于顶部 44px 带，指针远离顶部时无需 elementFromPoint。
+      // 主窗口铺满工作区且转发鼠标事件，这里是"鼠标一动就卡"的最热路径。
+      if (!revealedRef.current && !forcedRef.current && !pendingRef.current && !overlayRef.current && e.clientY > 64) {
+        setIgnore(true)
         return
       }
       const cx = window.innerWidth / 2
@@ -1379,12 +1385,27 @@ export function App(): React.JSX.Element {
         if (!forcedRef.current && !pendingRef.current && !overlayRef.current) scheduleHide(400)
       }, 0)
     }
+    // 高频 mousemove 合并到下一帧：全屏透明窗口转发的事件密度远高于屏幕刷新率，
+    // 逐条做命中测试会把渲染主线程占满（鼠标移动时最明显）。只保留最新一条即可。
+    let moveRaf = 0
+    let pendingMove: MouseEvent | null = null
+    const onMove = (e: MouseEvent): void => {
+      pendingMove = e
+      if (moveRaf) return
+      moveRaf = requestAnimationFrame(() => {
+        moveRaf = 0
+        const ev = pendingMove
+        pendingMove = null
+        if (ev) handleMove(ev)
+      })
+    }
     window.addEventListener('mousemove', onMove)
     document.addEventListener('mouseleave', onLeave)
     document.addEventListener('focusin', onFocusIn)
     document.addEventListener('focusout', onFocusOut)
     return () => {
       clearHideTimer()
+      if (moveRaf) cancelAnimationFrame(moveRaf)
       window.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseleave', onLeave)
       document.removeEventListener('focusin', onFocusIn)
@@ -2757,6 +2778,7 @@ export function App(): React.JSX.Element {
         <div
           data-solid
           ref={panelRef}
+          className={isShown ? undefined : 'island-paused'}
           onMouseDownCapture={() => {
             lastClickRef.current = Date.now()
             // 点击必须取消之前排好的收起计时器，否则展开资讯/打开详情后会在 260ms 内被旧计时器收回。
@@ -2790,7 +2812,9 @@ export function App(): React.JSX.Element {
             // 材质三层：顶部极光氛围光（主色相）+ 右上副色相补光 + 玻璃底。
             // 精修：氛围光压低一档，让内容与底色重新拉开，不再整屏泛蓝。
             background: `radial-gradient(125% 60% at 50% 0%, ${accent(0.62, 0.08)} 0%, transparent 64%), radial-gradient(90% 42% at 88% 0%, oklch(calc(0.62 + var(--accent2-l-shift, 0)) var(--accent2-c) var(--th2) / 0.065) 0%, transparent 62%), oklch(var(--panel-l) var(--surface-c) var(--ths) / var(--glass-a))`,
-            backdropFilter: 'blur(var(--glass-blur)) saturate(180%)',
+            // 收起态不保留背面模糊：面板虽然被 translate 出屏，backdrop-filter 仍可能让合成器持续取背景，
+            // 而收起占全天大多数时间（实测展开态 GPU 负载主要来自这块 30px 模糊）。
+            backdropFilter: isShown ? 'blur(var(--glass-blur)) saturate(180%)' : 'none',
             // Apple 式发型线边缘（0.5px 高明度线），不再用彩色 1px 描边
             borderLeft: `0.5px solid ${hairline(0.14)}`, borderRight: `0.5px solid ${hairline(0.14)}`,
             borderBottom: `0.5px solid ${hairline(0.18)}`, borderTop: 'none',

@@ -71,10 +71,10 @@
       @keyframes ai-attention {
         0%,
         100% {
-          box-shadow: 0 0 18px oklch(0.8 0.13 75 / 0.2);
+          opacity: 0.42;
         }
         50% {
-          box-shadow: 0 0 38px oklch(0.8 0.13 75 / 0.42);
+          opacity: 1;
         }
       }
       @keyframes ai-toast {
@@ -109,10 +109,10 @@
         0% { transform: scaleY(0.2); }
         100% { transform: scaleY(1); }
       }
-      /* 迷你条：霓虹脉冲 */
+      /* 迷你条：霓虹脉冲（只动 opacity；filter 每帧重栅格化，是透明窗口卡顿的大头） */
       @keyframes ai-neon {
-        0%, 100% { opacity: 0.45; filter: drop-shadow(0 0 2px currentColor); }
-        50% { opacity: 1; filter: drop-shadow(0 0 9px currentColor); }
+        0%, 100% { opacity: 0.5; }
+        50% { opacity: 1; }
       }
       /* 迷你条：小宠物散步 */
       @keyframes ai-walk {
@@ -172,17 +172,19 @@
         8% { opacity: .85; }
         100% { transform: scaleX(1); opacity: .65; }
       }
+      /* 脉冲只动 opacity：box-shadow 动画每次都要重绘整个光晕图层 */
       @keyframes ambient-status-pulse {
-        0%, 100% { box-shadow: 0 0 0 0 oklch(0.8 0.14 75 / 0); }
-        50% { box-shadow: 0 0 0 4px oklch(0.8 0.14 75 / .12); }
+        0%, 100% { opacity: .25; }
+        50% { opacity: 1; }
       }
       @keyframes ambient-icon-breathe {
         0%, 100% { opacity: .7; transform: scale(.92); }
         50% { opacity: 1; transform: scale(1); }
       }
+      /* 网格位移用 transform（合成层）：background-position 动画每帧都要重绘整条 */
       @keyframes ambient-grid-travel {
-        0% { background-position: 0 0, 0 0; }
-        100% { background-position: 32px 0, 0 18px; }
+        0% { transform: translate3d(0, 0, 0); }
+        100% { transform: translate3d(32px, 18px, 0); }
       }
       @keyframes ambient-telemetry {
         0%, 100% { transform: scaleY(.25); opacity: .12; }
@@ -197,16 +199,18 @@
         18% { opacity: .72; }
         100% { transform: translateX(310%) skewX(-20deg); opacity: 0; }
       }
+      /* 只呼吸透明度：filter: saturate 动画会逐帧重栅格化整条 */
       @keyframes ambient-rail-breathe {
-        0%, 100% { opacity: .42; filter: saturate(.9); }
-        50% { opacity: .88; filter: saturate(1.3); }
+        0%, 100% { opacity: .42; }
+        50% { opacity: .88; }
       }
+      /* 宠物散步用 transform：left 动画每帧触发布局（透明置顶窗口里会拖慢整机指针） */
       @keyframes ambient-pet-walk {
-        0% { left: 2%; transform: translateY(0) scaleX(1); }
-        48% { transform: translateY(-2px) scaleX(1); }
-        50% { left: 88%; transform: translateY(0) scaleX(-1); }
-        98% { transform: translateY(-2px) scaleX(-1); }
-        100% { left: 2%; transform: translateY(0) scaleX(1); }
+        0% { transform: translateX(0) translateY(0) scaleX(1); }
+        48% { transform: translateX(calc(var(--ambient-pet-travel, 240px) * .99)) translateY(-2px) scaleX(1); }
+        50% { transform: translateX(var(--ambient-pet-travel, 240px)) translateY(0) scaleX(-1); }
+        98% { transform: translateX(calc(var(--ambient-pet-travel, 240px) * .01)) translateY(-2px) scaleX(-1); }
+        100% { transform: translateX(0) translateY(0) scaleX(1); }
       }
       .ambient-shell {
         position: fixed;
@@ -283,7 +287,8 @@
       .ambient-depth-grid {
         position: absolute;
         z-index: -2;
-        inset: 0;
+        /* 比容器四周各多 32px：translate 一个完整网格周期（32px/18px）后边缘仍然无缝 */
+        inset: -32px;
         pointer-events: none;
         opacity: .09;
         background-image:
@@ -414,7 +419,16 @@
       .ambient-status-due .ambient-status-icon { color: oklch(.86 .14 75); background: oklch(.78 .12 75 / .13); }
       .ambient-status-focus .ambient-status-icon { color: oklch(.82 .11 275); background: oklch(.68 .12 275 / .14); }
       .ambient-status-quiet .ambient-status-icon { color: oklch(.82 .08 150); background: oklch(.7 .09 150 / .13); }
-      .ambient-urgent .ambient-status { animation: ambient-status-pulse 2.2s ease-in-out infinite; }
+      .ambient-urgent .ambient-status { position: relative; }
+      .ambient-urgent .ambient-status::after {
+        content: '';
+        position: absolute;
+        inset: -1px;
+        border-radius: 8px;
+        pointer-events: none;
+        box-shadow: 0 0 0 3px oklch(0.8 0.14 75 / .12);
+        animation: ambient-status-pulse 2.2s ease-in-out infinite;
+      }
       .ambient-stage {
         position: relative;
         z-index: 1;
@@ -480,11 +494,12 @@
       .ambient-clock > span { margin-left: -6px; font-size: 9px; opacity: .58; }
       .ambient-clock small { font-size: 9px; opacity: .58; white-space: nowrap; }
       .ambient-visual-line { width: 82%; height: 3px; border-radius: 999px; background-size: 260% 100% !important; animation: ai-flow 7s linear infinite; }
-      .ambient-neon-line { height: 2px; animation: ai-neon 1.8s ease-in-out infinite, ai-flow 8s linear infinite; }
+      /* 光晕是静态的（只栅格化一次），脉冲只动 opacity */
+      .ambient-neon-line { height: 2px; box-shadow: 0 0 7px color-mix(in oklch, var(--ambient-state) 55%, transparent); animation: ai-neon 1.8s ease-in-out infinite, ai-flow 8s linear infinite; }
       .ambient-eq { width: 88%; height: 22px; display: flex; align-items: center; justify-content: center; gap: 3px; }
       .ambient-eq > span { width: 3px; height: 16px; border-radius: 2px; transform-origin: center; animation: ai-eq ease-in-out infinite alternate; opacity: .82; }
       .ambient-pet-stage { position: relative; width: 92%; height: 100%; }
-      .ambient-pet { position: absolute; z-index: 1; left: 2%; bottom: 3px; font-size: 19px; animation: ambient-pet-walk 14s linear infinite; }
+      .ambient-pet { position: absolute; z-index: 1; left: 2%; bottom: 3px; font-size: 19px; animation: ambient-pet-walk 14s linear infinite; will-change: transform; }
       .ambient-pet-track { position: absolute; left: 2%; right: 2%; bottom: 4px; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent); }
       .ambient-pet-mini { position: absolute; right: 2px; bottom: 4px; font-size: 15px; animation: ai-hop .65s ease-in-out infinite alternate; }
       .ambient-music { width: 100%; min-width: 0; display: flex; align-items: center; gap: 6px; }
@@ -691,14 +706,32 @@
       .ai-scroll::-webkit-scrollbar-thumb { background: transparent; }
       .ai-scroll:hover::-webkit-scrollbar-thumb { background: oklch(0.55 calc(0.09 * var(--cs, 1)) var(--th) / 0.5); }
       .recording-sidebar > * { flex-shrink: 0; }
-      /* 待处理注意力脉冲（审批卡）：琥珀呼吸光晕 */
-      .ui-attention { animation: ai-attention 1.8s ease-in-out infinite; }
-      /* 状态点声呐环（待处理计数等） */
-      @keyframes ui-sonar {
-        0% { box-shadow: 0 0 0 0 oklch(0.8 0.13 75 / .38); }
-        100% { box-shadow: 0 0 0 5px oklch(0.8 0.13 75 / 0); }
+      /* 待处理注意力脉冲（审批卡）：静态琥珀光晕 + 只动 opacity（box-shadow 动画会整层重绘） */
+      .ui-attention { position: relative; }
+      .ui-attention::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        box-shadow: 0 0 28px oklch(0.8 0.13 75 / 0.34);
+        animation: ai-attention 1.8s ease-in-out infinite;
       }
-      .ui-sonar { animation: ui-sonar 2.2s cubic-bezier(.22,.61,.36,1) infinite; }
+      /* 状态点声呐环（待处理计数等）：transform/opacity 版本，合成层完成 */
+      @keyframes ui-sonar {
+        0% { transform: scale(1); opacity: .55; }
+        100% { transform: scale(2.4); opacity: 0; }
+      }
+      .ui-sonar { position: relative; }
+      .ui-sonar::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 999px;
+        border: 1px solid oklch(0.8 0.13 75 / .5);
+        pointer-events: none;
+        animation: ui-sonar 2.2s cubic-bezier(.22,.61,.36,1) infinite;
+      }
       /* 窄面板（默认 468px）优先保住品牌与操作可达性：版本号与时钟让位，
          九个头部按钮仍全部保留，避免为了"看起来完整"把功能藏起来。 */
       @media (max-width: 660px) {
@@ -713,8 +746,19 @@
         .settings-status-grid, .settings-theme-grid { grid-template-columns: 1fr !important; }
       }
       @media (prefers-reduced-motion: reduce) {
-        .ui-attention, .ui-sonar { animation: none !important; }
+        .ui-attention::after, .ui-sonar::after { animation: none !important; }
         .ui-shine::after { display: none; }
+      }
+      /**
+       * 岛收起时：面板仍挂载（保留滚动/本地状态），但不再逐帧重绘。
+       * 透明置顶窗口的持续重绘会拖慢整机指针（2026-11-14 实测），
+       * 所以收起态把面板内所有关键帧动画暂停（transition 不受影响，收起/展开动画照常）。
+       */
+      .island-paused,
+      .island-paused *,
+      .island-paused *::before,
+      .island-paused *::after {
+        animation-play-state: paused !important;
       }
       /* 录制收起态由 body portal 独占视觉层；主应用仍运行，但不会残留在桌面上。 */
       body.recording-compact-active #root { visibility: hidden; }
